@@ -1,0 +1,90 @@
+=== AndroNSZ Debug Log ===
+Log path : /storage/emulated/0/Android/data/com.androNSZ/files/nsz_debug.log
+Format   : [elapsed ms] message
+
+[    41 ms] === ncz_convert_nsz_to_nsp ===
+[    41 ms]   input  = '/data/user/0/com.androNSZ/cache/Don't Starve Nintendo Switch Edition [0100751007ADA000][v0] (1.10 GB).nsz'
+[    41 ms]   output = '/proc/self/fd/195'
+[    41 ms] pfs0_parse: opening '/data/user/0/com.androNSZ/cache/Don't Starve Nintendo Switch Edition [0100751007ADA000][v0] (1.10 GB).nsz'
+[    43 ms] pfs0_parse: magic=0x30534650 (expected 0x30534650), file_count=7, str_table_size=280
+[    43 ms] pfs0_parse:   [0] '0100751007ada0000000000000000004.cert'  data_offset=0x8000  size=1792  is_ncz=0
+[    43 ms] pfs0_parse:   [1] '0100751007ada0000000000000000004.tik'  data_offset=0x8700  size=704  is_ncz=0
+[    43 ms] pfs0_parse:   [2] '9168aff67434b345bb2f3d3ae2bd6ca4.ncz'  data_offset=0x89C0  size=663634269  is_ncz=1
+[    43 ms] pfs0_parse:   [3] '844dcb91ff8c61a16efe982e4bfe0602.nca'  data_offset=0x278ECB1D  size=138752  is_ncz=0
+[    43 ms] pfs0_parse:   [4] '97ffc9da503493bd93154ebfdd58b957.cnmt.nca'  data_offset=0x2790E91D  size=3584  is_ncz=0
+[    43 ms] pfs0_parse:   [5] '97ffc9da503493bd93154ebfdd58b957.cnmt.xml'  data_offset=0x2790F71D  size=1402  is_ncz=0
+[    43 ms] pfs0_parse:   [6] '3e02dc67bea4e23eed86f452f689e427.nca'  data_offset=0x2790FC97  size=193024  is_ncz=0
+[    43 ms] pfs0_parse: OK — 7 files, data_area_offset=0x1D0
+[    43 ms] pfs0_parse: OK — 7 files
+[    44 ms] pre-scan [0] '0100751007ada0000000000000000004.cert' passthrough  size=1792
+[    44 ms] pre-scan [1] '0100751007ada0000000000000000004.tik' passthrough  size=704
+[    44 ms] ncz_parse_header: start fp_pos=0xC9C0
+[    45 ms] ncz_parse_header: section_count=3
+[    45 ms] ncz_parse_header:   section[0] offset=0x4000 size=0x18000 crypto_type=1
+[    45 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    45 ms]     crypto_counter (16 bytes): 00000000 00000000 00000000 00000000
+[    45 ms] ncz_parse_header:   section[1] offset=0x1C000 size=0x46590000 crypto_type=3
+[    45 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    45 ms]     crypto_counter (16 bytes): 00000002 00000000 00000000 00000000
+[    45 ms] ncz_parse_header:   section[2] offset=0x465AC000 size=0xA04000 crypto_type=3
+[    45 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    45 ms]     crypto_counter (16 bytes): 00000001 00000000 00000000 00000000
+[    45 ms] ncz_parse_header: peek after sections (8 bytes read)
+[    45 ms] ncz_parse_header: no NCZBLOCK — solid compression
+[    45 ms] ncz_parse_header: OK  sections=3 (fake=0)  decompressed=1190838272 B
+[    45 ms] pre-scan [2] '9168aff67434b345bb2f3d3ae2bd6ca4.ncz' dec_size=1190838272  new_size=1190854656
+[    45 ms] pre-scan [3] '844dcb91ff8c61a16efe982e4bfe0602.nca' passthrough  size=138752
+[    45 ms] pre-scan [4] '97ffc9da503493bd93154ebfdd58b957.cnmt.nca' passthrough  size=3584
+[    45 ms] pre-scan [5] '97ffc9da503493bd93154ebfdd58b957.cnmt.xml' passthrough  size=1402
+[    45 ms] pre-scan [6] '3e02dc67bea4e23eed86f452f689e427.nca' passthrough  size=193024
+[    55 ms] file[2] '9168aff67434b345bb2f3d3ae2bd6ca4.ncz' — NCZ  compressed=663634269  decompressed=1190854656
+[    56 ms] ncz_parse_header: start fp_pos=0xC9C0
+[    56 ms] ncz_parse_header: section_count=3
+[    56 ms] ncz_parse_header:   section[0] offset=0x4000 size=0x18000 crypto_type=1
+[    56 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    56 ms]     crypto_counter (16 bytes): 00000000 00000000 00000000 00000000
+[    56 ms] ncz_parse_header:   section[1] offset=0x1C000 size=0x46590000 crypto_type=3
+[    56 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    56 ms]     crypto_counter (16 bytes): 00000002 00000000 00000000 00000000
+[    56 ms] ncz_parse_header:   section[2] offset=0x465AC000 size=0xA04000 crypto_type=3
+[    56 ms]     crypto_key (16 bytes): E0410108 4D72582E 5CA68958 0A9E1F90
+[    56 ms]     crypto_counter (16 bytes): 00000001 00000000 00000000 00000000
+[    56 ms] ncz_parse_header: peek after sections (8 bytes read)
+[    56 ms] ncz_parse_header: no NCZBLOCK — solid compression
+[    56 ms] ncz_parse_header: OK  sections=3 (fake=0)  decompressed=1190838272 B
+[    56 ms] ncz_decompress: start  sections=3  mode=SOLID
+[    56 ms] ncz_decompress:   section[0] offset=0x4000 size=0x18000 crypto=1 useCrypto=0 start_i=0x4000
+[    59 ms] ncz_decompress:   section[1] offset=0x1C000 size=0x46590000 crypto=3 useCrypto=1 start_i=0x1C000
+[ 18082 ms] ncz_decompress:   section[2] offset=0x465AC000 size=0xA04000 crypto=3 useCrypto=1 start_i=0x465AC000
+[ 18376 ms] ncz_decompress: done  bytes=1190838272  ret=0
+[ 18389 ms] conversion SUCCESS
+[ 18391 ms] pfs0_parse: opening '/proc/self/fd/195'
+[ 18398 ms] pfs0_parse: magic=0x30534650 (expected 0x30534650), file_count=7, str_table_size=270
+[ 18398 ms] pfs0_parse:   [0] '0100751007ada0000000000000000004.cert'  data_offset=0x1C6  size=1792  is_ncz=0
+[ 18398 ms] pfs0_parse:   [1] '0100751007ada0000000000000000004.tik'  data_offset=0x8C6  size=704  is_ncz=0
+[ 18398 ms] pfs0_parse:   [2] '9168aff67434b345bb2f3d3ae2bd6ca4.nca'  data_offset=0xB86  size=1190854656  is_ncz=0
+[ 18398 ms] pfs0_parse:   [3] '844dcb91ff8c61a16efe982e4bfe0602.nca'  data_offset=0x46FB0B86  size=138752  is_ncz=0
+[ 18398 ms] pfs0_parse:   [4] '97ffc9da503493bd93154ebfdd58b957.cnmt.nca'  data_offset=0x46FD2986  size=3584  is_ncz=0
+[ 18398 ms] pfs0_parse:   [5] '97ffc9da503493bd93154ebfdd58b957.cnmt.xml'  data_offset=0x46FD3786  size=1402  is_ncz=0
+[ 18398 ms] pfs0_parse:   [6] '3e02dc67bea4e23eed86f452f689e427.nca'  data_offset=0x46FD3D00  size=193024  is_ncz=0
+[ 18398 ms] pfs0_parse: OK — 7 files, data_area_offset=0x1C6
+[ 18402 ms] nca_verify: skipping '0100751007ada0000000000000000004.cert'
+[ 18402 ms] nca_verify: skipping '0100751007ada0000000000000000004.tik'
+[ 18402 ms] nca_verify: verifying '9168aff67434b345bb2f3d3ae2bd6ca4.nca'
+[ 18402 ms] nca_verify: '9168aff67434b345bb2f3d3ae2bd6ca4.nca' magic OK (NCA3)
+[ 18402 ms] nca_verify:   section[0] hash OK
+[ 18402 ms] nca_verify:   section[1] hash OK
+[ 18402 ms] nca_verify:   section[2] hash OK
+[ 18402 ms] nca_verify: verifying '844dcb91ff8c61a16efe982e4bfe0602.nca'
+[ 18402 ms] nca_verify: '844dcb91ff8c61a16efe982e4bfe0602.nca' magic OK (NCA3)
+[ 18402 ms] nca_verify:   section[0] hash OK
+[ 18402 ms] nca_verify: verifying '97ffc9da503493bd93154ebfdd58b957.cnmt.nca'
+[ 18403 ms] nca_verify: '97ffc9da503493bd93154ebfdd58b957.cnmt.nca' magic OK (NCA3)
+[ 18403 ms] nca_verify:   section[0] hash OK
+[ 18403 ms] nca_verify: skipping '97ffc9da503493bd93154ebfdd58b957.cnmt.xml'
+[ 18403 ms] nca_verify: verifying '3e02dc67bea4e23eed86f452f689e427.nca'
+[ 18403 ms] nca_verify: '3e02dc67bea4e23eed86f452f689e427.nca' magic OK (NCA3)
+[ 18403 ms] nca_verify:   section[0] hash OK
+[ 18403 ms] nca_verify: all 4 NCA(s) passed
+
+[ 18409 ms] === End of log ===

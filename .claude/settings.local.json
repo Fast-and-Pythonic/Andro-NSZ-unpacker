@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ren \"C:\\\\Users\\\\Boss\\\\AndroidStudioProjects\\\\AndroNSZ\\\\app\\\\src\\\\main\\\\java\\\\com\\\\AndroNSZ\" \"andronsz\")"
+    ]
+  }
+}
