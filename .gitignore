@@ -15,3 +15,8 @@
 .externalNativeBuild
 .cxx
 local.properties
+.claude/
+nsz_debug.log
+nsz_folder_debug.log
+problems.txt
+.idea/deploymentTargetSelector.xml
