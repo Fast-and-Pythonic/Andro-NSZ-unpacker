@@ -26,7 +26,11 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
         return -1;
     }
     if (memcmp(magic, NCZ_MAGIC_SECTION, 8) != 0) {
-        snprintf(s_err, sizeof(s_err), "ncz_parse_header: bad magic");
+        snprintf(s_err, sizeof(s_err),
+                 "ncz_parse_header: bad magic at 0x%llX (got %02X %02X %02X %02X %02X %02X %02X %02X)",
+                 (unsigned long long)fp_start,
+                 magic[0], magic[1], magic[2], magic[3],
+                 magic[4], magic[5], magic[6], magic[7]);
         DBGHEX("  bad magic (got)", magic, 8);
         return -2;
     }
@@ -39,7 +43,7 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
     }
     DBG("ncz_parse_header: section_count=%lld", (long long)section_count);
 
-    if (section_count < 0 || section_count > NCZ_MAX_SECTIONS) {
+    if (section_count < 0 || section_count > 1000000) {
         snprintf(s_err, sizeof(s_err),
                  "ncz_parse_header: section_count %lld out of range",
                  (long long)section_count);
@@ -47,6 +51,11 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
     }
 
     out->original_section_count = (int)section_count;
+    out->sections = calloc((size_t)section_count + 1u, sizeof(NczSection));
+    if (!out->sections) {
+        snprintf(s_err, sizeof(s_err), "ncz_parse_header: OOM sections");
+        return -4;
+    }
 
     /* Read sections (64 bytes each) */
     /* Leave room at [0] for potential FakeSection — read into [0..n-1] first */
@@ -55,6 +64,7 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
         if (fread(s, sizeof(NczSection), 1, fp) != 1) {
             snprintf(s_err, sizeof(s_err),
                      "ncz_parse_header: failed to read section %d", i);
+            ncz_free_header(out);
             return -5;
         }
         DBG("ncz_parse_header:   section[%d] offset=0x%llX size=0x%llX crypto_type=%lld",
@@ -127,6 +137,7 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
         } bh_fixed;
         if (fread(&bh_fixed, sizeof(bh_fixed), 1, fp) != 1) {
             snprintf(s_err, sizeof(s_err), "ncz_parse_header: failed to read NCZBLOCK");
+            ncz_free_header(out);
             return -5;
         }
         bh->version           = bh_fixed.version;
@@ -150,11 +161,13 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
             snprintf(s_err, sizeof(s_err),
                      "ncz_parse_header: block_size_exp %u out of range [14..32]",
                      bh->block_size_exp);
+            ncz_free_header(out);
             return -6;
         }
 
         if (bh->num_blocks == 0) {
             snprintf(s_err, sizeof(s_err), "ncz_parse_header: num_blocks == 0");
+            ncz_free_header(out);
             return -6;
         }
 
@@ -163,15 +176,17 @@ int ncz_parse_header(FILE *fp, NczHeader *out)
         if (!bh->compressed_sizes || !bh->block_offsets) {
             free(bh->compressed_sizes);
             free(bh->block_offsets);
+            bh->compressed_sizes = NULL;
+            bh->block_offsets = NULL;
             snprintf(s_err, sizeof(s_err), "ncz_parse_header: OOM block arrays");
+            ncz_free_header(out);
             return -7;
         }
         if (fread(bh->compressed_sizes, sizeof(uint32_t), bh->num_blocks, fp)
                 != bh->num_blocks) {
             snprintf(s_err, sizeof(s_err),
                      "ncz_parse_header: failed to read compressed_sizes");
-            free(bh->compressed_sizes);
-            free(bh->block_offsets);
+            ncz_free_header(out);
             return -8;
         }
 
@@ -214,4 +229,10 @@ void ncz_free_header(NczHeader *h)
         h->block_header.compressed_sizes = NULL;
         h->block_header.block_offsets    = NULL;
     }
+    free(h->sections);
+    h->sections = NULL;
+    h->section_count = 0;
+    h->original_section_count = 0;
+    h->has_fake_section = 0;
+    h->has_block_compression = 0;
 }

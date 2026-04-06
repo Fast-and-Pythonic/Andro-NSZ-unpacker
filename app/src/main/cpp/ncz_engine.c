@@ -146,6 +146,10 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
             NczHeader hdr;
             if (ncz_parse_header(in_fp, &hdr) != 0) {
                 DBG("pre-scan [%d] ncz_parse_header FAILED: %s", i, ncz_last_error());
+                EMIT("ERROR", "   NCZ parse failed for %s at 0x%llX: %s",
+                     f->name,
+                     (unsigned long long)(f->data_offset + NCZ_HEADER_OFFSET),
+                     ncz_last_error());
                 free(new_sizes); fclose(in_fp);
                 return NCZ_ERR_INVALID_NCZ;
             }
@@ -247,6 +251,10 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         NczHeader hdr;
         if (ncz_parse_header(in_fp, &hdr) != 0) {
             DBG("file[%d] NCZ header parse FAILED: %s", i, ncz_last_error());
+            EMIT("ERROR", "   NCZ parse failed for %s at 0x%llX: %s",
+                 f->name,
+                 (unsigned long long)(f->data_offset + NCZ_HEADER_OFFSET),
+                 ncz_last_error());
             ret = NCZ_ERR_INVALID_NCZ;
             break;
         }

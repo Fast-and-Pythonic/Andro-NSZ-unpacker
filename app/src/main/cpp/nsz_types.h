@@ -6,7 +6,6 @@
 
 #define NCA_HEADER_SIZE   0x4000   /* 16 KiB uncompressed NCA header */
 #define NCZ_HEADER_OFFSET 0x4000   /* NCZ metadata starts right after NCA hdr */
-#define NCZ_MAX_SECTIONS  16       /* practical upper bound */
 
 /* ── Error codes ───────────────────────────────────────────────────────────── */
 

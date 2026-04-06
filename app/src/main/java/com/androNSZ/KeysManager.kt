@@ -24,4 +24,11 @@ object KeysManager {
          }
       }
    }
+
+   fun deleteKeys(context: Context) {
+      val f = keysFile(context)
+      if (f.exists()) {
+         f.delete()
+      }
+   }
 }

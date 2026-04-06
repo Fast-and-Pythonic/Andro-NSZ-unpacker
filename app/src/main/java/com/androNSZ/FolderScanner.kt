@@ -1,0 +1,140 @@
+package com.androNSZ
+
+import android.content.Context
+import android.net.Uri
+import android.provider.DocumentsContract
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+
+object FolderScanner {
+    
+    /**
+     * Сканирует папку рекурсивно и возвращает структуру
+     */
+    suspend fun scanFolder(
+        context: Context,
+        folderUri: Uri,
+        statusCallback: NszConverter.StatusCallback? = null
+    ): FolderStructure = withContext(Dispatchers.IO) {
+        val nszFiles = mutableListOf<Uri>()
+        val totalSizeRef = LongArray(1) // Use array for mutable reference
+        val fileCountRef = IntArray(1)
+        val folderCountRef = IntArray(1)
+        
+        statusCallback?.onStatus("SCAN", "Начало сканирования папки...")
+        val startTime = System.currentTimeMillis()
+        
+        val documentId = DocumentsContract.getTreeDocumentId(folderUri)
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            folderUri,
+            documentId
+        )
+        
+        val tree = scanDirectory(
+            context, 
+            folderUri, 
+            childrenUri, 
+            nszFiles, 
+            fileCountRef,
+            folderCountRef,
+            statusCallback
+        ) { size ->
+            totalSizeRef[0] += size
+        }
+        
+        val elapsedMs = System.currentTimeMillis() - startTime
+        val totalSizeMB = totalSizeRef[0] / 1024.0 / 1024.0
+        statusCallback?.onStatus("SCAN", "Сканирование завершено за ${elapsedMs}мс")
+        statusCallback?.onStatus("INFO", "Найдено: ${fileCountRef[0]} файлов, ${folderCountRef[0]} папок")
+        statusCallback?.onStatus("INFO", "NSZ файлов: ${nszFiles.size}, общий размер: %.2f MB".format(totalSizeMB))
+        
+        FolderStructure(
+            rootUri = folderUri,
+            nszFiles = nszFiles,
+            allFiles = tree,
+            totalSize = totalSizeRef[0]
+        )
+    }
+    
+    private fun scanDirectory(
+        context: Context,
+        treeUri: Uri,
+        uri: Uri,
+        nszFiles: MutableList<Uri>,
+        fileCountRef: IntArray,
+        folderCountRef: IntArray,
+        statusCallback: NszConverter.StatusCallback?,
+        addToTotalSize: (Long) -> Unit
+    ): List<FileNode> {
+        val results = mutableListOf<FileNode>()
+        
+        context.contentResolver.query(
+            uri,
+            arrayOf(
+                DocumentsContract.Document.COLUMN_DOCUMENT_ID,
+                DocumentsContract.Document.COLUMN_DISPLAY_NAME,
+                DocumentsContract.Document.COLUMN_MIME_TYPE,
+                DocumentsContract.Document.COLUMN_SIZE
+            ),
+            null,
+            null,
+            null
+        )?.use { cursor ->
+            val idColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val nameColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+            val mimeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val sizeColumn = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_SIZE)
+            
+            while (cursor.moveToNext()) {
+                val docId = cursor.getString(idColumn)
+                val name = cursor.getString(nameColumn)
+                val mimeType = cursor.getString(mimeColumn)
+                val size = if (sizeColumn >= 0 && !cursor.isNull(sizeColumn)) {
+                    cursor.getLong(sizeColumn)
+                } else {
+                    0L
+                }
+                
+                if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    // Это папка - рекурсивный обход
+                    folderCountRef[0]++
+                    statusCallback?.onStatus("SCAN", "Найдена папка: $name")
+                    
+                    val childUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+                        treeUri,
+                        docId
+                    )
+                    val children = scanDirectory(
+                        context, 
+                        treeUri, 
+                        childUri, 
+                        nszFiles, 
+                        fileCountRef,
+                        folderCountRef,
+                        statusCallback,
+                        addToTotalSize
+                    )
+                    results.add(FileNode.Directory(name, children))
+                } else {
+                    // Это файл
+                    fileCountRef[0]++
+                    val isNsz = name.endsWith(".nsz", ignoreCase = true)
+                    val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
+                    
+                    val sizeMB = size / 1024.0 / 1024.0
+                    val fileType = if (isNsz) "NSZ" else name.substringAfterLast('.', "файл")
+                    statusCallback?.onStatus("SCAN", "Найден файл: $name (%.2f MB, $fileType)".format(sizeMB))
+                    
+                    if (isNsz) {
+                        nszFiles.add(fileUri)
+                    }
+                    
+                    results.add(FileNode.File(fileUri, name, isNsz))
+                    addToTotalSize(size)
+                }
+            }
+        }
+        
+        return results
+    }
+}

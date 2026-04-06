@@ -3,12 +3,13 @@ package com.androNSZ
 import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
 import android.provider.OpenableColumns
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
-import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.withContext
 import java.io.File
 
@@ -28,8 +29,6 @@ object NszConverter {
     init {
         System.loadLibrary("AndroNSZ")
     }
-
-    /* ── Native methods ─────────────────────────────────────────────── */
 
     @JvmStatic
     external fun nativeConvert(
@@ -54,8 +53,6 @@ object NszConverter {
     @JvmStatic
     external fun nativeVerifyNsp(nspPath: String, headerKey: ByteArray): String?
 
-    /* ── Callback interfaces ────────────────────────────────────────── */
-
     interface ProgressCallback {
         fun onProgress(done: Long, total: Long)
     }
@@ -63,8 +60,6 @@ object NszConverter {
     interface StatusCallback {
         fun onStatus(tag: String, msg: String)
     }
-
-    /* ── Error codes (mirror native ncz_types.h) ────────────────────── */
 
     const val OK = 0
     const val ERR_OPEN_INPUT = -1
@@ -77,8 +72,6 @@ object NszConverter {
     const val ERR_CANCELLED = -8
     const val ERR_HASH_MISMATCH = -9
 
-    /* ── State ───────────────────────────────────────────────────── */
-
     var lastDebugLogPath: String? = null
         private set
 
@@ -88,8 +81,6 @@ object NszConverter {
     var lastVerifySkipped: Boolean = false
         private set
 
-    /* ── High-level API ─────────────────────────────────────────── */
-
     fun convert(
         context: Context,
         inputUri: Uri,
@@ -97,108 +88,109 @@ object NszConverter {
         statusCallback: StatusCallback? = null,
     ): Flow<ConversionProgress> = callbackFlow {
 
-        val inputPath = withContext(Dispatchers.IO) {
+        val resolvedInput = withContext(Dispatchers.IO) {
             resolveToFilePath(context, inputUri)
         }
-        val inputName  = inputPath.substringAfterLast('/')
+        val inputName = resolvedInput.file.name
         val outputName = inputName.substringBeforeLast('.') + ".nsp"
 
         val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
-        lastDebugLogPath  = debugLogFile.absolutePath
-        lastVerifyError   = null
+        var outputUri: Uri? = null
+        var pfd: ParcelFileDescriptor? = null
+
+        lastDebugLogPath = debugLogFile.absolutePath
+        lastVerifyError = null
         lastVerifySkipped = false
-        withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
 
-        /* ── Create a pending entry in public Downloads via MediaStore ── */
-        val cv = ContentValues().apply {
-            put(MediaStore.Downloads.DISPLAY_NAME, outputName)
-            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-            put(MediaStore.Downloads.IS_PENDING, 1)
-        }
-        val outputUri = context.contentResolver.insert(
-            MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
-        ) ?: run {
-            close(NszConversionException(-1, "Cannot create output file in Downloads"))
-            awaitClose {}
-            return@callbackFlow
-        }
+        try {
+            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
 
-        val pfd = withContext(Dispatchers.IO) {
-            context.contentResolver.openFileDescriptor(outputUri, "rw")
-        } ?: run {
-            context.contentResolver.delete(outputUri, null, null)
-            close(NszConversionException(-1, "Cannot open output file descriptor"))
-            awaitClose {}
-            return@callbackFlow
-        }
+            val cv = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, outputName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val createdOutputUri = context.contentResolver.insert(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
+            ) ?: throw NszConversionException(-1, "Cannot create output file in Downloads")
+            outputUri = createdOutputUri
 
-        val nativePath = "/proc/self/fd/${pfd.fd}"
+            val openedPfd = withContext(Dispatchers.IO) {
+                context.contentResolver.openFileDescriptor(createdOutputUri, "rw")
+            } ?: throw NszConversionException(-1, "Cannot open output file descriptor")
+            pfd = openedPfd
 
-        var lastDone   = 0L
-        var lastTimeMs = System.currentTimeMillis()
+            val nativePath = "/proc/self/fd/${openedPfd.fd}"
 
-        val cb = object : ProgressCallback {
-            override fun onProgress(done: Long, total: Long) {
-                val now        = System.currentTimeMillis()
-                val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-                val speed      = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
-                lastDone   = done
-                lastTimeMs = now
-                trySend(ConversionProgress(done, total, speed))
+            var lastDone = 0L
+            var lastTimeMs = System.currentTimeMillis()
+
+            val cb = object : ProgressCallback {
+                override fun onProgress(done: Long, total: Long) {
+                    val now = System.currentTimeMillis()
+                    val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
+                    val speed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
+                    lastDone = done
+                    lastTimeMs = now
+                    trySend(ConversionProgress(done, total, speed))
+                }
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                nativeConvert(resolvedInput.file.absolutePath, nativePath, cb, statusCallback)
+            }
+
+            if (result == 0 && headerKey != null) {
+                lastVerifyError = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
+                lastVerifySkipped = false
+            } else if (result == 0) {
+                lastVerifyError = null
+                lastVerifySkipped = true
+            }
+
+            when (result) {
+                OK -> {
+                    context.contentResolver.update(
+                        createdOutputUri,
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null,
+                        null
+                    )
+                    close()
+                }
+                ERR_CANCELLED -> {
+                    context.contentResolver.delete(createdOutputUri, null, null)
+                    close(CancelledException())
+                }
+                else -> {
+                    context.contentResolver.delete(createdOutputUri, null, null)
+                    close(NszConversionException(result, nativeErrorString(result)))
+                }
+            }
+        } catch (e: Exception) {
+            outputUri?.let { context.contentResolver.delete(it, null, null) }
+            close(e)
+        } finally {
+            withContext(Dispatchers.IO) {
+                runCatching { nativeCloseDebugLog() }
+                runCatching { pfd?.close() }
+                resolvedInput.deleteIfTemp()
             }
         }
 
-        val result = withContext(Dispatchers.IO) {
-            nativeConvert(inputPath, nativePath, cb, statusCallback)
-        }
-
-        /* ── Verify NCA headers before closing the fd ── */
-        if (result == 0 && headerKey != null) {
-            lastVerifyError   = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
-            lastVerifySkipped = false
-        } else if (result == 0) {
-            lastVerifyError   = null
-            lastVerifySkipped = true
-        }
-
-        withContext(Dispatchers.IO) { nativeCloseDebugLog() }
-        pfd.close()
-
-        /* ── Finalise or discard the MediaStore entry ── */
-        when (result) {
-            0 -> {
-                context.contentResolver.update(
-                    outputUri,
-                    ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                    null, null
-                )
-            }
-            ERR_CANCELLED -> {
-                context.contentResolver.delete(outputUri, null, null)
-                close(CancelledException())
-            }
-            else -> {
-                context.contentResolver.delete(outputUri, null, null)
-                close(NszConversionException(result, nativeErrorString(result)))
-            }
-        }
-
-        close()
-        awaitClose { /* nothing */ }
+        awaitClose { }
     }
 
     fun cancel() = nativeCancel()
 
-    /* ── Internal helpers ───────────────────────────────────────── */
+    private fun resolveToFilePath(context: Context, uri: Uri): ResolvedInputFile {
+        if (uri.scheme == "file") return ResolvedInputFile(File(uri.path!!), false)
 
-    private fun resolveToFilePath(context: Context, uri: Uri): String {
-        if (uri.scheme == "file") return uri.path!!
-
-        val tmpFile = File(context.cacheDir, queryFileName(context, uri))
+        val tmpFile = TempFileManager.createManagedTempFile(context, queryFileName(context, uri), "nsz")
         context.contentResolver.openInputStream(uri)!!.use { ins ->
             tmpFile.outputStream().use { out -> ins.copyTo(out) }
         }
-        return tmpFile.absolutePath
+        return ResolvedInputFile(tmpFile, true)
     }
 
     private fun queryFileName(context: Context, uri: Uri): String {
@@ -209,5 +201,16 @@ object NszConverter {
             }
         }
         return "input.nsz"
+    }
+
+    private data class ResolvedInputFile(
+        val file: File,
+        val isTemp: Boolean
+    ) {
+        fun deleteIfTemp() {
+            if (isTemp) {
+                TempFileManager.deleteQuietly(file)
+            }
+        }
     }
 }

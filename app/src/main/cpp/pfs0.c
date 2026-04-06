@@ -6,6 +6,12 @@
 
 static char s_err[512];
 
+static uint32_t pfs0_align_0x20(uint32_t n)
+{
+    uint32_t rem = n % 0x20u;
+    return rem == 0 ? 0x20u : (0x20u - rem);
+}
+
 const char *pfs0_last_error(void) { return s_err; }
 
 int pfs0_parse(const char *input_path, Pfs0Container *out)
@@ -117,10 +123,10 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
 
     char strtab[PFS0_MAX_FILES * 256];
     uint32_t str_offsets[PFS0_MAX_FILES];
-    uint32_t strtab_size = 0;
+    uint32_t strtab_size_non_padded = 0;
 
     for (int i = 0; i < fc; i++) {
-        str_offsets[i] = strtab_size;
+        str_offsets[i] = strtab_size_non_padded;
         char name[256];
         strncpy(name, container->files[i].name, sizeof(name) - 1);
         name[sizeof(name) - 1] = '\0';
@@ -129,9 +135,17 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
             name[nlen - 1] = 'a'; /* .ncz -> .nca */
         }
         size_t slen = strlen(name) + 1;
-        memcpy(strtab + strtab_size, name, slen);
-        strtab_size += (uint32_t)slen;
+        memcpy(strtab + strtab_size_non_padded, name, slen);
+        strtab_size_non_padded += (uint32_t)slen;
     }
+
+    uint32_t header_size_non_padded = 0x10u
+                                    + (uint32_t)fc * (uint32_t)sizeof(Pfs0FileEntry)
+                                    + strtab_size_non_padded;
+    uint32_t strtab_padding = pfs0_align_0x20(header_size_non_padded);
+    uint32_t strtab_size = strtab_size_non_padded + strtab_padding;
+
+    memset(strtab + strtab_size_non_padded, 0, strtab_padding);
 
     Pfs0Header hdr;
     hdr.magic             = PFS0_MAGIC;

@@ -30,7 +30,7 @@ typedef struct {
 
 /* ── Full parsed NCZ header ───────────────────────────────────────────────── */
 typedef struct {
-    NczSection     sections[NCZ_MAX_SECTIONS + 1]; /* +1 for potential FakeSection */
+    NczSection    *sections;          /* malloc'd, +1 for potential FakeSection */
     int            section_count;      /* includes FakeSection if inserted */
     int            original_section_count; /* without FakeSection */
     int            has_block_compression;
