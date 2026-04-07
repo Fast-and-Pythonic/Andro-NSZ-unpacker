@@ -1,13 +1,9 @@
-package com.androNSZ
+package com.androNSZ.nut
 
 import java.io.File
 
 object KeysParser {
 
-   /**
-    * Parses prod.keys and returns the 32-byte header_key, or null if not found.
-    * Expected line format: "header_key = <64 hex chars>"
-    */
    fun parseHeaderKey(keysFile: File): ByteArray? {
       if (!keysFile.exists()) return null
       keysFile.readLines().forEach { line ->

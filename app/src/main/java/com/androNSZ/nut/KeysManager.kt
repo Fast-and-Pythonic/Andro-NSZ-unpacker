@@ -1,4 +1,4 @@
-package com.androNSZ
+package com.androNSZ.nut
 
 import android.content.Context
 import android.net.Uri

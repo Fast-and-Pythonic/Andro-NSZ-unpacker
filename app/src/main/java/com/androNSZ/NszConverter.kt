@@ -5,24 +5,19 @@ import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.MediaStore
-import android.provider.OpenableColumns
+import com.androNSZ.fs.TempFileManager
+import com.androNSZ.model.CancelledException
+import com.androNSZ.model.ConversionProgress
+import com.androNSZ.model.NszConversionException
+import com.androNSZ.util.ResolvedInputFile
+import com.androNSZ.util.queryFileName
+import com.androNSZ.util.resolveToFilePath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.channels.awaitClose
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.callbackFlow
 import kotlinx.coroutines.withContext
 import java.io.File
-
-data class ConversionProgress(
-   val doneBytes: Long,
-   val totalBytes: Long,
-   val speedMBps: Double,
-) {
-   val percent: Float get() = if (totalBytes > 0) doneBytes.toFloat() / totalBytes else 0f
-}
-
-class NszConversionException(val code: Int, msg: String) : Exception(msg)
-class CancelledException : Exception("Cancelled")
 
 object NszConverter {
 
@@ -182,35 +177,4 @@ object NszConverter {
     }
 
     fun cancel() = nativeCancel()
-
-    private fun resolveToFilePath(context: Context, uri: Uri): ResolvedInputFile {
-        if (uri.scheme == "file") return ResolvedInputFile(File(uri.path!!), false)
-
-        val tmpFile = TempFileManager.createManagedTempFile(context, queryFileName(context, uri), "nsz")
-        context.contentResolver.openInputStream(uri)!!.use { ins ->
-            tmpFile.outputStream().use { out -> ins.copyTo(out) }
-        }
-        return ResolvedInputFile(tmpFile, true)
-    }
-
-    private fun queryFileName(context: Context, uri: Uri): String {
-        context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
-            if (cursor.moveToFirst()) {
-                val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
-                if (idx >= 0) return cursor.getString(idx)
-            }
-        }
-        return "input.nsz"
-    }
-
-    private data class ResolvedInputFile(
-        val file: File,
-        val isTemp: Boolean
-    ) {
-        fun deleteIfTemp() {
-            if (isTemp) {
-                TempFileManager.deleteQuietly(file)
-            }
-        }
-    }
 }
