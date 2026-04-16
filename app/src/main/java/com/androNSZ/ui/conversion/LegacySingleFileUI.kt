@@ -18,6 +18,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.util.fmtBytes
 import com.androNSZ.util.resolveDisplayName
 import com.androNSZ.viewmodel.MainViewModel
@@ -62,13 +64,13 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                   verticalArrangement = Arrangement.spacedBy(4.dp),
                ) {
                   Text(
-                     text = "prod.keys required for proper NSZ to NSP decompression.",
+                     text = stringResource(R.string.msg_prod_keys_required),
                      style = MaterialTheme.typography.bodyMedium,
                      color = MaterialTheme.colorScheme.onErrorContainer,
                      textAlign = TextAlign.Center,
                   )
                   Text(
-                     text = "Install prod.keys",
+                     text = stringResource(R.string.action_install_prod_keys),
                      style = MaterialTheme.typography.labelLarge,
                      color = MaterialTheme.colorScheme.onErrorContainer,
                      textAlign = TextAlign.Center,
@@ -93,7 +95,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                horizontalAlignment = Alignment.CenterHorizontally,
             ) {
                Text(
-                  text = if (vm.selectedName != null) "Selected file" else "Tap to select NSZ file",
+                  text = if (vm.selectedName != null) stringResource(R.string.msg_selected_file) else stringResource(R.string.msg_tap_to_select),
                   style = MaterialTheme.typography.labelMedium,
                   color = MaterialTheme.colorScheme.onSurfaceVariant,
                )
@@ -112,7 +114,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
 
          /* ── Output destination note ── */
          Text(
-            text = "Output: Downloads folder",
+            text = stringResource(R.string.label_output_downloads),
             style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
          )
@@ -126,7 +128,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                   containerColor = MaterialTheme.colorScheme.error
                )
             ) {
-               Text("Cancel")
+               Text(stringResource(R.string.action_cancel))
             }
          } else {
             Button(
@@ -134,7 +136,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                enabled  = vm.selectedUri != null,
                modifier = Modifier.fillMaxWidth(),
             ) {
-               Text("Convert to NSP")
+               Text(stringResource(R.string.action_convert_to_nsp))
             }
          }
 
@@ -191,7 +193,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                   modifier = Modifier.size(18.dp),
                )
                Spacer(Modifier.width(4.dp))
-               Text(if (logVisible) "Hide log" else "Show log")
+               Text(if (logVisible) stringResource(R.string.action_hide_log) else stringResource(R.string.action_show_log))
             }
 
             if (logVisible) {

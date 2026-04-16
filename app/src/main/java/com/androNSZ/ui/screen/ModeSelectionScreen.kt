@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 
 @Composable
@@ -43,13 +45,13 @@ fun ModeSelectionScreen(
                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                Text(
-                  text = "prod.keys required for proper NSZ to NSP decompression.",
+                  text = stringResource(R.string.msg_prod_keys_required),
                   style = MaterialTheme.typography.bodyMedium,
                   color = MaterialTheme.colorScheme.onErrorContainer,
                   textAlign = TextAlign.Center,
                )
                Text(
-                  text = "Install prod.keys",
+                  text = stringResource(R.string.action_install_prod_keys),
                   style = MaterialTheme.typography.labelLarge,
                   color = MaterialTheme.colorScheme.onErrorContainer,
                   textAlign = TextAlign.Center,
@@ -61,24 +63,25 @@ fun ModeSelectionScreen(
       Spacer(modifier = Modifier.height(32.dp))
 
       Text(
-         text = "Выберите режим работы",
+         text = stringResource(R.string.msg_select_mode),
          style = MaterialTheme.typography.headlineMedium,
+         color = MaterialTheme.colorScheme.onSurface,
          textAlign = TextAlign.Center,
       )
 
       Spacer(modifier = Modifier.height(16.dp))
 
       ModeCard(
-         title = "Выбрать файлы",
-         description = "Выберите один или несколько NSZ файлов для конверсии",
+         title = stringResource(R.string.action_select_files),
+         description = stringResource(R.string.msg_select_files_desc),
          icon = Icons.Filled.InsertDriveFile,
          enabled = keysInstalled,
          onClick = { onModeSelected(ConversionMode.SingleFiles(emptyList())) }
       )
 
       ModeCard(
-         title = "Выбрать папку",
-         description = "Конвертирует все NSZ файлы в папке, сохраняя структуру",
+         title = stringResource(R.string.action_select_folder),
+         description = stringResource(R.string.msg_select_folder_desc),
          icon = Icons.Filled.Folder,
          enabled = keysInstalled,
          onClick = { onModeSelected(ConversionMode.FolderMode(Uri.EMPTY, null)) }

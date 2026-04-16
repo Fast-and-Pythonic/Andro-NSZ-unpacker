@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.MediaStore
+import com.androNSZ.Constants
 import com.androNSZ.NszConverter
 import com.androNSZ.model.*
 import com.androNSZ.util.ResolvedInputFile
@@ -25,25 +26,28 @@ object FolderProcessor {
     ): Result<Pair<Uri, FolderConversionSummary>> = withContext(Dispatchers.IO) {
         val totalFileCount = countAllFiles(structure.allFiles)
 
-        statusCallback?.onStatus("INFO", "Начало обработки папки")
-        statusCallback?.onStatus("INFO", "Всего файлов в папке: ${structure.allFiles.size}")
-        statusCallback?.onStatus("INFO", "NSZ файлов для конвертации: ${structure.nszFiles.size}")
-        statusCallback?.onStatus("INFO", "Общий размер: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
+        statusCallback?.onStatus("INFO", "Starting folder processing")
+        statusCallback?.onStatus("INFO", "Total files in folder: ${structure.allFiles.size}")
+        statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
+        statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
 
         var cumulativeBytesProcessed = 0L
         var lastCumulativeBytes = 0L
         var lastTimeMs = System.currentTimeMillis()
+        var lastEmitTimeMs = System.currentTimeMillis()
+        var lastNumericEmitTimeMs = System.currentTimeMillis()
+        var lastSpeed = 0.0
 
         val outputFolderName = generateOutputFolderName(context, structure.rootUri)
-        statusCallback?.onStatus("FOLDER", "Создание выходной папки: $outputFolderName")
+        statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
 
         val outputFolderUri = createOutputFolder(context, outputFolderName)
         if (outputFolderUri == null) {
-            statusCallback?.onStatus("ERROR", "Не удалось создать выходную папку")
+            statusCallback?.onStatus("ERROR", "Failed to create output folder")
             return@withContext Result.failure(Exception("Cannot create output folder"))
         }
 
-        statusCallback?.onStatus("FOLDER", "Выходная папка создана: $outputFolderUri")
+        statusCallback?.onStatus("FOLDER", "Output folder created: $outputFolderUri")
 
         val emitProgress = { currentFileName: String?, currentFileDone: Long, currentFileTotal: Long, cumulativeDone: Long, processedFiles: Int ->
             val safeFileTotal = currentFileTotal.coerceAtLeast(0L)
@@ -52,41 +56,51 @@ object FolderProcessor {
             val currentCumulative = (baseDone + safeFileDone).coerceAtMost(structure.totalSize)
 
             val now = System.currentTimeMillis()
-            val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-            val speed = if (elapsedSec > 0) {
-                (currentCumulative - lastCumulativeBytes).toDouble() / 1024 / 1024 / elapsedSec
-            } else {
-                0.0
-            }
+            
+            val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
+            
+            // Update progress bar every 250ms (4 times per second)
+            if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+                if (shouldUpdateNumeric) {
+                    val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
+                    lastSpeed = if (elapsedSec > 0) {
+                        (currentCumulative - lastCumulativeBytes).toDouble() / 1024 / 1024 / elapsedSec
+                    } else {
+                        0.0
+                    }
+                    lastCumulativeBytes = currentCumulative
+                    lastTimeMs = now
+                    lastNumericEmitTimeMs = now
+                }
+                
+                lastEmitTimeMs = now
 
-            lastCumulativeBytes = currentCumulative
-            lastTimeMs = now
-
-            progressCallback(
-                FolderProgressUpdate(
-                    overallProgress = ConversionProgress(
-                        doneBytes = currentCumulative,
-                        totalBytes = structure.totalSize,
-                        speedMBps = speed
-                    ),
-                    currentFileProgress = currentFileName?.takeIf { safeFileTotal > 0 }?.let {
-                        ConversionProgress(
-                            doneBytes = safeFileDone,
-                            totalBytes = safeFileTotal,
-                            speedMBps = 0.0
-                        )
-                    },
-                    currentFileName = currentFileName,
-                    processedFiles = processedFiles,
-                    totalFiles = totalFileCount
+                progressCallback(
+                    FolderProgressUpdate(
+                        overallProgress = ConversionProgress(
+                            doneBytes = currentCumulative,
+                            totalBytes = structure.totalSize,
+                            speedMBps = lastSpeed
+                        ),
+                        currentFileProgress = currentFileName?.takeIf { safeFileTotal > 0 }?.let {
+                            ConversionProgress(
+                                doneBytes = safeFileDone,
+                                totalBytes = safeFileTotal,
+                                speedMBps = 0.0
+                            )
+                        },
+                        currentFileName = currentFileName,
+                        processedFiles = processedFiles,
+                        totalFiles = totalFileCount
+                    )
                 )
-            )
+            }
         }
 
         val results = mutableListOf<FileConversionResult>()
 
         try {
-            statusCallback?.onStatus("INFO", "Начало обработки файлов...")
+            statusCallback?.onStatus("INFO", "Starting file processing...")
             val processingStartTime = System.currentTimeMillis()
 
             cumulativeBytesProcessed = processNodes(
@@ -119,39 +133,39 @@ object FolderProcessor {
             )
 
             statusCallback?.onStatus("SUMMARY", "========================================")
-            statusCallback?.onStatus("SUMMARY", "Итоги конвертации")
+            statusCallback?.onStatus("SUMMARY", "Conversion Summary")
             statusCallback?.onStatus("SUMMARY", "========================================")
-            statusCallback?.onStatus("SUMMARY", "Всего файлов: ${summary.totalFiles}")
-            statusCallback?.onStatus("SUMMARY", "NSZ файлов обработано: ${summary.nszFilesProcessed}")
-            statusCallback?.onStatus("SUMMARY", "Успешно: ${summary.successCount}")
-            statusCallback?.onStatus("SUMMARY", "Ошибок: ${summary.failedCount}")
-            statusCallback?.onStatus("SUMMARY", "Время: ${totalTimeMs/1000}с")
-            statusCallback?.onStatus("SUMMARY", "Средняя скорость: %.2f MB/s".format(avgSpeedMBps))
+            statusCallback?.onStatus("SUMMARY", "Total files: ${summary.totalFiles}")
+            statusCallback?.onStatus("SUMMARY", "NSZ files processed: ${summary.nszFilesProcessed}")
+            statusCallback?.onStatus("SUMMARY", "Successful: ${summary.successCount}")
+            statusCallback?.onStatus("SUMMARY", "Failed: ${summary.failedCount}")
+            statusCallback?.onStatus("SUMMARY", "Time: ${totalTimeMs/1000}s")
+            statusCallback?.onStatus("SUMMARY", "Average speed: %.2f MB/s".format(avgSpeedMBps))
 
             if (summary.failedCount > 0) {
                 statusCallback?.onStatus("SUMMARY", "")
-                statusCallback?.onStatus("SUMMARY", "Файлы с ошибками:")
+                statusCallback?.onStatus("SUMMARY", "Failed files:")
                 results.filterIsInstance<FileConversionResult.Failed>().forEach { failed ->
-                    statusCallback?.onStatus("FAILED_FILE", "  ${failed.fileName}: ${failed.errorMessage} (код: ${failed.errorCode})")
+                    statusCallback?.onStatus("FAILED_FILE", "  ${failed.fileName}: ${failed.errorMessage} (code: ${failed.errorCode})")
                 }
             }
 
-            statusCallback?.onStatus("COMPLETE", "Результат сохранён в: $outputFolderUri")
+            statusCallback?.onStatus("COMPLETE", "Result saved to: $outputFolderUri")
             emitProgress(null, 0L, 0L, cumulativeBytesProcessed, totalFileCount)
 
             if (summary.successCount > 0) {
                 Result.success(Pair(outputFolderUri, summary))
             } else {
                 deleteFolder(context, outputFolderUri)
-                Result.failure(Exception("Все файлы не удалось обработать. Успешно: 0, Ошибок: ${summary.failedCount}"))
+                Result.failure(Exception("All files failed to process. Successful: 0, Errors: ${summary.failedCount}"))
             }
         } catch (e: NszConversionException) {
-            statusCallback?.onStatus("ERROR", "Ошибка конвертации NSZ: ${e.message} (код: ${e.code})")
+            statusCallback?.onStatus("ERROR", "NSZ conversion error: ${e.message} (code: ${e.code})")
             deleteFolder(context, outputFolderUri)
             Result.failure(e)
         } catch (e: Exception) {
-            statusCallback?.onStatus("ERROR", "Критическая ошибка обработки: ${e.message}")
-            statusCallback?.onStatus("ERROR", "Стек: ${e.stackTraceToString().take(500)}")
+            statusCallback?.onStatus("ERROR", "Critical processing error: ${e.message}")
+            statusCallback?.onStatus("ERROR", "Stack: ${e.stackTraceToString().take(500)}")
             deleteFolder(context, outputFolderUri)
             Result.failure(e)
         }
@@ -207,7 +221,7 @@ object FolderProcessor {
                         progressCallback(node.name, 0L, fileSize, cumulative, processedFiles)
 
                         try {
-                            statusCallback?.onStatus("NSZ", "[$fileIndex/${nodes.size}] Начало конвертации: ${node.name} (%.2f MB)".format(fileSizeMB))
+                            statusCallback?.onStatus("NSZ", "[$fileIndex/${nodes.size}] Starting conversion: ${node.name} (%.2f MB)".format(fileSizeMB))
                             val startTime = System.currentTimeMillis()
 
                             convertAndSaveNsz(
@@ -225,7 +239,7 @@ object FolderProcessor {
 
                             val elapsedMs = System.currentTimeMillis() - startTime
                             val speedMBps = if (elapsedMs > 0) fileSizeMB / (elapsedMs / 1000.0) else 0.0
-                            statusCallback?.onStatus("NSZ", "[$fileIndex/${nodes.size}] Конвертация завершена: ${node.name} за ${elapsedMs/1000}с (%.2f MB/s)".format(speedMBps))
+                            statusCallback?.onStatus("NSZ", "[$fileIndex/${nodes.size}] Conversion completed: ${node.name} in ${elapsedMs/1000}s (%.2f MB/s)".format(speedMBps))
 
                             results.add(FileConversionResult.Success(
                                 fileName = node.name,
@@ -239,7 +253,7 @@ object FolderProcessor {
                             progressCallback(null, 0L, 0L, cumulative, processedFiles)
 
                         } catch (e: NszConversionException) {
-                            statusCallback?.onStatus("ERROR", "Конвертация не удалась: ${node.name} - ${e.message} (код: ${e.code})")
+                            statusCallback?.onStatus("ERROR", "Conversion failed: ${node.name} - ${e.message} (code: ${e.code})")
                             results.add(FileConversionResult.Failed(
                                 fileName = node.name,
                                 errorCode = e.code,
@@ -250,7 +264,7 @@ object FolderProcessor {
                             processedFiles++
                             progressCallback(null, 0L, 0L, cumulative, processedFiles)
                         } catch (e: Exception) {
-                            statusCallback?.onStatus("ERROR", "Ошибка обработки: ${node.name} - ${e.message}")
+                            statusCallback?.onStatus("ERROR", "Processing error: ${node.name} - ${e.message}")
                             results.add(FileConversionResult.Failed(
                                 fileName = node.name,
                                 errorCode = -999,
@@ -267,13 +281,13 @@ object FolderProcessor {
                         progressCallback(node.name, 0L, fileSize, cumulative, processedFiles)
 
                         try {
-                            statusCallback?.onStatus("COPY", "[$fileIndex/${nodes.size}] Копирование: ${node.name} (%.2f MB)".format(fileSizeMB))
+                            statusCallback?.onStatus("COPY", "[$fileIndex/${nodes.size}] Copying: ${node.name} (%.2f MB)".format(fileSizeMB))
                             val startTime = System.currentTimeMillis()
 
                             copyFile(context, node.uri, destParentUri, destRelativePath, node.name, statusCallback)
 
                             val elapsedMs = System.currentTimeMillis() - startTime
-                            statusCallback?.onStatus("COPY", "[$fileIndex/${nodes.size}] Копирование завершено: ${node.name} за ${elapsedMs}мс")
+                            statusCallback?.onStatus("COPY", "[$fileIndex/${nodes.size}] Copy completed: ${node.name} in ${elapsedMs}ms")
 
                             results.add(FileConversionResult.Success(
                                 fileName = node.name,
@@ -286,7 +300,7 @@ object FolderProcessor {
                             progressCallback(null, 0L, 0L, cumulative, processedFiles)
 
                         } catch (e: Exception) {
-                            statusCallback?.onStatus("ERROR", "Копирование не удалось: ${node.name} - ${e.message}")
+                            statusCallback?.onStatus("ERROR", "Copy failed: ${node.name} - ${e.message}")
                             results.add(FileConversionResult.Failed(
                                 fileName = node.name,
                                 errorCode = -998,
@@ -300,7 +314,7 @@ object FolderProcessor {
                     }
                 }
                 is FileNode.Directory -> {
-                    statusCallback?.onStatus("FOLDER", "Вход в папку: ${node.name} (${node.children.size} элементов)")
+                    statusCallback?.onStatus("FOLDER", "Entering folder: ${node.name} (${node.children.size} items)")
 
                     val subFolder = createSubFolder(context, destParentUri, destRelativePath, node.name, statusCallback)
                     if (subFolder != null) {
@@ -316,9 +330,9 @@ object FolderProcessor {
                             statusCallback,
                             results
                         )
-                        statusCallback?.onStatus("FOLDER", "Выход из папки: ${node.name}")
+                        statusCallback?.onStatus("FOLDER", "Exiting folder: ${node.name}")
                     } else {
-                        statusCallback?.onStatus("ERROR", "Не удалось создать подпапку: ${node.name}")
+                        statusCallback?.onStatus("ERROR", "Failed to create subfolder: ${node.name}")
                     }
                 }
             }
@@ -342,10 +356,10 @@ object FolderProcessor {
             } else {
                 Pair(parentUri, buildChildRelativePath(parentRelativePath, name))
             }
-            statusCallback?.onStatus("FOLDER", "Подпапка создана: $name")
+            statusCallback?.onStatus("FOLDER", "Subfolder created: $name")
             result
         } catch (e: Exception) {
-            statusCallback?.onStatus("ERROR", "Ошибка создания подпапки '$name': ${e.message}")
+            statusCallback?.onStatus("ERROR", "Error creating subfolder '$name': ${e.message}")
             null
         }
     }
@@ -362,14 +376,14 @@ object FolderProcessor {
     ) {
         val tempOutput = TempFileManager.createManagedTempFile(context, outputName, "nsp")
         var resolvedInput: ResolvedInputFile? = null
-        statusCallback?.onStatus("NSZ", "Создан временный файл: ${tempOutput.absolutePath}")
+        statusCallback?.onStatus("NSZ", "Created temp file: ${tempOutput.absolutePath}")
 
         try {
-            statusCallback?.onStatus("NSZ", "Разрешение пути к исходному файлу...")
+            statusCallback?.onStatus("NSZ", "Resolving source file path...")
             resolvedInput = resolveToFilePath(context, sourceUri, statusCallback)
-            statusCallback?.onStatus("NSZ", "Исходный файл: ${resolvedInput.file.absolutePath}")
+            statusCallback?.onStatus("NSZ", "Source file: ${resolvedInput.file.absolutePath}")
 
-            statusCallback?.onStatus("NSZ", "Запуск native конвертации...")
+            statusCallback?.onStatus("NSZ", "Starting native conversion...")
             val conversionStartTime = System.currentTimeMillis()
 
             val result = NszConverter.nativeConvert(
@@ -387,27 +401,27 @@ object FolderProcessor {
 
             if (result != NszConverter.OK) {
                 val errorMsg = NszConverter.nativeErrorString(result)
-                statusCallback?.onStatus("ERROR", "Native конвертация завершилась с ошибкой: $errorMsg (код: $result)")
+                statusCallback?.onStatus("ERROR", "Native conversion failed: $errorMsg (code: $result)")
                 throw NszConversionException(result, errorMsg)
             }
 
-            statusCallback?.onStatus("NSZ", "Native конвертация завершена за ${conversionTimeMs}мс")
-            statusCallback?.onStatus("NSZ", "Размер результата: %.2f MB".format(tempOutput.length() / 1024.0 / 1024.0))
+            statusCallback?.onStatus("NSZ", "Native conversion completed in ${conversionTimeMs}ms")
+            statusCallback?.onStatus("NSZ", "Result size: %.2f MB".format(tempOutput.length() / 1024.0 / 1024.0))
 
-            statusCallback?.onStatus("NSZ", "Копирование результата в целевую папку...")
+            statusCallback?.onStatus("NSZ", "Copying result to target folder...")
             copyFileToDestination(context, tempOutput, destParentUri, destRelativePath, outputName, statusCallback)
-            statusCallback?.onStatus("NSZ", "Результат скопирован: $outputName")
+            statusCallback?.onStatus("NSZ", "Result copied: $outputName")
 
         } catch (e: Exception) {
-            statusCallback?.onStatus("ERROR", "Ошибка при конвертации '$outputName': ${e.message}")
+            statusCallback?.onStatus("ERROR", "Error converting '$outputName': ${e.message}")
             throw e
         } finally {
             resolvedInput?.deleteIfTemp(statusCallback)
             val deleted = TempFileManager.deleteQuietly(tempOutput)
             if (deleted) {
-                statusCallback?.onStatus("NSZ", "Временный файл удалён")
+                statusCallback?.onStatus("NSZ", "Temp file deleted")
             } else if (tempOutput.exists()) {
-                statusCallback?.onStatus("ERROR", "Не удалось удалить временный файл: ${tempOutput.absolutePath}")
+                statusCallback?.onStatus("ERROR", "Failed to delete temp file: ${tempOutput.absolutePath}")
             }
         }
     }
@@ -423,7 +437,7 @@ object FolderProcessor {
         try {
             if (destParentUri.scheme == "file") {
                 val destFile = File(File(destParentUri.path!!), fileName)
-                statusCallback?.onStatus("COPY", "Копирование файла в: ${destFile.absolutePath}")
+                statusCallback?.onStatus("COPY", "Copying file to: ${destFile.absolutePath}")
 
                 context.contentResolver.openInputStream(sourceUri)?.use { input ->
                     destFile.outputStream().use { output ->
@@ -431,7 +445,7 @@ object FolderProcessor {
                     }
                 }
             } else {
-                statusCallback?.onStatus("COPY", "Создание файла через MediaStore: $fileName")
+                statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
 
                 val cv = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, fileName)
@@ -466,9 +480,9 @@ object FolderProcessor {
                     throw e
                 }
             }
-            statusCallback?.onStatus("COPY", "Файл успешно скопирован: $fileName")
+            statusCallback?.onStatus("COPY", "File copied successfully: $fileName")
         } catch (e: Exception) {
-            statusCallback?.onStatus("ERROR", "Ошибка копирования файла '$fileName': ${e.message}")
+            statusCallback?.onStatus("ERROR", "Error copying file '$fileName': ${e.message}")
             throw e
         }
     }
@@ -484,7 +498,7 @@ object FolderProcessor {
         try {
             if (destParentUri.scheme == "file") {
                 val destFile = File(File(destParentUri.path!!), fileName)
-                statusCallback?.onStatus("COPY", "Копирование в локальную ФС: ${destFile.absolutePath}")
+                statusCallback?.onStatus("COPY", "Copying to local filesystem: ${destFile.absolutePath}")
 
                 sourceFile.inputStream().use { input ->
                     destFile.outputStream().use { output ->
@@ -492,7 +506,7 @@ object FolderProcessor {
                     }
                 }
             } else {
-                statusCallback?.onStatus("COPY", "Создание файла через MediaStore: $fileName")
+                statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
 
                 val cv = ContentValues().apply {
                     put(MediaStore.Downloads.DISPLAY_NAME, fileName)
@@ -527,9 +541,9 @@ object FolderProcessor {
                     throw e
                 }
             }
-            statusCallback?.onStatus("COPY", "Файл скопирован в целевую папку: $fileName")
+            statusCallback?.onStatus("COPY", "File copied to target folder: $fileName")
         } catch (e: Exception) {
-            statusCallback?.onStatus("ERROR", "Ошибка копирования в назначение '$fileName': ${e.message}")
+            statusCallback?.onStatus("ERROR", "Error copying to destination '$fileName': ${e.message}")
             throw e
         }
     }
@@ -542,7 +556,7 @@ object FolderProcessor {
                 DocumentsContract.deleteDocument(context.contentResolver, folderUri)
             }
         } catch (e: Exception) {
-            // Игнорируем ошибки удаления
+            // Ignore deletion errors
         }
     }
 

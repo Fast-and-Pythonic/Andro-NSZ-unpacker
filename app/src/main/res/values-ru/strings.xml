@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- App name -->
+    <string name="app_name">Andro-NSZ unpacker</string>
+    <string name="app_title">AndroNSZ</string>
+
+    <!-- Actions -->
+    <string name="action_add_files">Добавить файлы</string>
+    <string name="action_select_files">Выбрать файлы</string>
+    <string name="action_select_folder">Выбрать папку</string>
+    <string name="action_convert">Конвертировать</string>
+    <string name="action_convert_files">Конвертировать %d файл(ов)</string>
+    <string name="action_convert_folder">Конвертировать папку</string>
+    <string name="action_convert_to_nsp">Convert to NSP</string>
+    <string name="action_cancel">Cancel</string>
+    <string name="action_delete">Удалить</string>
+    <string name="action_show_structure">Показать структуру</string>
+    <string name="action_hide_structure">Скрыть структуру</string>
+    <string name="action_show_log">Показать лог</string>
+    <string name="action_hide_log">Скрыть лог</string>
+    <string name="action_install_prod_keys">Install prod.keys</string>
+    <string name="action_change_prod_keys">Изменить выбранные prod.keys</string>
+    <string name="action_remove_prod_keys">Удалить выбранные prod.keys</string>
+
+    <!-- Labels -->
+    <string name="label_current_file">Текущий файл</string>
+    <string name="label_output_downloads">Output: Downloads folder</string>
+    <string name="label_folder_selected">Папка выбрана</string>
+    <string name="label_processing_folder">Обработка папки…</string>
+    <string name="label_folder_processed">Папка обработана!</string>
+
+    <!-- Messages -->
+    <string name="msg_prod_keys_required">prod.keys required for proper NSZ to NSP decompression.</string>
+    <string name="msg_select_mode">Выберите режим работы</string>
+    <string name="msg_select_files_desc">Выберите один или несколько NSZ файлов для конверсии</string>
+    <string name="msg_select_folder_desc">Конвертирует все NSZ файлы в папке, сохраняя структуру</string>
+    <string name="msg_tap_to_select">Tap to select NSZ file</string>
+    <string name="msg_selected_file">Selected file</string>
+    <string name="msg_tap_add_files">Нажмите \"Добавить файлы\" чтобы начать</string>
+    <string name="msg_saved_to_downloads">Сохранено в Downloads</string>
+    <string name="msg_see_log_details">Подробности в логе</string>
+
+    <!-- Status -->
+    <string name="status_waiting">Ожидает</string>
+    <string name="status_converting">Конвертируется…</string>
+    <string name="status_done">Завершено</string>
+    <string name="status_error">Ошибка</string>
+    <string name="status_scanning_folder">Сканирование папки…</string>
+    <string name="status_cancelled">Cancelled.</string>
+
+    <!-- Errors -->
+    <string name="error_scan_failed">Ошибка сканирования: %s</string>
+    <string name="error_folder_processing">Ошибка обработки папки: %s</string>
+    <string name="error_general">Ошибка: %s</string>
+    <string name="error_unexpected">Unexpected error: %s</string>
+    <string name="error_critical">Критическая ошибка: %s</string>
+    <string name="error_conversion_verify_failed">Conversion complete, but NSP verification failed:\n%s</string>
+
+    <!-- Format strings -->
+    <string name="format_files_queued">Файлов в очереди: %d</string>
+    <string name="format_file_n_of_m">Файл %1$d из %2$d</string>
+    <string name="format_files_processed">Файлы: %1$d / %2$d</string>
+    <string name="format_nsz_files_count">NSZ файлов: %d</string>
+    <string name="format_total_files_count">Всего файлов: %d</string>
+    <string name="format_size">Размер: %s</string>
+    <string name="format_files_completed">Обработано %1$d из %2$d файлов</string>
+    <string name="format_success_rate">Успешно: %1$d из %2$d NSZ файлов (%3$s)</string>
+    <string name="format_failed_count">Ошибок: %d файл(ов)</string>
+    <string name="format_log_path">Лог: %s</string>
+    <string name="format_debug_log">Debug log: %s</string>
+
+    <!-- Result messages -->
+    <string name="result_done_no_verify">Done! Saved to Downloads.\n(header_key not found in prod.keys — verification skipped)</string>
+    <string name="result_done_verified">Done! NSP verified. Saved to Downloads.</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_back">Back</string>
+    <string name="cd_settings">Settings</string>
+</resources>

@@ -38,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 import com.androNSZ.model.FileNode
 import com.androNSZ.model.countAllFiles
@@ -74,7 +76,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
       ) {
          Icon(Icons.Filled.Folder, null)
          Spacer(Modifier.width(8.dp))
-         Text("Выбрать папку")
+         Text(stringResource(R.string.action_select_folder))
       }
 
       val structure = vm.folderStructure
@@ -90,19 +92,19 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                verticalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                Text(
-                  text = "Папка выбрана",
+                  text = stringResource(R.string.label_folder_selected),
                   style = MaterialTheme.typography.titleMedium
                )
                Text(
-                  text = "NSZ файлов: ${structure.nszFiles.size}",
+                  text = stringResource(R.string.format_nsz_files_count, structure.nszFiles.size),
                   style = MaterialTheme.typography.bodyMedium
                )
                Text(
-                  text = "Всего файлов: ${countAllFiles(structure.allFiles)}",
+                  text = stringResource(R.string.format_total_files_count, countAllFiles(structure.allFiles)),
                   style = MaterialTheme.typography.bodyMedium
                )
                Text(
-                  text = "Размер: ${fmtBytes(structure.totalSize)}",
+                  text = stringResource(R.string.format_size, fmtBytes(structure.totalSize)),
                   style = MaterialTheme.typography.bodyMedium
                )
             }
@@ -111,8 +113,8 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
          var showStructure by remember { mutableStateOf(false) }
          CompactToggleButton(
             expanded = showStructure,
-            collapsedText = "Показать структуру",
-            expandedText = "Скрыть структуру",
+            collapsedText = stringResource(R.string.action_show_structure),
+            expandedText = stringResource(R.string.action_hide_structure),
             onClick = { showStructure = !showStructure }
          )
 
@@ -133,7 +135,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
             enabled = !vm.isConverting,
             modifier = Modifier.fillMaxWidth()
          ) {
-            Text("Конвертировать папку")
+            Text(stringResource(R.string.action_convert_folder))
          }
       }
 
@@ -149,7 +151,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                Text(
-                  text = "Обработка папки...",
+                  text = stringResource(R.string.label_processing_folder),
                   style = MaterialTheme.typography.titleMedium
                )
 
@@ -164,7 +166,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
                      Text(
-                        text = "Файлы: ${vm.folderProcessedFiles} / ${vm.folderTotalFiles}",
+                        text = stringResource(R.string.format_files_processed, vm.folderProcessedFiles, vm.folderTotalFiles),
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(
@@ -203,7 +205,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
                      Text(
-                        text = "Текущий файл",
+                        text = stringResource(R.string.label_current_file),
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(

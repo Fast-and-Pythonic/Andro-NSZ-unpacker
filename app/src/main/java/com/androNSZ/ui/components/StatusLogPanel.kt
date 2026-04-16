@@ -19,6 +19,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.LogEntry
 
 @Composable
@@ -29,8 +31,8 @@ fun StatusLogPanel(statusLog: List<LogEntry>) {
 
    CompactToggleButton(
       expanded = logVisible,
-      collapsedText = "Показать лог",
-      expandedText = "Скрыть лог",
+      collapsedText = stringResource(R.string.action_show_log),
+      expandedText = stringResource(R.string.action_hide_log),
       onClick = { logVisible = !logVisible }
    )
 
