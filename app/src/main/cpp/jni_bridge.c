@@ -140,6 +140,75 @@ Java_com_androNSZ_NszConverter_nativeConvert(
     return (jint)result;
 }
 
+/* ---------- JNI: convertXcz ---------- */
+JNIEXPORT jint JNICALL
+Java_com_androNSZ_NszConverter_nativeConvertXcz(
+        JNIEnv *env, jclass clazz,
+        jstring j_input, jstring j_output,
+        jobject j_progress_callback,
+        jobject j_status_callback)
+{
+    (void)clazz;
+
+    const char *input  = (*env)->GetStringUTFChars(env, j_input,  NULL);
+    const char *output = (*env)->GetStringUTFChars(env, j_output, NULL);
+
+    LOGI("convertXcz: %s -> %s", input, output);
+
+    JavaVM *jvm = NULL;
+    (*env)->GetJavaVM(env, &jvm);
+
+    /* Progress callback */
+    JniProgressCtx *prog_ctx = NULL;
+    NczProgressCb    prog_fn  = NULL;
+    if (j_progress_callback != NULL) {
+        jclass cb_class = (*env)->GetObjectClass(env, j_progress_callback);
+        jmethodID mid   = (*env)->GetMethodID(env, cb_class, "onProgress", "(JJ)V");
+        (*env)->DeleteLocalRef(env, cb_class);
+
+        prog_ctx = malloc(sizeof(JniProgressCtx));
+        prog_ctx->jvm          = jvm;
+        prog_ctx->callback_obj = (*env)->NewGlobalRef(env, j_progress_callback);
+        prog_ctx->on_progress  = mid;
+        prog_fn = jni_progress_cb;
+    }
+
+    /* Status callback */
+    JniStatusCtx *stat_ctx = NULL;
+    NczStatusCb   stat_fn  = NULL;
+    if (j_status_callback != NULL) {
+        jclass cb_class = (*env)->GetObjectClass(env, j_status_callback);
+        jmethodID mid   = (*env)->GetMethodID(env, cb_class, "onStatus",
+                                               "(Ljava/lang/String;Ljava/lang/String;)V");
+        (*env)->DeleteLocalRef(env, cb_class);
+
+        stat_ctx = malloc(sizeof(JniStatusCtx));
+        stat_ctx->jvm          = jvm;
+        stat_ctx->callback_obj = (*env)->NewGlobalRef(env, j_status_callback);
+        stat_ctx->on_status    = mid;
+        stat_fn = jni_status_cb;
+    }
+
+    int result = ncz_convert_xcz_to_xci(input, output,
+                                         prog_fn, prog_ctx,
+                                         stat_fn, stat_ctx);
+    LOGI("convertXcz finished: result=%d", result);
+
+    (*env)->ReleaseStringUTFChars(env, j_input,  input);
+    (*env)->ReleaseStringUTFChars(env, j_output, output);
+
+    if (prog_ctx) {
+        (*env)->DeleteGlobalRef(env, prog_ctx->callback_obj);
+        free(prog_ctx);
+    }
+    if (stat_ctx) {
+        (*env)->DeleteGlobalRef(env, stat_ctx->callback_obj);
+        free(stat_ctx);
+    }
+
+    return (jint)result;
+}
+
 /* ---------- JNI: setDebugLog ---------- */
 JNIEXPORT void JNICALL
 Java_com_androNSZ_NszConverter_nativeSetDebugLog(

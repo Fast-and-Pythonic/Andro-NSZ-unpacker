@@ -200,6 +200,8 @@ fun FileQueueItem(
    enabled: Boolean
 ) {
    val isNsz = file.displayName.endsWith(".nsz", ignoreCase = true)
+   val isXcz = file.displayName.endsWith(".xcz", ignoreCase = true)
+   val isCompressed = isNsz || isXcz
 
    Card(
       modifier = Modifier.fillMaxWidth(),
@@ -219,12 +221,12 @@ fun FileQueueItem(
          verticalAlignment = Alignment.Top
       ) {
          Icon(
-            imageVector = if (isNsz) Icons.Filled.Description else Icons.Filled.InsertDriveFile,
+            imageVector = if (isCompressed) Icons.Filled.Description else Icons.Filled.InsertDriveFile,
             contentDescription = null,
             modifier = Modifier
                .padding(top = 2.dp)
                .size(20.dp),
-            tint = if (isNsz) MaterialTheme.colorScheme.primary
+            tint = if (isCompressed) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurfaceVariant
          )
          Spacer(Modifier.width(8.dp))
@@ -232,7 +234,7 @@ fun FileQueueItem(
             Text(
                text = file.displayName,
                style = MaterialTheme.typography.bodyMedium,
-               fontWeight = if (isNsz) FontWeight.Bold else FontWeight.Normal
+               fontWeight = if (isCompressed) FontWeight.Bold else FontWeight.Normal
             )
             val statusText = when (file.status) {
                FileStatus.Pending -> stringResource(R.string.status_waiting)

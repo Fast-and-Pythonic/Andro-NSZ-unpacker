@@ -46,7 +46,7 @@ fun CompactCenterAlignedTopAppBar(
             ) {
                 navigationIcon()
             }
-
+            
             // Title
             Box(
                 modifier = Modifier.weight(1f),
@@ -56,7 +56,7 @@ fun CompactCenterAlignedTopAppBar(
                     title()
                 }
             }
-
+            
             // Actions
             Row(
                 modifier = Modifier.wrapContentWidth(),

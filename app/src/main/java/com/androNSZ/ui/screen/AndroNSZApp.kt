@@ -40,7 +40,17 @@ fun AndroNSZApp(vm: MainViewModel) {
                vm.currentScreen = Screen.ModeSelection
                vm.resetConversionState()
             },
-            onInstallKeys = { keysPicker.launch(arrayOf("*/*")) }
+            onInstallKeys = { keysPicker.launch(arrayOf("*/*")) },
+            onNavigateToAbout = {
+               vm.currentScreen = Screen.About
+            }
+         )
+      }
+      Screen.About -> {
+         AboutScreen(
+            onBack = {
+               vm.currentScreen = Screen.Conversion
+            }
          )
       }
    }

@@ -4,6 +4,7 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -23,7 +24,8 @@ import com.androNSZ.viewmodel.MainViewModel
 fun ConversionScreen(
    vm: MainViewModel,
    onBackToModeSelection: () -> Unit,
-   onInstallKeys: () -> Unit
+   onInstallKeys: () -> Unit,
+   onNavigateToAbout: () -> Unit
 ) {
    // Обработка системной кнопки "назад"
    BackHandler(enabled = !vm.isConverting) {
@@ -75,6 +77,20 @@ fun ConversionScreen(
                            settingsMenuExpanded = false
                            KeysManager.deleteKeys(context)
                            vm.checkKeys(context)
+                        }
+                     )
+                     HorizontalDivider()
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_about_app)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onNavigateToAbout()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.Info,
+                              contentDescription = null
+                           )
                         }
                      )
                   }

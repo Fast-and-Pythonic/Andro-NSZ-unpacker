@@ -2,7 +2,7 @@
 <resources>
     <!-- App name -->
     <string name="app_name">Andro-NSZ unpacker</string>
-    <string name="app_title">AndroNSZ</string>
+    <string name="app_title">Andro-NSZ</string>
 
     <!-- Actions -->
     <string name="action_add_files">Добавить файлы</string>

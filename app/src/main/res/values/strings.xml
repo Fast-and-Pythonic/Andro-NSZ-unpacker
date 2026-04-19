@@ -1,12 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-<<<<<<< Updated upstream
-    <string name="app_name">AndroNSZ</string>
-</resources>
-=======
     <!-- App name -->
     <string name="app_name">Andro-NSZ unpacker</string>
-    <string name="app_title">AndroNSZ</string>
+    <string name="app_title">Andro-NSZ</string>
 
     <!-- Actions -->
     <string name="action_add_files">Add files</string>
@@ -80,5 +76,34 @@
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_settings">Settings</string>
+
+    <!-- XCZ format support -->
+    <string name="converting_xcz">Converting XCZ to XCI…</string>
+    <string name="xcz_format">XCZ (Compressed Cartridge)</string>
+    <string name="xci_format">XCI (Nintendo Cartridge Image)</string>
+    <string name="invalid_xcz">Invalid XCZ file format</string>
+    <string name="format_xcz_files_count">XCZ files: %d</string>
+    <string name="error_conversion_verify_failed_xci">Conversion complete, but XCI verification failed:\n%s</string>
+
+    <!-- About screen -->
+    <string name="action_about_app">О приложении</string>
+    <string name="about_app_title">О приложении</string>
+    
+    <string name="about_what_is_title">Что это за приложение?</string>
+    <string name="about_what_is_content">Andro-NSZ — это Android-приложение для распаковки сжатых файлов, некоторых форматов. Оно конвертирует их, используя нативный C-движок для высокой производительности.</string>
+    
+    <string name="about_formats_title">Поддерживаемые форматы</string>
+    <string name="about_formats_content">Приложение поддерживает два типа сжатых файлов Nintendo Switch:</string>
+    
+    <string name="about_nsz_description">Сжатые пакеты Nintendo Switch (digital downloads)</string>
+    <string name="about_xcz_description">Сжатые образы картриджей Nintendo Switch (cartridge dumps)</string>
+    
+    <string name="about_how_works_title">Как это работает</string>
+    <string name="about_how_works_content">Приложение использует алгоритм Zstandard для декомпрессии сжатых NCZ файлов внутри контейнеров NSZ/XCZ. После декомпрессии файлы повторно шифруются с помощью AES-CTR и сохраняются в стандартном формате NSP/XCI.\n\nВы можете конвертировать отдельные файлы или целые папки, сохраняя структуру каталогов.</string>
+    
+    <string name="about_requirements_title">Требования</string>
+    <string name="about_requirements_content">Для правильной работы требуется файл prod.keys, содержащий ключи шифрования Nintendo Switch. Вы можете установить его через меню приложения.\n\nБез prod.keys приложение всё равно выполнит конвертацию, но пропустит этап верификации.</string>
+    
+    <string name="about_credits_title">Авторство</string>
+    <string name="about_credits_content">Основано на оригинальной утилите nsz от nicoboss.\n\nAndro-NSZ — Android-порт с нативным C-движком для мобильных устройств.</string>
 </resources>
->>>>>>> Stashed changes

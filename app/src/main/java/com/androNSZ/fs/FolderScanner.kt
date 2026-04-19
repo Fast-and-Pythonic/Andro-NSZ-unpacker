@@ -17,6 +17,7 @@ object FolderScanner {
         statusCallback: NszConverter.StatusCallback? = null
     ): FolderStructure = withContext(Dispatchers.IO) {
         val nszFiles = mutableListOf<Uri>()
+        val xczFiles = mutableListOf<Uri>()
         val totalSizeRef = LongArray(1)
         val fileCountRef = IntArray(1)
         val folderCountRef = IntArray(1)
@@ -35,6 +36,7 @@ object FolderScanner {
             folderUri,
             childrenUri,
             nszFiles,
+            xczFiles,
             fileCountRef,
             folderCountRef,
             statusCallback
@@ -46,11 +48,12 @@ object FolderScanner {
         val totalSizeMB = totalSizeRef[0] / 1024.0 / 1024.0
         statusCallback?.onStatus("SCAN", "Scan completed in ${elapsedMs}ms")
         statusCallback?.onStatus("INFO", "Found: ${fileCountRef[0]} files, ${folderCountRef[0]} folders")
-        statusCallback?.onStatus("INFO", "NSZ files: ${nszFiles.size}, total size: %.2f MB".format(totalSizeMB))
+        statusCallback?.onStatus("INFO", "NSZ files: ${nszFiles.size}, XCZ files: ${xczFiles.size}, total size: %.2f MB".format(totalSizeMB))
 
         FolderStructure(
             rootUri = folderUri,
             nszFiles = nszFiles,
+            xczFiles = xczFiles,
             allFiles = tree,
             totalSize = totalSizeRef[0]
         )
@@ -61,6 +64,7 @@ object FolderScanner {
         treeUri: Uri,
         uri: Uri,
         nszFiles: MutableList<Uri>,
+        xczFiles: MutableList<Uri>,
         fileCountRef: IntArray,
         folderCountRef: IntArray,
         statusCallback: NszConverter.StatusCallback?,
@@ -108,6 +112,7 @@ object FolderScanner {
                         treeUri,
                         childUri,
                         nszFiles,
+                        xczFiles,
                         fileCountRef,
                         folderCountRef,
                         statusCallback,
@@ -117,17 +122,24 @@ object FolderScanner {
                 } else {
                     fileCountRef[0]++
                     val isNsz = name.endsWith(".nsz", ignoreCase = true)
+                    val isXcz = name.endsWith(".xcz", ignoreCase = true)
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
 
                     val sizeMB = size / 1024.0 / 1024.0
-                    val fileType = if (isNsz) "NSZ" else name.substringAfterLast('.', "file")
+                    val fileType = when {
+                        isNsz -> "NSZ"
+                        isXcz -> "XCZ"
+                        else -> name.substringAfterLast('.', "file")
+                    }
                     statusCallback?.onStatus("SCAN", "Found file: $name (%.2f MB, $fileType)".format(sizeMB))
 
                     if (isNsz) {
                         nszFiles.add(fileUri)
+                    } else if (isXcz) {
+                        xczFiles.add(fileUri)
                     }
 
-                    results.add(FileNode.File(fileUri, name, isNsz))
+                    results.add(FileNode.File(fileUri, name, isNsz, isXcz))
                     addToTotalSize(size)
                 }
             }
