@@ -88,21 +88,24 @@
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>
     <string name="about_app_title">О приложении</string>
+    <string name="about_links_title">Репозитории</string>
+    <string name="about_link_andro_nsz">Andro-NSZ (Android порт)</string>
+    <string name="about_link_nsz">nsz (оригинальная утилита)</string>
     
     <string name="about_what_is_title">Что это за приложение?</string>
-    <string name="about_what_is_content">Andro-NSZ — это Android-приложение для распаковки сжатых файлов, некоторых форматов. Оно конвертирует их, используя нативный C-движок для высокой производительности.</string>
+    <string name="about_what_is_content">Andro-NSZ — это Android-приложение для распаковки сжатых файлов специальных форматов. Оно конвертирует их, используя нативный C-движок для высокой производительности.</string>
     
     <string name="about_formats_title">Поддерживаемые форматы</string>
-    <string name="about_formats_content">Приложение поддерживает два типа сжатых файлов Nintendo Switch:</string>
+    <string name="about_formats_content">Приложение распаковывает сжатые файлы в стандартные форматы:</string>
     
-    <string name="about_nsz_description">Сжатые пакеты Nintendo Switch (digital downloads)</string>
-    <string name="about_xcz_description">Сжатые образы картриджей Nintendo Switch (cartridge dumps)</string>
+    <string name="about_nsz_description">Сжатые пакеты NSZ → стандартные пакеты NSP</string>
+    <string name="about_xcz_description">Сжатые образы XCZ → стандартные образы XCI</string>
     
     <string name="about_how_works_title">Как это работает</string>
     <string name="about_how_works_content">Приложение использует алгоритм Zstandard для декомпрессии сжатых NCZ файлов внутри контейнеров NSZ/XCZ. После декомпрессии файлы повторно шифруются с помощью AES-CTR и сохраняются в стандартном формате NSP/XCI.\n\nВы можете конвертировать отдельные файлы или целые папки, сохраняя структуру каталогов.</string>
     
     <string name="about_requirements_title">Требования</string>
-    <string name="about_requirements_content">Для правильной работы требуется файл prod.keys, содержащий ключи шифрования Nintendo Switch. Вы можете установить его через меню приложения.\n\nБез prod.keys приложение всё равно выполнит конвертацию, но пропустит этап верификации.</string>
+    <string name="about_requirements_content">Для правильной работы требуется файл prod.keys, содержащий криптографические ключи. Вы можете установить его через меню приложения.\n\nБез prod.keys приложение всё равно выполнит конвертацию, но пропустит этап верификации.</string>
     
     <string name="about_credits_title">Авторство</string>
     <string name="about_credits_content">Основано на оригинальной утилите nsz от nicoboss.\n\nAndro-NSZ — Android-порт с нативным C-движком для мобильных устройств.</string>
