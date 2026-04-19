@@ -8,11 +8,26 @@ Port of the original [nicoboss/nsz](https://github.com/nicoboss/nsz) with:
 
 The app is being developed using vibe coding. I am not a programmer and I am not familiar with Android and C, so it would be very nice if experienced developers checked the correctness of the project. I try to make the project as consistent and compatible as possible with the original [nicoboss/nsz](https://github.com/nicoboss/nsz ).
 
-## Legal
-- This project does NOT incorporate any copyrighted material such as cryptographic keys. All keys must be provided by the user.
-- This project does NOT circumvent any technological protection measures. The NSZ file format purposely keeps all technological protection measures in place.
-- This project shall only be used for legally purchased games.
-- This project is MIT licensed. Check [LICENSE](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/blob/main/LICENSE) for more information.
+## Legal Notice
+
+**Important Information:**
+
+1. **No Copyrighted Material**: This software does NOT contain, distribute, or incorporate any copyrighted Nintendo content, game files, encryption keys, or proprietary firmware.
+
+2. **Technology Protection Measures**: This tool does NOT circumvent, remove, or bypass any technological protection measures. It processes files that users already possess and have legal rights to use.
+
+3. **User Responsibility**: Users are solely responsible for:
+   - Obtaining their own `prod.keys` file legally from their own Nintendo Switch console
+   - Ensuring they have legal rights to possess and process any game files
+   - Complying with all applicable laws and terms of service in their jurisdiction
+
+4. **Educational Purpose**: This software is provided for educational and archival purposes, enabling users to manage their legally owned game backups.
+
+5. **This project is MIT licensed.** Check [LICENSE](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/blob/main/LICENSE) for more information.
+
+6. **No Warranty**: This software is provided "as is" without warranty of any kind. Use at your own risk.
+
+**prod.keys Disclaimer:** The `prod.keys` file must be obtained from YOUR OWN Nintendo Switch console using legal homebrew tools. This app does not provide, generate, or help obtain encryption keys. Distribution of prod.keys files is illegal and violates Nintendo's intellectual property rights.
 
 ## Overview
 
@@ -41,7 +56,6 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 - **Material 3 Design**: Modern Android UI with dynamic colors
 - **Touch-Optimized**: Gesture-friendly interface for mobile devices
 - **Multi-Language**: English and Russian localizations
-- **Edge-to-Edge**: Immersive full-screen experience
 - **Dark/Light Theme**: Follows system theme automatically
 
 ### Technical Features
@@ -56,7 +70,7 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 
 ## Requirements
 
-- **Android 12+** (API level 31 or higher)
+- **Android 12+** (API level 31 or higher) - It may be lowered in the future. Or it won't be. I'm not sure about that yet.
 - **Device Storage**: Sufficient space for output files (NSP/XCI sizes equal to original uncompressed size)
 - **prod.keys File**:
   - Required for NCA verification after conversion
@@ -67,25 +81,16 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 1. Download the latest APK from the [Releases](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/releases) page
 2. Enable "Install from Unknown Sources" in Android settings if needed
 3. Install the APK
-4. (Optional) Install your `prod.keys` file via the app menu for verification support
+4. Install your `prod.keys` file via the app menu for verification support
 
 **First-time Setup:**
 - On first launch, grant file access permissions when prompted
-- Use the overflow menu (⋮) to install prod.keys if you have it
+- Use the overflow menu (⋮) to install prod.keys
 - Select your conversion mode and start processing files
 
 ## Usage
 
-### Mode 1: Legacy Single File
-Perfect for quick one-off conversions.
-
-1. Launch the app and select "Legacy Single File" mode
-2. Tap "Select file" and choose an NSZ or XCZ file
-3. Tap "Convert" button
-4. Wait for conversion to complete
-5. Output saved to Downloads folder
-
-### Mode 2: Batch Conversion
+### Mode 1: Single File/Batch Conversion
 Process multiple files in sequence with cumulative progress.
 
 1. Select "Batch Multiple Files" mode
@@ -95,7 +100,7 @@ Process multiple files in sequence with cumulative progress.
 5. Monitor per-file and overall progress
 6. Files are converted sequentially, status updates in real-time
 
-### Mode 3: Folder Mode
+### Mode 2: Folder Mode
 Recursively process entire folders while preserving structure.
 
 1. Select "Folder Processing" mode
@@ -107,18 +112,6 @@ Recursively process entire folders while preserving structure.
 7. Non-game files are copied as-is
 8. Conversion summary displayed at completion
 9. Debug log saved to `nsz_folder_debug.log`
-
-### prod.keys Management
-
-**Installing prod.keys:**
-1. Open overflow menu (⋮) from main screen
-2. Select "Install prod.keys"
-3. Browse to your prod.keys file
-4. File is copied to app's private storage
-
-**Changing or Removing:**
-- Use "Change prod.keys" to select a different file
-- Use "Remove prod.keys" to delete the installed keys
 
 ## Technical Details
 
@@ -200,8 +193,7 @@ Recursively process entire folders while preserving structure.
 
 **Typical Performance:**
 - Speed varies by device CPU and file compression ratio
-- Modern ARM64 devices: 50-150 MB/s typical
-- Older ARM32 devices: 20-50 MB/s typical
+- Snapdragon 8s gen 4 - 30-40 MB/s
 - Storage I/O is often the bottleneck, not CPU
 
 ## Building from Source
@@ -299,25 +291,6 @@ To force native rebuild:
 - **Zstd Algorithm**: Same decompression logic
 - **Encryption Handling**: Identical AES-CTR/XTS implementation
 - **Verification**: Same SHA-256 validation approach
-
-## Legal Notice
-
-**Important Information:**
-
-1. **No Copyrighted Material**: This software does NOT contain, distribute, or incorporate any copyrighted Nintendo content, game files, encryption keys, or proprietary firmware.
-
-2. **Technology Protection Measures**: This tool does NOT circumvent, remove, or bypass any technological protection measures. It processes files that users already possess and have legal rights to use.
-
-3. **User Responsibility**: Users are solely responsible for:
-   - Obtaining their own `prod.keys` file legally from their own Nintendo Switch console
-   - Ensuring they have legal rights to possess and process any game files
-   - Complying with all applicable laws and terms of service in their jurisdiction
-
-4. **Educational Purpose**: This software is provided for educational and archival purposes, enabling users to manage their legally owned game backups.
-
-5. **No Warranty**: This software is provided "as is" without warranty of any kind. Use at your own risk.
-
-**prod.keys Disclaimer:** The `prod.keys` file must be obtained from YOUR OWN Nintendo Switch console using legal homebrew tools. This app does not provide, generate, or help obtain encryption keys. Distribution of prod.keys files is illegal and violates Nintendo's intellectual property rights.
 
 ## Credits
 
