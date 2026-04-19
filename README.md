@@ -37,6 +37,43 @@ The app is being developed using vibe coding. I am not a programmer and I am not
 
 The app uses **Zstandard (zstd)** compression algorithm for lossless decompression, preserving all encryption structures while maintaining file integrity. Built with Jetpack Compose and Material 3 for a modern Android experience, powered by a native C engine via JNI for optimal performance.
 
+## Installation
+
+1. Download the latest APK from the [Releases](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/releases) page
+2. Enable "Install from Unknown Sources" in Android settings if needed
+3. Install the APK
+4. Install your `prod.keys` file via the app menu for verification support
+
+**First-time Setup:**
+- On first launch, grant file access permissions when prompted
+- Use the overflow menu (⋮) to install prod.keys
+- Select your conversion mode and start processing files
+
+## Usage
+
+### Mode 1: Single File/Batch Conversion
+Process multiple files in sequence with cumulative progress.
+
+1. Select "Batch Multiple Files" mode
+2. Tap "Add files" and select multiple NSZ/XCZ files
+3. Review the queue (remove unwanted files with × button)
+4. Tap "Convert X file(s)" to start
+5. Monitor per-file and overall progress
+6. Files are converted sequentially, status updates in real-time
+
+### Mode 2: Folder Mode
+Recursively process entire folders while preserving structure.
+
+1. Select "Folder Processing" mode
+2. Tap "Select folder" and choose a folder containing NSZ/XCZ files
+3. Wait for folder scanning to complete
+4. Review detected files and folder structure
+5. Tap "Convert folder" to start
+6. Output saved to `Original_unpacked/` in Downloads (auto-numbered if exists)
+7. Non-game files are copied as-is
+8. Conversion summary displayed at completion
+9. Debug log saved to `nsz_folder_debug.log`
+
 ## Features
 
 ### Core Functionality
@@ -75,43 +112,6 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 - **prod.keys File**:
   - Required for NCA verification after conversion
   - Must be legally obtained from your own console
-
-## Installation
-
-1. Download the latest APK from the [Releases](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/releases) page
-2. Enable "Install from Unknown Sources" in Android settings if needed
-3. Install the APK
-4. Install your `prod.keys` file via the app menu for verification support
-
-**First-time Setup:**
-- On first launch, grant file access permissions when prompted
-- Use the overflow menu (⋮) to install prod.keys
-- Select your conversion mode and start processing files
-
-## Usage
-
-### Mode 1: Single File/Batch Conversion
-Process multiple files in sequence with cumulative progress.
-
-1. Select "Batch Multiple Files" mode
-2. Tap "Add files" and select multiple NSZ/XCZ files
-3. Review the queue (remove unwanted files with × button)
-4. Tap "Convert X file(s)" to start
-5. Monitor per-file and overall progress
-6. Files are converted sequentially, status updates in real-time
-
-### Mode 2: Folder Mode
-Recursively process entire folders while preserving structure.
-
-1. Select "Folder Processing" mode
-2. Tap "Select folder" and choose a folder containing NSZ/XCZ files
-3. Wait for folder scanning to complete
-4. Review detected files and folder structure
-5. Tap "Convert folder" to start
-6. Output saved to `Original_unpacked/` in Downloads (auto-numbered if exists)
-7. Non-game files are copied as-is
-8. Conversion summary displayed at completion
-9. Debug log saved to `nsz_folder_debug.log`
 
 ## Technical Details
 
