@@ -2,11 +2,17 @@
 or **Andro-NSZ** for short
 
 Native Android unpacker for compressed NSZ/XCZ files.  
-Port of the original [nicoboss/nsz](https://github.com/nicoboss/nsz ) with:
+Port of the original [nicoboss/nsz](https://github.com/nicoboss/nsz) with:
 - Native C engine for high performance
 - And GUI interface, tailored to the convenience on Android.
 
 The app is being developed using vibe coding. I am not a programmer and I am not familiar with Android and C, so it would be very nice if experienced developers checked the correctness of the project. I try to make the project as consistent and compatible as possible with the original [nicoboss/nsz](https://github.com/nicoboss/nsz ).
+
+## Legal
+- This project does NOT incorporate any copyrighted material such as cryptographic keys. All keys must be provided by the user.
+- This project does NOT circumvent any technological protection measures. The NSZ file format purposely keeps all technological protection measures in place.
+- This project shall only be used for legally purchased games.
+- This project is MIT licensed. Check [LICENSE](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/blob/main/LICENSE) for more information.
 
 ## Overview
 
@@ -52,10 +58,9 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 
 - **Android 12+** (API level 31 or higher)
 - **Device Storage**: Sufficient space for output files (NSP/XCI sizes equal to original uncompressed size)
-- **prod.keys File** (optional but recommended): Contains Nintendo Switch decryption keys
+- **prod.keys File**:
   - Required for NCA verification after conversion
-  - Conversion works without it, but verification will be skipped
-  - Must be legally obtained from your own Nintendo Switch console
+  - Must be legally obtained from your own console
 
 ## Installation
 
@@ -114,12 +119,6 @@ Recursively process entire folders while preserving structure.
 **Changing or Removing:**
 - Use "Change prod.keys" to select a different file
 - Use "Remove prod.keys" to delete the installed keys
-
-**What is prod.keys?**
-- Contains Nintendo Switch system decryption keys
-- Must include `header_key` line for NCA verification
-- File format: `key_name = hex_value` (one per line)
-- Must be legally obtained from your own console
 
 ## Technical Details
 
@@ -338,6 +337,7 @@ To force native rebuild:
 
 **Special Thanks:**
 - The Nintendo Switch homebrew community
+- To all participants of the project [nicoboss/nsz](https://github.com/nicoboss/nsz)
 - All contributors and testers
 
 ## Changelog
@@ -359,5 +359,3 @@ To force native rebuild:
 This project is open source. License information to be determined.
 
 ---
-
-**Made with ❤️ for the Nintendo Switch community**
