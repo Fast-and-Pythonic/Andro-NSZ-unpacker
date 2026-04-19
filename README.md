@@ -1,10 +1,12 @@
-# AndroNSZ
+# Andro-NSZ-unpacker
 
-Native Android unpacker for compressed Nintendo Switch game files. A full-featured port of [nicoboss/nsz](https://github.com/nicoboss/nsz) with a modern touch-friendly interface and native C engine for high performance.
+Native Android unpacker for compressed NSZ/XCZ files. A port of [nicoboss/nsz](https://github.com/nicoboss/nsz) with a modern touch-friendly interface and native C engine for high performance.
+
+The app is being developed using vibe coding. I am not a programmer and I am not familiar with Android and C, so it would be very nice if experienced developers checked the correctness of the project. I try to make the project as consistent and compatible as possible with the original [nicoboss/nsz](https://github.com/nicoboss/nsz ).
 
 ## Overview
 
-**AndroNSZ** converts compressed Nintendo Switch files to standard formats:
+**AndroNSZ** converts compressed files to standard formats:
 - **NSZ → NSP** (compressed packages to standard packages)
 - **XCZ → XCI** (compressed cartridge images to standard images)
 
@@ -13,7 +15,7 @@ The app uses **Zstandard (zstd)** compression algorithm for lossless decompressi
 ## Features
 
 ### Core Functionality
-- **NSZ → NSP Conversion**: Decompress compressed game packages with full NCA support
+- **NSZ → NSP Conversion**: Decompress compressed packages with full NCA support
 - **XCZ → XCI Conversion**: Decompress compressed cartridge images
 - **Three Conversion Modes**:
   - **Legacy Single File**: Quick one-file conversion
