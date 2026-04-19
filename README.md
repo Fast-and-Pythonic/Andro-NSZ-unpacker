@@ -1,7 +1,10 @@
 # Andro-NSZ-unpacker
 or **Andro-NSZ** for short
 
-Native Android unpacker for compressed NSZ/XCZ files. A port of [nicoboss/nsz](https://github.com/nicoboss/nsz) with a modern touch-friendly interface and native C engine for high performance.
+Native Android unpacker for compressed NSZ/XCZ files.
+Port of the original [nicoboss/nsz](https://github.com/nicoboss/nsz ) with:
+- Native C engine for high performance
+- And GUI interface, tailored to the convenience on Android.
 
 The app is being developed using vibe coding. I am not a programmer and I am not familiar with Android and C, so it would be very nice if experienced developers checked the correctness of the project. I try to make the project as consistent and compatible as possible with the original [nicoboss/nsz](https://github.com/nicoboss/nsz ).
 
