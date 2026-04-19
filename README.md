@@ -8,27 +8,6 @@ Port of the original [nicoboss/nsz](https://github.com/nicoboss/nsz) with:
 
 The app is being developed using vibe coding. I am not a programmer and I am not familiar with Android and C, so it would be very nice if experienced developers checked the correctness of the project. I try to make the project as consistent and compatible as possible with the original [nicoboss/nsz](https://github.com/nicoboss/nsz ).
 
-## Legal Notice
-
-**Important Information:**
-
-1. **No Copyrighted Material**: This software does NOT contain, distribute, or incorporate any copyrighted Nintendo content, game files, encryption keys, or proprietary firmware.
-
-2. **Technology Protection Measures**: This tool does NOT circumvent, remove, or bypass any technological protection measures. It processes files that users already possess and have legal rights to use.
-
-3. **User Responsibility**: Users are solely responsible for:
-   - Obtaining their own `prod.keys` file legally from their own Nintendo Switch console
-   - Ensuring they have legal rights to possess and process any game files
-   - Complying with all applicable laws and terms of service in their jurisdiction
-
-4. **Educational Purpose**: This software is provided for educational and archival purposes, enabling users to manage their legally owned game backups.
-
-5. **This project is MIT licensed.** Check [LICENSE](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/blob/main/LICENSE) for more information.
-
-6. **No Warranty**: This software is provided "as is" without warranty of any kind. Use at your own risk.
-
-**prod.keys Disclaimer:** The `prod.keys` file must be obtained from YOUR OWN Nintendo Switch console using legal homebrew tools. This app does not provide, generate, or help obtain encryption keys. Distribution of prod.keys files is illegal and violates Nintendo's intellectual property rights.
-
 ## Overview
 
 **AndroNSZ** converts compressed files to standard formats:
@@ -73,6 +52,27 @@ Recursively process entire folders while preserving structure.
 7. Non-game files are copied as-is
 8. Conversion summary displayed at completion
 9. Debug log saved to `nsz_folder_debug.log`
+
+## Legal Notice
+
+**Important Information:**
+
+1. **No Copyrighted Material**: This software does NOT contain, distribute, or incorporate any copyrighted Nintendo content, game files, encryption keys, or proprietary firmware.
+
+2. **Technology Protection Measures**: This tool does NOT circumvent, remove, or bypass any technological protection measures. It processes files that users already possess and have legal rights to use.
+
+3. **User Responsibility**: Users are solely responsible for:
+   - Obtaining their own `prod.keys` file legally from their own Nintendo Switch console
+   - Ensuring they have legal rights to possess and process any game files
+   - Complying with all applicable laws and terms of service in their jurisdiction
+
+4. **Educational Purpose**: This software is provided for educational and archival purposes, enabling users to manage their legally owned game backups.
+
+5. **This project is MIT licensed.** Check [LICENSE](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/blob/main/LICENSE) for more information.
+
+6. **No Warranty**: This software is provided "as is" without warranty of any kind. Use at your own risk.
+
+**prod.keys Disclaimer:** The `prod.keys` file must be obtained from YOUR OWN Nintendo Switch console using legal homebrew tools. This app does not provide, generate, or help obtain encryption keys. Distribution of prod.keys files is illegal and violates Nintendo's intellectual property rights.
 
 ## Features
 
@@ -298,23 +298,3 @@ To force native rebuild:
 - The Nintendo Switch homebrew community
 - To all participants of the project [nicoboss/nsz](https://github.com/nicoboss/nsz)
 - All contributors and testers
-
-## Changelog
-
-### Version 1.0.0
-- ✅ NSZ → NSP conversion support
-- ✅ XCZ → XCI conversion support
-- ✅ Three conversion modes (single file, batch, folder)
-- ✅ NCA verification with prod.keys
-- ✅ Real-time progress with speed metrics
-- ✅ Multi-language support (English, Russian)
-- ✅ Material 3 design
-- ✅ Folder structure preservation
-- ✅ Error resilience in batch processing
-- ✅ Debug logging for troubleshooting
-
-## License
-
-This project is open source. License information to be determined.
-
----
