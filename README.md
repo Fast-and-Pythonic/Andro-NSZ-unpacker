@@ -263,24 +263,10 @@ To force native rebuild:
 
 ## Comparison with Original NSZ
 
-### Advantages of Android Port
-
-| Feature | Original NSZ | AndroNSZ |
-|---------|-------------|----------|
-| **Platform** | Windows/Linux/macOS | Android 12+ |
-| **Interface** | Command-line + optional GUI | Native Material 3 UI |
-| **Batch Processing** | Via CLI arguments | Visual queue with status tracking |
-| **Folder Mode** | Basic directory processing | Recursive with structure preview |
-| **Progress Display** | Text-based percentage | Real-time bars + speed metrics |
-| **Cancellation** | Ctrl+C interrupt | UI button with instant response |
-| **Multi-language** | English only | English + Russian (extensible) |
-| **Error Handling** | Stops on first error | Continues batch, logs all errors |
-| **Keys Management** | Manual file placement | Built-in installer via file picker |
-| **Portability** | Requires Python + dependencies | Self-contained APK |
-
 ### What's Different
 
-- **No Compression**: AndroNSZ only **decompresses** (NSZ→NSP, XCZ→XCI). For compression (NSP→NSZ), use the original nsz tool on desktop.
+- **No Compression**: AndroNSZ only **decompresses** (NSZ→NSP, XCZ→XCI). For compression (NSP→NSZ), use the original nsz tool on desktop.  
+  (This restriction is temporary. It is not yet completely certain that the application packages data completely correctly, like the original nicoboss/nsz. So far, this is exactly the unpacker. I don't know if the packaging will be added in the future.)
 - **Mobile-Optimized**: Designed for touchscreens and mobile workflows.
 - **Native Performance**: C engine built with Android NDK, not Python.
 - **Simplified**: No advanced options like custom compression levels or multi-threaded compression (since we only decompress).
