@@ -1,5 +1,11 @@
 package com.androNSZ.model
 
+enum class FileOperationType {
+    NSZ_CONVERSION,  // NSZ → NSP
+    XCZ_CONVERSION,  // XCZ → XCI
+    FILE_COPY        // Обычное копирование
+}
+
 sealed class FileConversionResult {
     abstract val fileName: String
 
@@ -7,14 +13,16 @@ sealed class FileConversionResult {
         override val fileName: String,
         val outputName: String,
         val sizeBytes: Long,
-        val durationMs: Long
+        val durationMs: Long,
+        val operationType: FileOperationType
     ) : FileConversionResult()
 
     data class Failed(
         override val fileName: String,
         val errorCode: Int,
         val errorMessage: String,
-        val sizeBytes: Long
+        val sizeBytes: Long,
+        val operationType: FileOperationType
     ) : FileConversionResult()
 
     data class Skipped(
@@ -31,7 +39,16 @@ data class FolderConversionSummary(
     val skippedCount: Int,
     val results: List<FileConversionResult>,
     val totalDurationMs: Long,
-    val totalBytesProcessed: Long
+    val totalBytesProcessed: Long,
+    // Детальная статистика по типам операций
+    val nszSuccessCount: Int,
+    val nszFailedCount: Int,
+    val xczSuccessCount: Int,
+    val xczFailedCount: Int,
+    val xczFilesProcessed: Int,
+    val copySuccessCount: Int,
+    val copyFailedCount: Int,
+    val copyFilesProcessed: Int
 )
 
 data class FolderProgressUpdate(

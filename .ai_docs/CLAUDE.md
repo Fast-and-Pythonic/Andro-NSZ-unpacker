@@ -39,7 +39,7 @@ Kotlin/Compose UI + native C engine via JNI. The nicoboss/nsz Python reference p
 
 ✅ **Correct:**
 ```kotlin
-// Update progress bar every 250ms (4 times per second)
+// Update progress bar every 100ms (10 times per second)
 if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
     statusCallback?.onStatus("NSZ", "Starting conversion...")
 }

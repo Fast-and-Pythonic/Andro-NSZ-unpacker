@@ -36,6 +36,8 @@ Android автоматически выбирает правильный фай�
 <string name="action_select_folder">Select folder</string>
 <string name="action_convert">Convert</string>
 <string name="action_cancel">Cancel</string>
+<string name="action_settings">Settings</string>
+<string name="action_change_output_folder">Change output folder</string>
 ```
 
 ### `label_*` — Метки полей
@@ -69,6 +71,29 @@ Android автоматически выбирает правильный фай�
 <string name="format_files_queued">Files queued: %d</string>
 <string name="format_file_n_of_m">File %1$d of %2$d</string>
 <string name="format_files_processed">Files: %1$d / %2$d</string>
+```
+
+### `settings_*` — Экран настроек
+```xml
+<string name="settings_title">Settings</string>
+<string name="settings_stats_format">Final statistics format</string>
+<string name="settings_language">App language</string>
+<string name="stats_format_compact">Compact</string>
+<string name="stats_format_detailed">Detailed</string>
+<string name="language_system">System default</string>
+<string name="language_english">English</string>
+<string name="language_russian">Russian</string>
+```
+
+### `stats_*` — Статистика обработки папки
+```xml
+<string name="stats_title">Processing Statistics</string>
+<string name="stats_all_files">Total files processed:</string>
+<string name="stats_success">✅ Successful: %1$d of %2$d</string>
+<string name="stats_failed">❌ Failed: %1$d of %2$d</string>
+<string name="stats_nsz_conversion">NSZ files decompressed:</string>
+<string name="stats_xcz_conversion">XCZ files decompressed:</string>
+<string name="stats_files_copied">Files copied:</string>
 ```
 
 ### `cd_*` — Content Descriptions (для accessibility)
@@ -241,46 +266,57 @@ stringResource(R.string.format_progress, 5, 10)
 
 1. `app/src/main/java/com/androNSZ/ui/screen/ConversionScreen.kt`
    - Заголовок приложения
-   - Меню настроек
+   - Меню (настройки, смена папки вывода)
 
 2. `app/src/main/java/com/androNSZ/ui/screen/ModeSelectionScreen.kt`
    - Выбор режима работы
    - Предупреждение о prod.keys
+   - Меню (настройки, смена папки вывода)
 
-3. `app/src/main/java/com/androNSZ/ui/conversion/SingleFilesUI.kt`
+3. `app/src/main/java/com/androNSZ/ui/screen/SettingsScreen.kt`
+   - Выбор формата статистики (Compact / Detailed)
+   - Выбор языка приложения (System / English / Russian)
+
+4. `app/src/main/java/com/androNSZ/ui/screen/AboutScreen.kt`
+   - Все разделы информации о приложении
+
+5. `app/src/main/java/com/androNSZ/ui/conversion/SingleFilesUI.kt`
    - UI для режима нескольких файлов
    - Кнопки, статусы, прогресс
 
-4. `app/src/main/java/com/androNSZ/ui/conversion/FolderModeUI.kt`
+6. `app/src/main/java/com/androNSZ/ui/conversion/FolderModeUI.kt`
    - UI для режима папки
    - Информация о структуре папки
 
-5. `app/src/main/java/com/androNSZ/ui/conversion/LegacySingleFileUI.kt`
+7. `app/src/main/java/com/androNSZ/ui/conversion/LegacySingleFileUI.kt`
    - Legacy UI для одного файла
    - Кнопки конвертации
 
-6. `app/src/main/java/com/androNSZ/ui/components/StatusLogPanel.kt`
+8. `app/src/main/java/com/androNSZ/ui/components/StatusLogPanel.kt`
    - Панель логов (показать/скрыть)
 
 ### ViewModel (использует context.getString)
 
-7. `app/src/main/java/com/androNSZ/viewmodel/MainViewModel.kt`
+9. `app/src/main/java/com/androNSZ/viewmodel/MainViewModel.kt`
    - Сообщения об ошибках
    - Статусы конвертации
-   - Результаты обработки
+   - Результаты обработки (включая статистику по типам операций)
 
 ## Общее количество строк
 
-**~60 строк** организовано в категории:
-- 2 строки приложения
-- 16 строк действий
-- 5 строк меток
-- 9 строк сообщений
-- 6 строк статусов
-- 6 строк ошибок
-- 11 строк форматирования
+**~134 строки** организовано в категории:
+- 2 строки приложения (`app_*`)
+- 18 строк действий (`action_*`)
+- 5 строк меток (`label_*`)
+- 9 строк сообщений (`msg_*`)
+- 6 строк статусов (`status_*`)
+- 6 строк ошибок (`error_*`)
+- 11 строк форматирования (`format_*`)
 - 2 строки результатов
-- 2 content descriptions
+- 2 content descriptions (`cd_*`)
+- 9 строк настроек (`settings_*` + `stats_format_*` + `language_*`)
+- 7 строк статистики папки (`stats_*`)
+- ~57 строк экрана About
 
 ## Особенности реализации
 
@@ -356,3 +392,10 @@ statusMessage = context.getString(R.string.error_general, errorMsg) + logSuffix
 - Организованы категории (app_, action_, label_, msg_, status_, error_, format_)
 - Добавлена поддержка русского языка
 - Обновлены все UI компоненты и ViewModel
+
+**2026-04-28:** Расширение до ~134 строк
+- Добавлены строки экрана настроек (`settings_*`, `stats_format_*`, `language_*`)
+- Добавлены строки статистики папки (`stats_*`)
+- Добавлены `action_settings`, `action_change_output_folder`
+- Полная локализация `AboutScreen` и `SettingsScreen`
+- Обновлён список файлов с локализацией

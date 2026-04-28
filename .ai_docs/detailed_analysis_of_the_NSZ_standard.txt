@@ -292,10 +292,13 @@ Size Constants:
 • Alignment: 0x20 bytes (for string tables)
 File Detection:
 • .ncz = compressed NCA
+
 • .nsz = NSP with compressed NCAs
 • .xcz = XCI with compressed NCAs
+
 • .nsp = uncompressed NSP
 • .xci = uncompressed XCI
+
 Cryptographic Operations:
 • NCA header encrypted with AES-XTS (header key from Keys.txt)
 • Section keys unwrapped using area keys

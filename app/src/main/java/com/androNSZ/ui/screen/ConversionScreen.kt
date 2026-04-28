@@ -4,8 +4,10 @@ import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
@@ -25,7 +27,9 @@ fun ConversionScreen(
    vm: MainViewModel,
    onBackToModeSelection: () -> Unit,
    onInstallKeys: () -> Unit,
-   onNavigateToAbout: () -> Unit
+   onNavigateToAbout: () -> Unit,
+   onNavigateToSettings: () -> Unit,
+   onChangeOutputFolder: () -> Unit
 ) {
    // Обработка системной кнопки "назад"
    BackHandler(enabled = !vm.isConverting) {
@@ -80,6 +84,33 @@ fun ConversionScreen(
                         }
                      )
                      HorizontalDivider()
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_change_output_folder)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onChangeOutputFolder()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.FolderOpen,
+                              contentDescription = null
+                           )
+                        }
+                     )
+                     HorizontalDivider()
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_settings)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onNavigateToSettings()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.Settings,
+                              contentDescription = null
+                           )
+                        }
+                     )
                      DropdownMenuItem(
                         text = { Text(stringResource(R.string.action_about_app)) },
                         onClick = {

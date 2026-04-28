@@ -10,6 +10,7 @@ import androidx.lifecycle.viewModelScope
 import com.androNSZ.Constants
 import com.androNSZ.R
 import com.androNSZ.NszConverter
+import com.androNSZ.data.SettingsRepository
 import com.androNSZ.fs.FolderLogWriter
 import com.androNSZ.fs.FolderScanner
 import com.androNSZ.fs.FolderProcessor
@@ -26,7 +27,12 @@ import kotlinx.coroutines.withContext
 class MainViewModel : ViewModel() {
 
    // Navigation & Mode
-   var currentScreen by mutableStateOf<Screen>(Screen.ModeSelection)
+   private val _screenStack = mutableStateListOf<Screen>(Screen.ModeSelection)
+   val currentScreen: Screen get() = _screenStack.last()
+
+   fun navigateTo(screen: Screen) { _screenStack.add(screen) }
+   fun navigateBack() { if (_screenStack.size > 1) _screenStack.removeLast() }
+
    var conversionMode by mutableStateOf<ConversionMode>(ConversionMode.None)
 
    // Single file mode (legacy)
@@ -59,6 +65,11 @@ class MainViewModel : ViewModel() {
    var keysInstalled by mutableStateOf(false)
    val statusLog = mutableStateListOf<LogEntry>()
 
+   // Settings
+   var statsFormat by mutableStateOf(StatsFormat.DETAILED)
+   var outputFolderUri by mutableStateOf<Uri?>(null)
+   var appLanguage by mutableStateOf("system")
+
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
    }
@@ -67,6 +78,44 @@ class MainViewModel : ViewModel() {
       viewModelScope.launch {
          KeysManager.installFromUri(context, uri)
          keysInstalled = KeysManager.isInstalled(context)
+      }
+   }
+
+   fun loadSettings(context: android.content.Context) {
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).statsFormatFlow.collect {
+            statsFormat = it
+         }
+      }
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).outputFolderUriFlow.collect {
+            outputFolderUri = it
+         }
+      }
+      appLanguage = SettingsRepository.getInstance(context).getLanguage()
+   }
+
+   fun saveLanguage(context: android.content.Context, lang: String) {
+      SettingsRepository.getInstance(context).saveLanguage(lang)
+      appLanguage = lang
+   }
+
+   fun saveOutputFolder(context: android.content.Context, uri: Uri) {
+      context.contentResolver.takePersistableUriPermission(
+         uri,
+         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+         android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+      )
+      outputFolderUri = uri
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).saveOutputFolderUri(uri)
+      }
+   }
+
+   fun saveStatsFormat(context: android.content.Context, format: StatsFormat) {
+      statsFormat = format
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).saveStatsFormat(format)
       }
    }
 
@@ -385,6 +434,7 @@ class MainViewModel : ViewModel() {
                context,
                structure,
                headerKey,
+               outputFolderUri,
                { update ->
                   folderOverallProgress = update.overallProgress
                   folderCurrentFileProgress = update.currentFileProgress
@@ -404,25 +454,15 @@ class MainViewModel : ViewModel() {
             val logPathMsg = if (folderLogPath != null) "\n${context.getString(R.string.format_log_path, folderLogPath!!)}" else ""
 
             result.onSuccess { (outputUri, summary) ->
-               val successRate = if (summary.nszFilesProcessed > 0) {
-                  (summary.successCount * 100) / summary.nszFilesProcessed
+               val successRate = if (summary.totalFiles > 0) {
+                  (summary.successCount * 100) / summary.totalFiles
                } else 100
 
                isSuccess = summary.successCount > 0 && successRate >= 50
 
-               statusMessage = buildString {
-                  appendLine(context.getString(R.string.label_folder_processed))
-                  appendLine()
-                  appendLine(context.getString(R.string.format_success_rate, summary.successCount, summary.nszFilesProcessed, "$successRate%"))
-
-                  if (summary.failedCount > 0) {
-                     appendLine(context.getString(R.string.format_failed_count, summary.failedCount))
-                     appendLine(context.getString(R.string.msg_see_log_details))
-                  }
-
-                  appendLine()
-                  appendLine(context.getString(R.string.msg_saved_to_downloads))
-                  append(logPathMsg)
+               statusMessage = when (statsFormat) {
+                  StatsFormat.COMPACT -> buildCompactStats(context, summary, logPathMsg)
+                  StatsFormat.DETAILED -> buildDetailedStats(context, summary, logPathMsg)
                }
             }.onFailure { e ->
                isSuccess = false
@@ -444,5 +484,110 @@ class MainViewModel : ViewModel() {
             withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
          }
       }
+   }
+
+   private fun buildCompactStats(
+      context: android.content.Context,
+      summary: FolderConversionSummary,
+      logPathMsg: String
+   ): String = buildString {
+      appendLine(context.getString(R.string.label_folder_processed))
+      appendLine()
+      appendLine(context.getString(R.string.format_files_completed, summary.successCount, summary.totalFiles))
+      if (summary.failedCount > 0) {
+         appendLine(context.getString(R.string.format_failed_count, summary.failedCount))
+         appendLine(context.getString(R.string.msg_see_log_details))
+      }
+      appendLine()
+      appendLine(context.getString(R.string.msg_saved_to_downloads))
+      append(logPathMsg)
+   }
+
+   private fun buildDetailedStats(
+      context: android.content.Context,
+      summary: FolderConversionSummary,
+      logPathMsg: String
+   ): String = buildString {
+      appendLine(context.getString(R.string.label_folder_processed))
+      appendLine()
+      
+      // === ДЕТАЛЬНАЯ СТАТИСТИКА ===
+      appendLine(context.getString(R.string.stats_title))
+      appendLine("─".repeat(40))
+      appendLine()
+      
+      // 1. Файлов всего
+      appendLine(context.getString(R.string.stats_all_files))
+      appendLine(context.getString(
+         R.string.stats_success, 
+         summary.successCount, 
+         summary.totalFiles
+      ))
+      appendLine(context.getString(
+         R.string.stats_failed,
+         summary.failedCount,
+         summary.totalFiles
+      ))
+      appendLine()
+      
+      // 2. NSZ файлов (если есть)
+      if (summary.nszFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_nsz_conversion))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.nszSuccessCount, 
+            summary.nszFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.nszFailedCount,
+            summary.nszFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      // 3. XCZ файлов (если есть)
+      if (summary.xczFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_xcz_conversion))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.xczSuccessCount, 
+            summary.xczFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.xczFailedCount,
+            summary.xczFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      // 4. Скопированных файлов (если есть)
+      if (summary.copyFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_files_copied))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.copySuccessCount, 
+            summary.copyFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.copyFailedCount,
+            summary.copyFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      appendLine("─".repeat(40))
+      // === КОНЕЦ ДЕТАЛЬНОЙ СТАТИСТИКИ ===
+
+      if (summary.failedCount > 0) {
+         appendLine(context.getString(R.string.format_failed_count, summary.failedCount))
+         appendLine(context.getString(R.string.msg_see_log_details))
+      }
+
+      appendLine()
+      appendLine(context.getString(R.string.msg_saved_to_downloads))
+      append(logPathMsg)
    }
 }

@@ -10,6 +10,7 @@ Kotlin/Compose UI + native C engine via JNI. Port of the Python reference [nicob
 - **Native:** C11, CMake 3.22.1, zstd 1.5.5
 - **Target:** Android API 31+, ARM (arm64-v8a, armeabi-v7a)
 - **Build:** Gradle (Kotlin DSL), compileSdk 36, NDK
+- **Persistence:** DataStore Preferences (`androidx.datastore:datastore-preferences:1.1.1`)
 
 ---
 
@@ -39,28 +40,55 @@ AndroNSZ/
 │       │   ├── nsz_debug.c/.h    # Debug log (file + logcat)
 │       │   └── nsz_types.h       # Types, error codes, callbacks
 │       ├── java/com/androNSZ/    # === Kotlin layer ===
-│       │   ├── MainActivity.kt   # Activity + ViewModel + Compose UI
+│       │   ├── MainActivity.kt   # Activity: locale config + Compose host
 │       │   ├── NszConverter.kt   # JNI wrapper, progress Flow, MediaStore I/O
-│       │   ├── KeysManager.kt    # Installing/checking prod.keys
-│       │   ├── KeysParser.kt     # Parsing header_key from prod.keys
+│       │   ├── Constants.kt      # App-wide constants (progress throttling intervals)
+│       │   ├── data/
+│       │   │   └── SettingsRepository.kt  # DataStore/SharedPrefs settings singleton
 │       │   ├── model/
-│       │   │   └── Screen.kt     # Navigation screens (ModeSelection, Conversion, About)
+│       │   │   ├── Screen.kt              # Navigation screens (sealed class)
+│       │   │   ├── StatsFormat.kt         # Enum: COMPACT / DETAILED
+│       │   │   ├── ConversionMode.kt      # Sealed: None / SingleFiles / FolderMode
+│       │   │   ├── ConversionProgress.kt  # Progress data (done, total, speed)
+│       │   │   ├── FileEntry.kt           # Queue element (uri, name, size, status)
+│       │   │   ├── FolderConversionResult.kt  # Folder processing results and types
+│       │   │   ├── FolderStructure.kt     # Folder scan result (tree, NSZ/XCZ lists)
+│       │   │   ├── LogEntry.kt            # Single log entry (tag, message)
+│       │   │   └── NszExceptions.kt       # Custom exceptions
+│       │   ├── nut/
+│       │   │   ├── KeysManager.kt         # Install/check prod.keys
+│       │   │   └── KeysParser.kt          # Parse header_key from prod.keys
+│       │   ├── fs/
+│       │   │   ├── FolderScanner.kt       # Recursive folder scan (DocumentsContract)
+│       │   │   ├── FolderProcessor.kt     # Batch folder processing with progress
+│       │   │   ├── FolderStructure.kt     # Folder data models (FileNode, File/Directory)
+│       │   │   ├── FolderLogWriter.kt     # Thread-safe log writing
+│       │   │   └── TempFileManager.kt     # Temp file management in cache
 │       │   ├── ui/
 │       │   │   ├── screen/
-│       │   │   │   ├── ModeSelectionScreen.kt  # Mode selection UI
-│       │   │   │   ├── ConversionScreen.kt     # Main conversion UI
-│       │   │   │   ├── AboutScreen.kt          # About app screen
-│       │   │   │   └── AndroNSZApp.kt          # Main navigation
-│       │   │   └── components/   # Reusable UI components
-│       │   ├── fs/
-│       │   │   ├── FolderScanner.kt   # Recursive folder scan (DocumentsContract)
-│       │   │   ├── FolderProcessor.kt # Batch folder processing with progress
-│       │   │   └── FolderStructure.kt # Folder data models (FileNode, File/Directory)
-│       │   └── core/
-│       │       ├── NszConverter.kt     # JNI wrapper, progress Flow, MediaStore I/O
-│       │       ├── KeysManager.kt      # Installing/checking prod.keys
-│       │       ├── KeysParser.kt       # Parsing header_key from prod.keys
-│       │       └── TempFileManager.kt  # Temp file management in cache
+│       │   │   │   ├── AndroNSZApp.kt          # Main navigation root
+│       │   │   │   ├── ModeSelectionScreen.kt  # Mode selection + menu
+│       │   │   │   ├── ConversionScreen.kt     # Conversion UI (routes to sub-UIs)
+│       │   │   │   ├── AboutScreen.kt          # App info
+│       │   │   │   └── SettingsScreen.kt       # Language + stats format settings
+│       │   │   ├── conversion/
+│       │   │   │   ├── LegacySingleFileUI.kt   # Single file UI (legacy/fallback)
+│       │   │   │   ├── SingleFilesUI.kt        # Batch file conversion UI
+│       │   │   │   └── FolderModeUI.kt         # Folder conversion UI with tree
+│       │   │   ├── components/
+│       │   │   │   ├── CompactTopAppBar.kt     # Custom compact top bar
+│       │   │   │   ├── StatusLogPanel.kt       # Collapsible log panel
+│       │   │   │   ├── StatusMessageCard.kt    # Success/error card
+│       │   │   │   └── ToggleButtonDefaults.kt # Toggle button for show/hide
+│       │   │   └── theme/
+│       │   │       ├── Color.kt
+│       │   │       ├── Theme.kt
+│       │   │       └── Type.kt
+│       │   ├── util/
+│       │   │   ├── FileUtils.kt               # File handling utilities
+│       │   │   └── FormatUtils.kt             # Formatting utilities
+│       │   └── viewmodel/
+│       │       └── MainViewModel.kt           # All UI state and conversion logic
 │       └── res/                  # Resources: icons, themes, strings
 ```
 
@@ -75,6 +103,7 @@ sealed class Screen {
     object ModeSelection : Screen()  // Mode selection screen
     object Conversion : Screen()     // Main conversion screen
     object About : Screen()          // About app screen
+    object Settings : Screen()       // App settings screen
 }
 ```
 
@@ -82,73 +111,157 @@ Navigation is state-based via `MainViewModel.currentScreen`.
 
 ### UI Structure
 
-**AndroNSZApp.kt** - Main navigation composable, switches between screens based on `vm.currentScreen`
+**AndroNSZApp.kt** — Main navigation composable. On launch:
+- Calls `vm.checkKeys(context)` and `vm.loadSettings(context)` via `LaunchedEffect`
+- Hosts the `outputFolderPicker` SAF launcher
+- Routes to one of four screens based on `vm.currentScreen`
 
 **Screens:**
-- **ModeSelectionScreen.kt** - Choose between single file or folder mode
-- **ConversionScreen.kt** - Main conversion UI with overflow menu (three dots):
-  - Change/Remove prod.keys
-  - About app (navigates to AboutScreen)
-- **AboutScreen.kt** - Information about the app:
-  - What is this app
-  - Supported formats (NSZ→NSP, XCZ→XCI)
-  - How it works (technical details)
-  - Requirements (prod.keys)
-  - Credits (nicoboss/nsz)
+- **ModeSelectionScreen.kt** — Choose between single file or folder mode. Overflow menu:
+  - Install/Remove prod.keys
+  - Change output folder (SAF folder picker)
+  - Settings → navigates to SettingsScreen
+  - About → navigates to AboutScreen
+- **ConversionScreen.kt** — Main conversion UI. Dynamically renders one of:
+  - `LegacySingleFileUI` (mode = None)
+  - `SingleFilesUI` (mode = SingleFiles)
+  - `FolderModeUI` (mode = FolderMode)
+  - Same overflow menu as ModeSelectionScreen
+- **AboutScreen.kt** — App information: what it is, formats, how it works, requirements, credits
+- **SettingsScreen.kt** — App preferences:
+  - Stats format dropdown: COMPACT / DETAILED (affects final folder conversion report)
+  - Language dropdown: System default / English / Russian
+  - Language change calls `(context as Activity).recreate()` to apply immediately
+
+### Constants.kt
+```kotlin
+const val PROGRESS_BAR_UPDATE_INTERVAL_MS = 100L    // 10 updates/sec — smooth animation
+const val PROGRESS_NUMERIC_UPDATE_INTERVAL_MS = 500L // 2 updates/sec — readable text
+```
 
 ### MainActivity.kt
-The only Activity. Contains `MainViewModel` and hosts `AndroNSZApp` composable.
+The only Activity. Hosts `AndroNSZApp` composable.
 
-**ViewModel — state and logic:**
-- `checkKeys()` / `installKeys()` — prod.keys management
+Key overrides:
+- `attachBaseContext()` — reads language from `SettingsRepository.getLanguage()` and wraps context with the correct `Locale` if not "system". This runs before UI inflation, enabling per-app language without changing system settings.
+- `onCreate()` — calls `TempFileManager.cleanupManagedCache(this)` on startup to remove leftover temp files.
+
+### data/SettingsRepository.kt
+Singleton (`getInstance(context: Context)`). Handles all persistent user settings.
+
+| Setting | Storage | Type |
+|---------|---------|------|
+| `statsFormat` | DataStore Preferences | `Flow<StatsFormat>` |
+| `outputFolderUri` | DataStore Preferences | `Flow<Uri?>` |
+| `language` | SharedPreferences | String (synchronous) |
+
+SharedPreferences is used for `language` specifically because `attachBaseContext()` runs synchronously before coroutines are available.
+
+**Public API:**
+- `getLanguage(): String` — synchronous read ("system" / "en" / "ru")
+- `saveLanguage(lang: String)` — synchronous write
+- `statsFormatFlow: Flow<StatsFormat>` — reactive stats format
+- `outputFolderUriFlow: Flow<Uri?>` — reactive output folder URI
+- `suspend fun saveStatsFormat(format: StatsFormat)`
+- `suspend fun saveOutputFolderUri(uri: Uri?)`
+
+### model/StatsFormat.kt
+```kotlin
+enum class StatsFormat {
+    COMPACT,   // Brief summary
+    DETAILED   // Per-type breakdown (NSZ/XCZ/copy counts)
+}
+```
+
+### MainViewModel.kt
+State and logic hub. State fields:
+- `currentScreen`, `keysInstalled`, `conversionMode` — navigation and mode
+- `statsFormat: StatsFormat` — current stats display format
+- `outputFolderUri: Uri?` — user-selected output folder (null = Downloads)
+- `appLanguage: String` — current language code
+- Conversion state: `isConverting`, `progress`, `statusMessage`, `statusLog`, etc.
+
+Key methods:
+- `checkKeys(context)` / `installKeys(context, uri)` / `deleteKeys(context)` — prod.keys management
+- `loadSettings(context)` — collects flows from SettingsRepository into state fields
+- `saveLanguage(context, lang)` — persists language preference
+- `saveOutputFolder(context, uri)` — persists output folder with persistent SAF permissions
+- `saveStatsFormat(context, format)` — persists stats format
 - `startConversion()` — single file conversion (legacy)
 - `startBatchConversion()` — batch conversion of queued files
-- `selectFolder()` — folder scanning via `FolderScanner`
 - `startFolderConversion()` — folder conversion via `FolderProcessor`
-
-**Key data classes:**
-- `FileEntry` (uri, name, size, status) — queue element
-- `FolderStructure` (rootUri, nszFiles, xczFiles, allFiles, totalSize) — scan result
-- `FileNode` (sealed: File / Directory) — folder tree with isNsz/isXcz flags
-- `ConversionMode` (sealed: None / SingleFiles / FolderMode)
+- `resetConversionState()` — resets all transient conversion state
 
 ### NszConverter.kt
-Singleton wrapper over the native library `libAndroNSZ`.
+Singleton wrapper over `libAndroNSZ`.
 
 **Main methods:**
 - `convert()` — NSZ → NSP conversion
-  - Resolves URI -> path (copies to temp if needed)
-  - Creates output NSP via MediaStore in Downloads
+  - Resolves URI → path (copies to temp if needed)
+  - Creates output NSP via MediaStore in Downloads (or custom `outputFolderUri`)
   - Calls `nativeConvert()`, streams progress via Flow
   - Verifies result via `nativeVerifyNsp()` (if header_key is available)
   - Cleans up temp files
 
 - `convertXcz()` — XCZ → XCI conversion
-  - Same flow as NSZ, but outputs XCI format
+  - Same flow as above, outputs XCI format
   - Calls `nativeConvertXcz()` JNI method
   - Uses HFS0 container parsing instead of PFS0
 
-### KeysManager.kt
+### nut/KeysManager.kt
 Stores `prod.keys` in `context.filesDir`. Methods: `isInstalled()`, `installFromUri()`, `deleteKeys()`.
 
-### KeysParser.kt
-Parses the prod.keys file, extracts `header_key` (32 bytes) from the line `header_key = <hex>`.
+### nut/KeysParser.kt
+Parses the prod.keys file, extracts `header_key` (32 bytes) from line `header_key = <hex>`.
 
-### FolderScanner.kt
+### fs/FolderScanner.kt
 Recursively traverses a folder via `DocumentsContract`, builds a `FileNode` tree, collects lists of NSZ and XCZ files. Detects file types by extension (`.nsz`, `.xcz`).
 
-### FolderProcessor.kt
+### fs/FolderProcessor.kt
 Processes all files from `FolderStructure`:
 - **NSZ** → converts to NSP via `NszConverter`, copies to output folder
 - **XCZ** → converts to XCI via `NszConverter.convertXcz()`, copies to output folder
 - **Other files** → copies as-is
 - Preserves folder structure, continues on individual file errors
-- Result: `FolderConversionSummary` (success/failed/skipped counts)
+- Progress throttling: bar updates every `PROGRESS_BAR_UPDATE_INTERVAL_MS` (100ms), numeric text every `PROGRESS_NUMERIC_UPDATE_INTERVAL_MS` (500ms)
+- Result: `FolderConversionSummary` with per-operation-type counters
 
-### TempFileManager.kt
-Temp files in `cacheDir` named `andronsz_<UUID>_<name>.<ext>`. Method `cleanupManagedCache()` cleans all.
+### model/FolderConversionResult.kt
+Contains all types related to folder conversion results:
 
-### FolderLogWriter.kt
+```kotlin
+enum class FileOperationType {
+    NSZ_CONVERSION,  // NSZ → NSP
+    XCZ_CONVERSION,  // XCZ → XCI
+    FILE_COPY        // Regular file copy
+}
+
+sealed class FileConversionResult {
+    data class Success(operationType, durationMs, outputName): FileConversionResult()
+    data class Failed(operationType, errorCode, errorMessage): FileConversionResult()
+    data class Skipped(reason): FileConversionResult()
+}
+
+data class FolderConversionSummary(
+    totalFiles, successCount, failedCount, skippedCount,
+    nszFilesProcessed, nszSuccessCount, nszFailedCount,
+    xczFilesProcessed, xczSuccessCount, xczFailedCount,
+    copyFilesProcessed, copySuccessCount, copyFailedCount
+)
+
+data class FolderProgressUpdate(
+    overallProgress: ConversionProgress,
+    currentFileProgress: ConversionProgress?,
+    currentFileName: String?,
+    processedFiles: Int,
+    totalFiles: Int
+)
+```
+
+### fs/TempFileManager.kt
+Temp files in `cacheDir` named `andronsz_<UUID>_<name>.<ext>`. Method `cleanupManagedCache()` removes all.
+
+### fs/FolderLogWriter.kt
 Thread-safe log writing to `nsz_folder_debug.log` with timestamps. Protected by `Mutex`.
 
 ---
@@ -235,13 +348,18 @@ Shared types: error codes, callback typedefs (`NczProgressCb`, `NczStatusCb`), c
 === Kotlin ===
 
 MainActivity
+ ├─ SettingsRepository  (language — synchronous, in attachBaseContext)
+ └─ TempFileManager     (cleanup on start)
+
+MainViewModel
  ├─ NszConverter        (conversion)
  ├─ KeysManager         (key status)
  ├─ KeysParser          (header_key extraction)
  ├─ FolderScanner       (folder scan)
  ├─ FolderProcessor     (folder processing)
  ├─ TempFileManager     (cache cleanup)
- └─ FolderLogWriter     (logging)
+ ├─ FolderLogWriter     (logging)
+ └─ SettingsRepository  (settings persistence)
 
 FolderProcessor
  ├─ NszConverter        (native conversion)
@@ -279,7 +397,7 @@ nsz_debug.c     (used throughout)
 ```
 File selection (URI) -> NszConverter.convert()
   -> resolveUri -> temp copy (if needed)
-  -> MediaStore: create NSP in Downloads
+  -> MediaStore: create NSP in Downloads (or custom outputFolderUri)
   -> JNI: nativeConvert(input, output)
      -> pfs0_parse -> ncz pre-scan -> pfs0_write_header
      -> for each file: ncz_decompress / copy
@@ -304,11 +422,12 @@ Folder selection -> FolderScanner.scanFolder()
   -> recursive DocumentsContract traversal
   -> FolderStructure (tree, NSZ list, size)
 -> startFolderConversion() -> FolderProcessor.processFolder()
-  -> create output folder in Downloads
+  -> create output folder in Downloads (or custom outputFolderUri)
   -> recursively processNodes():
      -> NSZ: convertAndSaveNsz() -> copy to output folder
+     -> XCZ: convertAndSaveXcz() -> copy to output folder
      -> others: copyFile()
-  -> FolderConversionSummary
+  -> FolderConversionSummary (per-type counts)
   -> FolderLogWriter.close()
   -> cleanup
 ```

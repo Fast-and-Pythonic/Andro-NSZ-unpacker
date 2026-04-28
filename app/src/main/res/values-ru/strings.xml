@@ -11,31 +11,32 @@
     <string name="action_convert">Конвертировать</string>
     <string name="action_convert_files">Конвертировать %d файл(ов)</string>
     <string name="action_convert_folder">Конвертировать папку</string>
-    <string name="action_convert_to_nsp">Convert to NSP</string>
-    <string name="action_cancel">Cancel</string>
+    <string name="action_convert_to_nsp">Конвертировать в NSP</string>
+    <string name="action_cancel">Отмена</string>
     <string name="action_delete">Удалить</string>
     <string name="action_show_structure">Показать структуру</string>
     <string name="action_hide_structure">Скрыть структуру</string>
     <string name="action_show_log">Показать лог</string>
     <string name="action_hide_log">Скрыть лог</string>
-    <string name="action_install_prod_keys">Install prod.keys</string>
-    <string name="action_change_prod_keys">Изменить выбранные prod.keys</string>
-    <string name="action_remove_prod_keys">Удалить выбранные prod.keys</string>
+    <string name="action_install_prod_keys">Установить prod.keys</string>
+    <string name="action_change_prod_keys">Изменить prod.keys</string>
+    <string name="action_remove_prod_keys">Удалить prod.keys</string>
+    <string name="action_change_output_folder">Изменить папку назначения</string>
 
     <!-- Labels -->
     <string name="label_current_file">Текущий файл</string>
-    <string name="label_output_downloads">Output: Downloads folder</string>
+    <string name="label_output_downloads">Вывод: папка Downloads</string>
     <string name="label_folder_selected">Папка выбрана</string>
     <string name="label_processing_folder">Обработка папки…</string>
     <string name="label_folder_processed">Папка обработана!</string>
 
     <!-- Messages -->
-    <string name="msg_prod_keys_required">prod.keys required for proper NSZ to NSP decompression.</string>
+    <string name="msg_prod_keys_required">prod.keys требуется для правильной декомпрессии NSZ в NSP.</string>
     <string name="msg_select_mode">Выберите режим работы</string>
     <string name="msg_select_files_desc">Выберите один или несколько NSZ файлов для конверсии</string>
     <string name="msg_select_folder_desc">Конвертирует все NSZ файлы в папке, сохраняя структуру</string>
-    <string name="msg_tap_to_select">Tap to select NSZ file</string>
-    <string name="msg_selected_file">Selected file</string>
+    <string name="msg_tap_to_select">Нажмите, чтобы выбрать NSZ файл</string>
+    <string name="msg_selected_file">Выбранный файл</string>
     <string name="msg_tap_add_files">Нажмите \"Добавить файлы\" чтобы начать</string>
     <string name="msg_saved_to_downloads">Сохранено в Downloads</string>
     <string name="msg_see_log_details">Подробности в логе</string>
@@ -46,15 +47,15 @@
     <string name="status_done">Завершено</string>
     <string name="status_error">Ошибка</string>
     <string name="status_scanning_folder">Сканирование папки…</string>
-    <string name="status_cancelled">Cancelled.</string>
+    <string name="status_cancelled">Отменено.</string>
 
     <!-- Errors -->
     <string name="error_scan_failed">Ошибка сканирования: %s</string>
     <string name="error_folder_processing">Ошибка обработки папки: %s</string>
     <string name="error_general">Ошибка: %s</string>
-    <string name="error_unexpected">Unexpected error: %s</string>
+    <string name="error_unexpected">Неожиданная ошибка: %s</string>
     <string name="error_critical">Критическая ошибка: %s</string>
-    <string name="error_conversion_verify_failed">Conversion complete, but NSP verification failed:\n%s</string>
+    <string name="error_conversion_verify_failed">Конвертация завершена, но верификация NSP не прошла:\n%s</string>
 
     <!-- Format strings -->
     <string name="format_files_queued">Файлов в очереди: %d</string>
@@ -67,13 +68,67 @@
     <string name="format_success_rate">Успешно: %1$d из %2$d NSZ файлов (%3$s)</string>
     <string name="format_failed_count">Ошибок: %d файл(ов)</string>
     <string name="format_log_path">Лог: %s</string>
-    <string name="format_debug_log">Debug log: %s</string>
+    <string name="format_debug_log">Лог отладки: %s</string>
 
     <!-- Result messages -->
-    <string name="result_done_no_verify">Done! Saved to Downloads.\n(header_key not found in prod.keys — verification skipped)</string>
-    <string name="result_done_verified">Done! NSP verified. Saved to Downloads.</string>
+    <string name="result_done_no_verify">Готово! Сохранено в Downloads.\n(header_key не найден в prod.keys — верификация пропущена)</string>
+    <string name="result_done_verified">Готово! NSP проверен. Сохранено в Downloads.</string>
 
     <!-- Content descriptions -->
-    <string name="cd_back">Back</string>
-    <string name="cd_settings">Settings</string>
+    <string name="cd_back">Назад</string>
+    <string name="cd_settings">Настройки</string>
+
+    <!-- XCZ format support -->
+    <string name="converting_xcz">Конвертация XCZ в XCI…</string>
+    <string name="xcz_format">XCZ (Сжатый картридж)</string>
+    <string name="xci_format">XCI (Образ картриджа Nintendo)</string>
+    <string name="invalid_xcz">Неверный формат XCZ файла</string>
+    <string name="format_xcz_files_count">XCZ файлов: %d</string>
+    <string name="error_conversion_verify_failed_xci">Конвертация завершена, но верификация XCI не прошла:\n%s</string>
+
+    <!-- Detailed folder statistics -->
+    <string name="stats_title">Статистика обработки</string>
+    <string name="stats_all_files">Файлов всего обработано:</string>
+    <string name="stats_success">✅ Удачно: %1$d из %2$d</string>
+    <string name="stats_failed">❌ Не удалось: %1$d из %2$d</string>
+    <string name="stats_nsz_conversion">NSZ файлов распаковано:</string>
+    <string name="stats_xcz_conversion">XCZ файлов распаковано:</string>
+    <string name="stats_files_copied">Файлов просто скопировано:</string>
+
+    <!-- Settings screen -->
+    <string name="action_settings">Настройки</string>
+    <string name="settings_title">Настройки</string>
+    <string name="settings_stats_format">Вариант итоговой статистики</string>
+    <string name="stats_format_compact">Компактно</string>
+    <string name="stats_format_detailed">Развёрнуто</string>
+    <string name="settings_language">Язык приложения</string>
+    <string name="language_system">Системный</string>
+    <string name="language_english">Английский</string>
+    <string name="language_russian">Русский</string>
+
+    <!-- About screen -->
+    <string name="action_about_app">О приложении</string>
+    <string name="about_app_title">О приложении</string>
+
+    <string name="about_links_title">Репозитории</string>
+    <string name="about_link_andro_nsz">Andro-NSZ (Android порт)</string>
+    <string name="about_link_nsz">nicoboss/nsz (оригинальная утилита)</string>
+
+    <string name="about_what_is_title">Что это за приложение?</string>
+    <string name="about_what_is_content">Andro-NSZ — это Android-приложение для распаковки сжатых файлов специальных форматов. Оно конвертирует их, используя нативный C-движок для высокой производительности.</string>
+
+    <string name="about_formats_title">Поддерживаемые форматы</string>
+    <string name="about_formats_content">Приложение распаковывает сжатые файлы в стандартные форматы:</string>
+
+    <string name="about_nsz_description">Сжатые пакеты NSZ → стандартные пакеты NSP</string>
+    <string name="about_xcz_description">Сжатые образы XCZ → стандартные образы XCI</string>
+
+    <string name="about_how_works_title">Как это работает</string>
+    <string name="about_how_works_content">Приложение использует алгоритм Zstandard для декомпрессии сжатых NCZ файлов внутри контейнеров NSZ/XCZ. После декомпрессии файлы повторно шифруются с помощью AES-CTR и сохраняются в стандартном формате NSP/XCI.\n\nВы можете конвертировать отдельные файлы или целые папки, сохраняя структуру каталогов.</string>
+
+    <string name="about_requirements_title">Требования</string>
+    <string name="about_requirements_content">Для правильной работы требуется файл prod.keys, содержащий криптографические ключи. Он используется для проверки правильности распаковки. Установить его можно через меню приложения.</string>
+
+    <string name="about_credits_title">Авторство</string>
+    <string name="about_credits_content">Основано на оригинальной утилите nsz от nicoboss.</string>
 </resources>

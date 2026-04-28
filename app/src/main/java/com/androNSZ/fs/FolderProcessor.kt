@@ -21,6 +21,7 @@ object FolderProcessor {
         context: Context,
         structure: FolderStructure,
         headerKey: ByteArray?,
+        outputBaseUri: Uri?,
         progressCallback: (FolderProgressUpdate) -> Unit,
         statusCallback: NszConverter.StatusCallback?
     ): Result<Pair<Uri, FolderConversionSummary>> = withContext(Dispatchers.IO) {
@@ -38,10 +39,14 @@ object FolderProcessor {
         var lastNumericEmitTimeMs = System.currentTimeMillis()
         var lastSpeed = 0.0
 
-        val outputFolderName = generateOutputFolderName(context, structure.rootUri)
+        val outputFolderName = generateOutputFolderName(context, structure.rootUri, outputBaseUri)
         statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
 
-        val outputFolderUri = createOutputFolder(context, outputFolderName)
+        val outputFolderUri = if (outputBaseUri != null) {
+            createOutputFolderInSaf(context, outputBaseUri, outputFolderName)
+        } else {
+            createOutputFolder(context, outputFolderName)
+        }
         if (outputFolderUri == null) {
             statusCallback?.onStatus("ERROR", "Failed to create output folder")
             return@withContext Result.failure(Exception("Cannot create output folder"))
@@ -121,6 +126,20 @@ object FolderProcessor {
                 (cumulativeBytesProcessed / 1024.0 / 1024.0) / (totalTimeMs / 1000.0)
             } else 0.0
 
+            // Собираем детальную статистику по типам операций
+            val nszResults = results.filter { 
+                (it is FileConversionResult.Success && it.operationType == FileOperationType.NSZ_CONVERSION) ||
+                (it is FileConversionResult.Failed && it.operationType == FileOperationType.NSZ_CONVERSION)
+            }
+            val xczResults = results.filter { 
+                (it is FileConversionResult.Success && it.operationType == FileOperationType.XCZ_CONVERSION) ||
+                (it is FileConversionResult.Failed && it.operationType == FileOperationType.XCZ_CONVERSION)
+            }
+            val copyResults = results.filter { 
+                (it is FileConversionResult.Success && it.operationType == FileOperationType.FILE_COPY) ||
+                (it is FileConversionResult.Failed && it.operationType == FileOperationType.FILE_COPY)
+            }
+
             val summary = FolderConversionSummary(
                 totalFiles = totalFileCount,
                 nszFilesProcessed = structure.nszFiles.size,
@@ -129,16 +148,29 @@ object FolderProcessor {
                 skippedCount = results.count { it is FileConversionResult.Skipped },
                 results = results.toList(),
                 totalDurationMs = totalTimeMs,
-                totalBytesProcessed = cumulativeBytesProcessed
+                totalBytesProcessed = cumulativeBytesProcessed,
+                // Детальная статистика по типам операций
+                nszSuccessCount = nszResults.count { it is FileConversionResult.Success },
+                nszFailedCount = nszResults.count { it is FileConversionResult.Failed },
+                xczSuccessCount = xczResults.count { it is FileConversionResult.Success },
+                xczFailedCount = xczResults.count { it is FileConversionResult.Failed },
+                xczFilesProcessed = structure.xczFiles.size,
+                copySuccessCount = copyResults.count { it is FileConversionResult.Success },
+                copyFailedCount = copyResults.count { it is FileConversionResult.Failed },
+                copyFilesProcessed = copyResults.size
             )
 
             statusCallback?.onStatus("SUMMARY", "========================================")
             statusCallback?.onStatus("SUMMARY", "Conversion Summary")
             statusCallback?.onStatus("SUMMARY", "========================================")
             statusCallback?.onStatus("SUMMARY", "Total files: ${summary.totalFiles}")
-            statusCallback?.onStatus("SUMMARY", "NSZ files processed: ${summary.nszFilesProcessed}")
             statusCallback?.onStatus("SUMMARY", "Successful: ${summary.successCount}")
             statusCallback?.onStatus("SUMMARY", "Failed: ${summary.failedCount}")
+            statusCallback?.onStatus("SUMMARY", "")
+            statusCallback?.onStatus("SUMMARY", "NSZ conversions: ${summary.nszSuccessCount}/${summary.nszFilesProcessed} (failed: ${summary.nszFailedCount})")
+            statusCallback?.onStatus("SUMMARY", "XCZ conversions: ${summary.xczSuccessCount}/${summary.xczFilesProcessed} (failed: ${summary.xczFailedCount})")
+            statusCallback?.onStatus("SUMMARY", "Files copied: ${summary.copySuccessCount}/${summary.copyFilesProcessed} (failed: ${summary.copyFailedCount})")
+            statusCallback?.onStatus("SUMMARY", "")
             statusCallback?.onStatus("SUMMARY", "Time: ${totalTimeMs/1000}s")
             statusCallback?.onStatus("SUMMARY", "Average speed: %.2f MB/s".format(avgSpeedMBps))
 
@@ -245,7 +277,8 @@ object FolderProcessor {
                                 fileName = node.name,
                                 outputName = node.name.substringBeforeLast('.') + ".nsp",
                                 sizeBytes = fileSize,
-                                durationMs = elapsedMs
+                                durationMs = elapsedMs,
+                                operationType = FileOperationType.NSZ_CONVERSION
                             ))
 
                             cumulative += fileSize
@@ -258,7 +291,8 @@ object FolderProcessor {
                                 fileName = node.name,
                                 errorCode = e.code,
                                 errorMessage = e.message ?: "Unknown error",
-                                sizeBytes = fileSize
+                                sizeBytes = fileSize,
+                                operationType = FileOperationType.NSZ_CONVERSION
                             ))
                             cumulative += fileSize
                             processedFiles++
@@ -269,7 +303,8 @@ object FolderProcessor {
                                 fileName = node.name,
                                 errorCode = -999,
                                 errorMessage = e.message ?: "Unknown error",
-                                sizeBytes = fileSize
+                                sizeBytes = fileSize,
+                                operationType = FileOperationType.NSZ_CONVERSION
                             ))
                             cumulative += fileSize
                             processedFiles++
@@ -293,7 +328,8 @@ object FolderProcessor {
                                 fileName = node.name,
                                 outputName = node.name,
                                 sizeBytes = fileSize,
-                                durationMs = elapsedMs
+                                durationMs = elapsedMs,
+                                operationType = FileOperationType.FILE_COPY
                             ))
                             cumulative += fileSize
                             processedFiles++
@@ -305,7 +341,8 @@ object FolderProcessor {
                                 fileName = node.name,
                                 errorCode = -998,
                                 errorMessage = e.message ?: "Copy failed",
-                                sizeBytes = fileSize
+                                sizeBytes = fileSize,
+                                operationType = FileOperationType.FILE_COPY
                             ))
                             cumulative += fileSize
                             processedFiles++
@@ -348,13 +385,21 @@ object FolderProcessor {
         statusCallback: NszConverter.StatusCallback? = null
     ): Pair<Uri, String?>? {
         return try {
-            val result = if (parentUri.scheme == "file") {
-                val parentFile = File(parentUri.path!!)
-                val subFolder = File(parentFile, name)
-                subFolder.mkdirs()
-                Pair(Uri.fromFile(subFolder), null)
-            } else {
-                Pair(parentUri, buildChildRelativePath(parentRelativePath, name))
+            val result = when {
+                parentUri.scheme == "file" -> {
+                    val parentFile = File(parentUri.path!!)
+                    val subFolder = File(parentFile, name)
+                    subFolder.mkdirs()
+                    Pair(Uri.fromFile(subFolder), null)
+                }
+                DocumentsContract.isDocumentUri(context, parentUri) -> {
+                    val subUri = DocumentsContract.createDocument(
+                        context.contentResolver, parentUri,
+                        DocumentsContract.Document.MIME_TYPE_DIR, name
+                    ) ?: return null
+                    Pair(subUri, null)
+                }
+                else -> Pair(parentUri, buildChildRelativePath(parentRelativePath, name))
             }
             statusCallback?.onStatus("FOLDER", "Subfolder created: $name")
             result
@@ -435,49 +480,64 @@ object FolderProcessor {
         statusCallback: NszConverter.StatusCallback? = null
     ) {
         try {
-            if (destParentUri.scheme == "file") {
-                val destFile = File(File(destParentUri.path!!), fileName)
-                statusCallback?.onStatus("COPY", "Copying file to: ${destFile.absolutePath}")
+            when {
+                destParentUri.scheme == "file" -> {
+                    val destFile = File(File(destParentUri.path!!), fileName)
+                    statusCallback?.onStatus("COPY", "Copying file to: ${destFile.absolutePath}")
 
-                context.contentResolver.openInputStream(sourceUri)?.use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                    context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                        destFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
-            } else {
-                statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
+                DocumentsContract.isDocumentUri(context, destParentUri) -> {
+                    statusCallback?.onStatus("COPY", "Creating file via SAF: $fileName")
+                    val destUri = DocumentsContract.createDocument(
+                        context.contentResolver, destParentUri, "application/octet-stream", fileName
+                    ) ?: throw Exception("Cannot create SAF file: $fileName")
 
-                val cv = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-
-                    val relativePath = resolveRelativePath(context, destParentUri, destRelativePath)
-                    if (relativePath != null) {
-                        put(MediaStore.Downloads.RELATIVE_PATH, "Download/$relativePath")
-                    }
-                }
-
-                val destUri = context.contentResolver.insert(
-                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    cv
-                ) ?: throw Exception("Cannot create destination file: $fileName")
-
-                try {
                     context.contentResolver.openInputStream(sourceUri)?.use { input ->
                         context.contentResolver.openOutputStream(destUri)?.use { output ->
                             input.copyTo(output)
                         }
                     }
+                }
+                else -> {
+                    statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
 
-                    val updateCv = ContentValues().apply {
-                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    val cv = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+
+                        val relativePath = resolveRelativePath(context, destParentUri, destRelativePath)
+                        if (relativePath != null) {
+                            put(MediaStore.Downloads.RELATIVE_PATH, "Download/$relativePath")
+                        }
                     }
-                    context.contentResolver.update(destUri, updateCv, null, null)
 
-                } catch (e: Exception) {
-                    context.contentResolver.delete(destUri, null, null)
-                    throw e
+                    val destUri = context.contentResolver.insert(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        cv
+                    ) ?: throw Exception("Cannot create destination file: $fileName")
+
+                    try {
+                        context.contentResolver.openInputStream(sourceUri)?.use { input ->
+                            context.contentResolver.openOutputStream(destUri)?.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+
+                        val updateCv = ContentValues().apply {
+                            put(MediaStore.Downloads.IS_PENDING, 0)
+                        }
+                        context.contentResolver.update(destUri, updateCv, null, null)
+
+                    } catch (e: Exception) {
+                        context.contentResolver.delete(destUri, null, null)
+                        throw e
+                    }
                 }
             }
             statusCallback?.onStatus("COPY", "File copied successfully: $fileName")
@@ -496,49 +556,64 @@ object FolderProcessor {
         statusCallback: NszConverter.StatusCallback? = null
     ) {
         try {
-            if (destParentUri.scheme == "file") {
-                val destFile = File(File(destParentUri.path!!), fileName)
-                statusCallback?.onStatus("COPY", "Copying to local filesystem: ${destFile.absolutePath}")
+            when {
+                destParentUri.scheme == "file" -> {
+                    val destFile = File(File(destParentUri.path!!), fileName)
+                    statusCallback?.onStatus("COPY", "Copying to local filesystem: ${destFile.absolutePath}")
 
-                sourceFile.inputStream().use { input ->
-                    destFile.outputStream().use { output ->
-                        input.copyTo(output)
+                    sourceFile.inputStream().use { input ->
+                        destFile.outputStream().use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
-            } else {
-                statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
+                DocumentsContract.isDocumentUri(context, destParentUri) -> {
+                    statusCallback?.onStatus("COPY", "Creating file via SAF: $fileName")
+                    val destUri = DocumentsContract.createDocument(
+                        context.contentResolver, destParentUri, "application/octet-stream", fileName
+                    ) ?: throw Exception("Cannot create SAF file: $fileName")
 
-                val cv = ContentValues().apply {
-                    put(MediaStore.Downloads.DISPLAY_NAME, fileName)
-                    put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                    put(MediaStore.Downloads.IS_PENDING, 1)
-
-                    val relativePath = resolveRelativePath(context, destParentUri, destRelativePath)
-                    if (relativePath != null) {
-                        put(MediaStore.Downloads.RELATIVE_PATH, "Download/$relativePath")
-                    }
-                }
-
-                val destUri = context.contentResolver.insert(
-                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
-                    cv
-                ) ?: throw Exception("Cannot create destination file: $fileName")
-
-                try {
                     sourceFile.inputStream().use { input ->
                         context.contentResolver.openOutputStream(destUri)?.use { output ->
                             input.copyTo(output)
                         }
                     }
+                }
+                else -> {
+                    statusCallback?.onStatus("COPY", "Creating file via MediaStore: $fileName")
 
-                    val updateCv = ContentValues().apply {
-                        put(MediaStore.Downloads.IS_PENDING, 0)
+                    val cv = ContentValues().apply {
+                        put(MediaStore.Downloads.DISPLAY_NAME, fileName)
+                        put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                        put(MediaStore.Downloads.IS_PENDING, 1)
+
+                        val relativePath = resolveRelativePath(context, destParentUri, destRelativePath)
+                        if (relativePath != null) {
+                            put(MediaStore.Downloads.RELATIVE_PATH, "Download/$relativePath")
+                        }
                     }
-                    context.contentResolver.update(destUri, updateCv, null, null)
 
-                } catch (e: Exception) {
-                    context.contentResolver.delete(destUri, null, null)
-                    throw e
+                    val destUri = context.contentResolver.insert(
+                        MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                        cv
+                    ) ?: throw Exception("Cannot create destination file: $fileName")
+
+                    try {
+                        sourceFile.inputStream().use { input ->
+                            context.contentResolver.openOutputStream(destUri)?.use { output ->
+                                input.copyTo(output)
+                            }
+                        }
+
+                        val updateCv = ContentValues().apply {
+                            put(MediaStore.Downloads.IS_PENDING, 0)
+                        }
+                        context.contentResolver.update(destUri, updateCv, null, null)
+
+                    } catch (e: Exception) {
+                        context.contentResolver.delete(destUri, null, null)
+                        throw e
+                    }
                 }
             }
             statusCallback?.onStatus("COPY", "File copied to target folder: $fileName")
@@ -560,7 +635,7 @@ object FolderProcessor {
         }
     }
 
-    private fun generateOutputFolderName(context: Context, rootUri: Uri): String {
+    private fun generateOutputFolderName(context: Context, rootUri: Uri, outputBaseUri: Uri? = null): String {
         val originalName = getSourceFolderName(context, rootUri)
             .takeIf { it.isNotBlank() }
             ?: "AndroNSZ"
@@ -568,12 +643,47 @@ object FolderProcessor {
 
         var candidate = baseName
         var index = 2
-        while (outputNameExists(context, candidate)) {
+        while (if (outputBaseUri != null) outputNameExistsInSaf(context, outputBaseUri, candidate)
+               else outputNameExists(context, candidate)) {
             candidate = "${baseName}_$index"
             index++
         }
 
         return candidate
+    }
+
+    private fun createOutputFolderInSaf(context: Context, treeUri: Uri, name: String): Uri? {
+        return try {
+            val treeDocUri = DocumentsContract.buildDocumentUriUsingTree(
+                treeUri, DocumentsContract.getTreeDocumentId(treeUri)
+            )
+            DocumentsContract.createDocument(
+                context.contentResolver, treeDocUri, DocumentsContract.Document.MIME_TYPE_DIR, name
+            )
+        } catch (e: Exception) {
+            null
+        }
+    }
+
+    private fun outputNameExistsInSaf(context: Context, treeUri: Uri, name: String): Boolean {
+        val childrenUri = DocumentsContract.buildChildDocumentsUriUsingTree(
+            treeUri, DocumentsContract.getTreeDocumentId(treeUri)
+        )
+        return try {
+            context.contentResolver.query(
+                childrenUri,
+                arrayOf(DocumentsContract.Document.COLUMN_DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                while (cursor.moveToNext()) {
+                    val col = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+                    if (col >= 0 && cursor.getString(col) == name) return@use true
+                }
+                false
+            } ?: false
+        } catch (e: Exception) {
+            false
+        }
     }
 
     private fun getSourceFolderName(context: Context, rootUri: Uri): String {

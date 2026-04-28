@@ -59,7 +59,7 @@ fun CompactCenterAlignedTopAppBar(
             
             // Actions
             Row(
-                modifier = Modifier.wrapContentWidth(),
+                modifier = Modifier.defaultMinSize(minWidth = 48.dp),
                 horizontalArrangement = Arrangement.End,
                 verticalAlignment = Alignment.CenterVertically
             ) {

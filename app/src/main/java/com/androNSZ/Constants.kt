@@ -16,5 +16,5 @@ object Constants {
      * Less frequent updates for better readability of percentages, speed and size
      * Value 500ms = 2 updates per second
      */
-    const val PROGRESS_NUMERIC_UPDATE_INTERVAL_MS = 100L
+    const val PROGRESS_NUMERIC_UPDATE_INTERVAL_MS = 500L
 }
