@@ -1,13 +1,13 @@
-# AGENTS.md
+# AndroNSZ Project Guidelines
 
 Instructions for AI agents working with the AndroNSZ project.
 
-## About the project
+## About the Project
 
 AndroNSZ is an Android application for converting NSZ to NSP (Nintendo Switch).
 Kotlin/Compose UI + native C engine via JNI. The nicoboss/nsz Python reference port.
 
-## Instruction files
+## Instruction Files
 
 | File                    | Purpose                                                                                                                                                                            |
 |-------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -16,7 +16,7 @@ Kotlin/Compose UI + native C engine via JNI. The nicoboss/nsz Python reference p
 | `README.md`             | Brief project description for humans.                                                                                                                                              |
 | `.claude/memory/`       | Claude Code auto-memory between sessions (project context, user profile, known bugs). For Claude Code only — other agents can ignore.                                              |
 
-## Working rules
+## Working Rules
 
 - **Communication language:** Russian.
 - **The project owner** is not a professional programmer. Explain things simply, avoid jargon when unnecessary.
@@ -25,19 +25,53 @@ Kotlin/Compose UI + native C engine via JNI. The nicoboss/nsz Python reference p
 - **Build:** `.\gradlew.bat :app:assembleDebug` — main verification. Details in `BUILD_DEBUG_CHECKS.md`.
 - **Architecture:** before making changes, check `project_structure.md` to understand the relationships between modules.
 
-### Code style
+## Code Comments
+
+**IMPORTANT: All code comments, documentation, and commit messages MUST be written in English.**
+
+### Rules:
+1. **Language**: All comments in code files (`.kt`, `.java`, `.xml`, etc.) must be in English
+2. **User Communication**: Communication with the user should be in Russian
+3. **UI Strings**: User-facing strings in the app are localized (see `.ai_docs/localization.md`)
+4. **Documentation**: Technical documentation and README files should be in English
+
+### Examples:
+
+✅ **Correct:**
+```kotlin
+// Update progress bar every 100ms (10 times per second)
+if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+    statusCallback?.onStatus("NSZ", "Starting conversion...")
+}
+```
+
+❌ **Incorrect:**
+```kotlin
+// Обновляем прогресс-бар каждые 250 мс (4 раза в секунду)
+if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+    statusCallback?.onStatus("NSZ", "Начало конвертации...")
+}
+```
+
+### Rationale:
+- English comments make the codebase accessible to the international developer community
+- Improves code maintainability and collaboration
+- Follows industry best practices
+- AI assistants work better with English comments
+
+## Code Style
 
 ### STRICTLY MANDATORY CODE FORMATTING RULES:
 
 - **Indentation**: always exactly **3 spaces**. Never use tabs.
 - **Empty lines inside blocks**:
-- NEVER REMOVE THE INDENTATION ON EMPTY LINES.
-    - An empty line inside a function, class, loop, or condition must maintain the current indentation level (3 spaces for each nesting level).
+  - NEVER REMOVE THE INDENTATION ON EMPTY LINES.
+  - An empty line inside a function, class, loop, or condition must maintain the current indentation level (3 spaces for each nesting level).
 - **Keep indents on empty lines** is a strict rule.
 
 Examples of correct formatting of indents and empty lines:
 
-```
+```c
 int calculate_sum(int arr[], int size) {
    if (size <= 0) {
       return 0;
@@ -59,5 +93,10 @@ int calculate_sum(int arr[], int size) {
 }
 ```
 
+## Progress Throttling
 
+See `C:\Users\Boss\.claude\projects\C--Users-Boss-AndroidStudioProjects-AndroNSZ\memory\progress_throttling.md` for details on the current progress update system.
 
+## Localization
+
+See `.ai_docs/localization.md` for the localization system structure and how to add new strings.

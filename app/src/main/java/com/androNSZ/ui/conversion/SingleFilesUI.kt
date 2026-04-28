@@ -14,6 +14,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
 import com.androNSZ.ui.components.StatusLogPanel
@@ -51,12 +53,12 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
       ) {
          Icon(Icons.Filled.Add, null)
          Spacer(Modifier.width(8.dp))
-         Text("Добавить файлы")
+         Text(stringResource(R.string.action_add_files))
       }
 
       if (vm.fileQueue.isNotEmpty()) {
          Text(
-            text = "Файлов в очереди: ${vm.fileQueue.size}",
+            text = stringResource(R.string.format_files_queued, vm.fileQueue.size),
             style = MaterialTheme.typography.titleMedium,
          )
 
@@ -80,7 +82,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
             contentAlignment = Alignment.Center
          ) {
             Text(
-               text = "Нажмите \"Добавить файлы\" чтобы начать",
+               text = stringResource(R.string.msg_tap_add_files),
                style = MaterialTheme.typography.bodyLarge,
                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -92,7 +94,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
          enabled = vm.fileQueue.isNotEmpty() && !vm.isConverting,
          modifier = Modifier.fillMaxWidth()
       ) {
-         Text("Конвертировать ${vm.fileQueue.size} файл(ов)")
+         Text(stringResource(R.string.action_convert_files, vm.fileQueue.size))
       }
 
       if (vm.isConverting || vm.progress != null) {
@@ -107,7 +109,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                Text(
-                  text = "Файл ${vm.currentFileIndex + 1} из ${vm.fileQueue.size}",
+                  text = stringResource(R.string.format_file_n_of_m, vm.currentFileIndex + 1, vm.fileQueue.size),
                   style = MaterialTheme.typography.titleMedium
                )
 
@@ -123,7 +125,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
                      Text(
-                        text = "Файлы: ${vm.batchProcessedFiles} / ${vm.batchTotalFiles}",
+                        text = stringResource(R.string.format_files_processed, vm.batchProcessedFiles, vm.batchTotalFiles),
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(
@@ -146,7 +148,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                   if (isMultiFile) {
                      Spacer(Modifier.height(4.dp))
                      Text(
-                        text = vm.batchCurrentFileName ?: "Текущий файл",
+                        text = vm.batchCurrentFileName ?: stringResource(R.string.label_current_file),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -161,7 +163,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
                      Text(
-                        text = if (isMultiFile) "Текущий файл" else "%.1f%%".format(p.percent * 100f),
+                        text = if (isMultiFile) stringResource(R.string.label_current_file) else "%.1f%%".format(p.percent * 100f),
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(
@@ -198,6 +200,8 @@ fun FileQueueItem(
    enabled: Boolean
 ) {
    val isNsz = file.displayName.endsWith(".nsz", ignoreCase = true)
+   val isXcz = file.displayName.endsWith(".xcz", ignoreCase = true)
+   val isCompressed = isNsz || isXcz
 
    Card(
       modifier = Modifier.fillMaxWidth(),
@@ -217,12 +221,12 @@ fun FileQueueItem(
          verticalAlignment = Alignment.Top
       ) {
          Icon(
-            imageVector = if (isNsz) Icons.Filled.Description else Icons.Filled.InsertDriveFile,
+            imageVector = if (isCompressed) Icons.Filled.Description else Icons.Filled.InsertDriveFile,
             contentDescription = null,
             modifier = Modifier
                .padding(top = 2.dp)
                .size(20.dp),
-            tint = if (isNsz) MaterialTheme.colorScheme.primary
+            tint = if (isCompressed) MaterialTheme.colorScheme.primary
                    else MaterialTheme.colorScheme.onSurfaceVariant
          )
          Spacer(Modifier.width(8.dp))
@@ -230,13 +234,13 @@ fun FileQueueItem(
             Text(
                text = file.displayName,
                style = MaterialTheme.typography.bodyMedium,
-               fontWeight = if (isNsz) FontWeight.Bold else FontWeight.Normal
+               fontWeight = if (isCompressed) FontWeight.Bold else FontWeight.Normal
             )
             val statusText = when (file.status) {
-               FileStatus.Pending -> "Ожидает"
-               FileStatus.Converting -> "Конвертируется..."
-               FileStatus.Completed -> "Завершено"
-               FileStatus.Failed -> "Ошибка"
+               FileStatus.Pending -> stringResource(R.string.status_waiting)
+               FileStatus.Converting -> stringResource(R.string.status_converting)
+               FileStatus.Completed -> stringResource(R.string.status_done)
+               FileStatus.Failed -> stringResource(R.string.status_error)
             }
             val sizeText = if (file.fileSize > 0) fmtBytes(file.fileSize) else null
             Text(
@@ -248,7 +252,7 @@ fun FileQueueItem(
 
          if (enabled && file.status == FileStatus.Pending) {
             IconButton(onClick = onRemove) {
-               Icon(Icons.Filled.Close, "Удалить")
+               Icon(Icons.Filled.Close, stringResource(R.string.action_delete))
             }
          }
       }

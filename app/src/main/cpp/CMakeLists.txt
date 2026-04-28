@@ -27,6 +27,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     aes_xts.c
     sha256.c
     pfs0.c
+    hfs0.c
     ncz.c
     ncz_decompress.c
     ncz_engine.c

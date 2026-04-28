@@ -34,6 +34,14 @@ object NszConverter {
     ): Int
 
     @JvmStatic
+    external fun nativeConvertXcz(
+        inputPath: String,
+        outputPath: String,
+        progressCallback: ProgressCallback?,
+        statusCallback: StatusCallback?
+    ): Int
+
+    @JvmStatic
     external fun nativeSetDebugLog(path: String?)
 
     @JvmStatic
@@ -83,11 +91,11 @@ object NszConverter {
         statusCallback: StatusCallback? = null,
     ): Flow<ConversionProgress> = callbackFlow {
 
+        val originalFileName = queryFileName(context, inputUri)
         val resolvedInput = withContext(Dispatchers.IO) {
             resolveToFilePath(context, inputUri)
         }
-        val inputName = resolvedInput.file.name
-        val outputName = inputName.substringBeforeLast('.') + ".nsp"
+        val outputName = originalFileName.substringBeforeLast('.') + ".nsp"
 
         val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
@@ -119,15 +127,29 @@ object NszConverter {
 
             var lastDone = 0L
             var lastTimeMs = System.currentTimeMillis()
+            var lastEmitTimeMs = System.currentTimeMillis()
+            var lastNumericEmitTimeMs = System.currentTimeMillis()
+            var lastSpeed = 0.0
 
             val cb = object : ProgressCallback {
                 override fun onProgress(done: Long, total: Long) {
                     val now = System.currentTimeMillis()
-                    val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-                    val speed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
-                    lastDone = done
-                    lastTimeMs = now
-                    trySend(ConversionProgress(done, total, speed))
+                    
+                    val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
+                    
+                    // Update progress bar every 250ms (4 times per second)
+                    if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+                        if (shouldUpdateNumeric) {
+                            val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
+                            lastSpeed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
+                            lastDone = done
+                            lastTimeMs = now
+                            lastNumericEmitTimeMs = now
+                        }
+                        
+                        lastEmitTimeMs = now
+                        trySend(ConversionProgress(done, total, lastSpeed))
+                    }
                 }
             }
 
@@ -141,6 +163,111 @@ object NszConverter {
             } else if (result == 0) {
                 lastVerifyError = null
                 lastVerifySkipped = true
+            }
+
+            when (result) {
+                OK -> {
+                    context.contentResolver.update(
+                        createdOutputUri,
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null,
+                        null
+                    )
+                    close()
+                }
+                ERR_CANCELLED -> {
+                    context.contentResolver.delete(createdOutputUri, null, null)
+                    close(CancelledException())
+                }
+                else -> {
+                    context.contentResolver.delete(createdOutputUri, null, null)
+                    close(NszConversionException(result, nativeErrorString(result)))
+                }
+            }
+        } catch (e: Exception) {
+            outputUri?.let { context.contentResolver.delete(it, null, null) }
+            close(e)
+        } finally {
+            withContext(Dispatchers.IO) {
+                runCatching { nativeCloseDebugLog() }
+                runCatching { pfd?.close() }
+                resolvedInput.deleteIfTemp()
+            }
+        }
+
+        awaitClose { }
+    }
+
+    fun convertXcz(
+        context: Context,
+        inputUri: Uri,
+        headerKey: ByteArray?,
+        statusCallback: StatusCallback? = null,
+    ): Flow<ConversionProgress> = callbackFlow {
+
+        val originalFileName = queryFileName(context, inputUri)
+        val resolvedInput = withContext(Dispatchers.IO) {
+            resolveToFilePath(context, inputUri)
+        }
+        val outputName = originalFileName.substringBeforeLast('.') + ".xci"
+
+        val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
+        var outputUri: Uri? = null
+        var pfd: ParcelFileDescriptor? = null
+
+        lastDebugLogPath = debugLogFile.absolutePath
+        lastVerifyError = null
+        lastVerifySkipped = true  // XCI verification not implemented yet
+
+        try {
+            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
+
+            val cv = ContentValues().apply {
+                put(MediaStore.Downloads.DISPLAY_NAME, outputName)
+                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+                put(MediaStore.Downloads.IS_PENDING, 1)
+            }
+            val createdOutputUri = context.contentResolver.insert(
+                MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
+            ) ?: throw NszConversionException(-1, "Cannot create output file in Downloads")
+            outputUri = createdOutputUri
+
+            val openedPfd = withContext(Dispatchers.IO) {
+                context.contentResolver.openFileDescriptor(createdOutputUri, "rw")
+            } ?: throw NszConversionException(-1, "Cannot open output file descriptor")
+            pfd = openedPfd
+
+            val nativePath = "/proc/self/fd/${openedPfd.fd}"
+
+            var lastDone = 0L
+            var lastTimeMs = System.currentTimeMillis()
+            var lastEmitTimeMs = System.currentTimeMillis()
+            var lastNumericEmitTimeMs = System.currentTimeMillis()
+            var lastSpeed = 0.0
+
+            val cb = object : ProgressCallback {
+                override fun onProgress(done: Long, total: Long) {
+                    val now = System.currentTimeMillis()
+                    
+                    val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
+                    
+                    if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+                        if (shouldUpdateNumeric) {
+                            val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
+                            lastSpeed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
+                            lastDone = done
+                            lastTimeMs = now
+                            lastNumericEmitTimeMs = now
+                        }
+                        
+                        lastEmitTimeMs = now
+                        trySend(ConversionProgress(done, total, lastSpeed))
+                    }
+                }
+            }
+
+            val result = withContext(Dispatchers.IO) {
+                nativeConvertXcz(resolvedInput.file.absolutePath, nativePath, cb, statusCallback)
             }
 
             when (result) {

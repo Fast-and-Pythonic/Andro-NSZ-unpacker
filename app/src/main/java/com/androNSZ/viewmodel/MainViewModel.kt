@@ -7,7 +7,10 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.androNSZ.Constants
+import com.androNSZ.R
 import com.androNSZ.NszConverter
+import com.androNSZ.data.SettingsRepository
 import com.androNSZ.fs.FolderLogWriter
 import com.androNSZ.fs.FolderScanner
 import com.androNSZ.fs.FolderProcessor
@@ -24,7 +27,12 @@ import kotlinx.coroutines.withContext
 class MainViewModel : ViewModel() {
 
    // Navigation & Mode
-   var currentScreen by mutableStateOf<Screen>(Screen.ModeSelection)
+   private val _screenStack = mutableStateListOf<Screen>(Screen.ModeSelection)
+   val currentScreen: Screen get() = _screenStack.last()
+
+   fun navigateTo(screen: Screen) { _screenStack.add(screen) }
+   fun navigateBack() { if (_screenStack.size > 1) _screenStack.removeLast() }
+
    var conversionMode by mutableStateOf<ConversionMode>(ConversionMode.None)
 
    // Single file mode (legacy)
@@ -57,6 +65,11 @@ class MainViewModel : ViewModel() {
    var keysInstalled by mutableStateOf(false)
    val statusLog = mutableStateListOf<LogEntry>()
 
+   // Settings
+   var statsFormat by mutableStateOf(StatsFormat.DETAILED)
+   var outputFolderUri by mutableStateOf<Uri?>(null)
+   var appLanguage by mutableStateOf("system")
+
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
    }
@@ -65,6 +78,44 @@ class MainViewModel : ViewModel() {
       viewModelScope.launch {
          KeysManager.installFromUri(context, uri)
          keysInstalled = KeysManager.isInstalled(context)
+      }
+   }
+
+   fun loadSettings(context: android.content.Context) {
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).statsFormatFlow.collect {
+            statsFormat = it
+         }
+      }
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).outputFolderUriFlow.collect {
+            outputFolderUri = it
+         }
+      }
+      appLanguage = SettingsRepository.getInstance(context).getLanguage()
+   }
+
+   fun saveLanguage(context: android.content.Context, lang: String) {
+      SettingsRepository.getInstance(context).saveLanguage(lang)
+      appLanguage = lang
+   }
+
+   fun saveOutputFolder(context: android.content.Context, uri: Uri) {
+      context.contentResolver.takePersistableUriPermission(
+         uri,
+         android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+         android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+      )
+      outputFolderUri = uri
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).saveOutputFolderUri(uri)
+      }
+   }
+
+   fun saveStatsFormat(context: android.content.Context, format: StatsFormat) {
+      statsFormat = format
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).saveStatsFormat(format)
       }
    }
 
@@ -101,11 +152,11 @@ class MainViewModel : ViewModel() {
                isConverting = false
                withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
                val logPath = NszConverter.lastDebugLogPath
-               val logSuffix = if (logPath != null) "\nDebug log: $logPath" else ""
+               val logSuffix = if (logPath != null) "\n${context.getString(R.string.format_debug_log, logPath)}" else ""
                statusMessage = when (e) {
-                  is CancelledException     -> "Cancelled.$logSuffix"
-                  is NszConversionException -> "Error: ${e.message}$logSuffix"
-                  else                      -> "Unexpected error: ${e.message}$logSuffix"
+                  is CancelledException     -> context.getString(R.string.status_cancelled) + logSuffix
+                  is NszConversionException -> context.getString(R.string.error_general, e.message ?: "") + logSuffix
+                  else                      -> context.getString(R.string.error_unexpected, e.message ?: "") + logSuffix
                }
             }
             .collect { p ->
@@ -115,19 +166,19 @@ class MainViewModel : ViewModel() {
             isConverting = false
             withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
             val logPath      = NszConverter.lastDebugLogPath
-            val logSuffix    = if (logPath != null) "\nDebug log: $logPath" else ""
+            val logSuffix    = if (logPath != null) "\n${context.getString(R.string.format_debug_log, logPath)}" else ""
             val verifyError   = NszConverter.lastVerifyError
             val verifySkipped = NszConverter.lastVerifySkipped
 
             isSuccess     = true
             statusMessage = when {
                verifyError != null ->
-                  "Conversion complete, but NSP verification failed:\n$verifyError$logSuffix"
+                  context.getString(R.string.error_conversion_verify_failed, verifyError) + logSuffix
                      .also { isSuccess = false }
                verifySkipped ->
-                  "Done! Saved to Downloads.\n(header_key not found in prod.keys — verification skipped)$logSuffix"
+                  context.getString(R.string.result_done_no_verify) + logSuffix
                else ->
-                  "Done! NSP verified. Saved to Downloads.$logSuffix"
+                  context.getString(R.string.result_done_verified) + logSuffix
             }
          }
       }
@@ -154,7 +205,7 @@ class MainViewModel : ViewModel() {
    fun selectFolder(context: android.content.Context, uri: Uri) {
       viewModelScope.launch {
          try {
-            statusMessage = "Сканирование папки..."
+            statusMessage = context.getString(R.string.status_scanning_folder)
             statusLog.clear()
 
             folderLogWriter = FolderLogWriter(context)
@@ -176,9 +227,9 @@ class MainViewModel : ViewModel() {
             conversionMode = ConversionMode.FolderMode(uri, structure)
             statusMessage = null
          } catch (e: Exception) {
-            statusMessage = "Ошибка сканирования: ${e.message}"
+            statusMessage = context.getString(R.string.error_scan_failed, e.message ?: "")
             viewModelScope.launch(Dispatchers.IO) {
-               folderLogWriter?.writeLog("ERROR", "Ошибка сканирования: ${e.message}")
+               folderLogWriter?.writeLog("ERROR", context.getString(R.string.error_scan_failed, e.message ?: ""))
                folderLogWriter?.close()
             }
          }
@@ -227,6 +278,16 @@ class MainViewModel : ViewModel() {
          override fun onStatus(tag: String, msg: String) {
             viewModelScope.launch(Dispatchers.Main.immediate) {
                statusLog.add(LogEntry(tag, msg.trim()))
+               
+               // Instant file name update from C++ code (for internal NCA files)
+               when (tag) {
+                  "EXISTS", "FILE_START" -> {
+                     val internalFileName = msg.trim()
+                     if (internalFileName.isNotEmpty()) {
+                        batchCurrentFileName = internalFileName
+                     }
+                  }
+               }
             }
          }
       }
@@ -243,6 +304,9 @@ class MainViewModel : ViewModel() {
          var completedBytes = 0L
          var lastOverallBytes = 0L
          var lastOverallTimeMs = System.currentTimeMillis()
+         var lastOverallEmitTimeMs = System.currentTimeMillis()
+         var lastOverallNumericEmitTimeMs = System.currentTimeMillis()
+         var lastOverallSpeed = 0.0
 
          for (i in fileQueue.indices) {
             currentFileIndex = i
@@ -272,19 +336,30 @@ class MainViewModel : ViewModel() {
                         val overallDone = (completedBytes + currentDone)
                            .coerceAtMost(overallTotal)
                         val now = System.currentTimeMillis()
-                        val elapsedSec = (now - lastOverallTimeMs).coerceAtLeast(1L) / 1000.0
-                        val speed = if (elapsedSec > 0) {
-                           (overallDone - lastOverallBytes).toDouble() / 1024 / 1024 / elapsedSec
-                        } else {
-                           0.0
+                        
+                        val shouldUpdateNumeric = (now - lastOverallNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
+                        
+                        // Update progress bar every 250ms (4 times per second)
+                        if (now - lastOverallEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
+                           if (shouldUpdateNumeric) {
+                              val elapsedSec = (now - lastOverallTimeMs).coerceAtLeast(1L) / 1000.0
+                              lastOverallSpeed = if (elapsedSec > 0) {
+                                 (overallDone - lastOverallBytes).toDouble() / 1024 / 1024 / elapsedSec
+                              } else {
+                                 0.0
+                              }
+                              lastOverallBytes = overallDone
+                              lastOverallTimeMs = now
+                              lastOverallNumericEmitTimeMs = now
+                           }
+                           
+                           lastOverallEmitTimeMs = now
+                           batchOverallProgress = ConversionProgress(
+                              doneBytes = overallDone,
+                              totalBytes = overallTotal,
+                              speedMBps = lastOverallSpeed
+                           )
                         }
-                        lastOverallBytes = overallDone
-                        lastOverallTimeMs = now
-                        batchOverallProgress = ConversionProgress(
-                           doneBytes = overallDone,
-                           totalBytes = overallTotal,
-                           speedMBps = speed
-                        )
                      }
                   }
 
@@ -311,7 +386,7 @@ class MainViewModel : ViewModel() {
 
          isConverting = false
          val completed = fileQueue.count { it.status == FileStatus.Completed }
-         statusMessage = "Обработано $completed из ${fileQueue.size} файлов"
+         statusMessage = context.getString(R.string.format_files_completed, completed, fileQueue.size)
          isSuccess = completed == fileQueue.size
       }
    }
@@ -339,6 +414,13 @@ class MainViewModel : ViewModel() {
          override fun onStatus(tag: String, msg: String) {
             viewModelScope.launch(Dispatchers.Main.immediate) {
                statusLog.add(LogEntry(tag, msg.trim()))
+               
+               // Instant file name update from C++ code
+               when (tag) {
+                  "EXISTS", "FILE_START" -> {
+                     folderCurrentFileName = msg.trim()
+                  }
+               }
             }
             viewModelScope.launch(Dispatchers.IO) {
                folderLogWriter?.writeLog(tag, msg.trim())
@@ -352,6 +434,7 @@ class MainViewModel : ViewModel() {
                context,
                structure,
                headerKey,
+               outputFolderUri,
                { update ->
                   folderOverallProgress = update.overallProgress
                   folderCurrentFileProgress = update.currentFileProgress
@@ -368,32 +451,22 @@ class MainViewModel : ViewModel() {
                folderLogWriter?.close()
             }
 
-            val logPathMsg = if (folderLogPath != null) "\nЛог: $folderLogPath" else ""
+            val logPathMsg = if (folderLogPath != null) "\n${context.getString(R.string.format_log_path, folderLogPath!!)}" else ""
 
             result.onSuccess { (outputUri, summary) ->
-               val successRate = if (summary.nszFilesProcessed > 0) {
-                  (summary.successCount * 100) / summary.nszFilesProcessed
+               val successRate = if (summary.totalFiles > 0) {
+                  (summary.successCount * 100) / summary.totalFiles
                } else 100
 
                isSuccess = summary.successCount > 0 && successRate >= 50
 
-               statusMessage = buildString {
-                  appendLine("Папка обработана!")
-                  appendLine()
-                  appendLine("Успешно: ${summary.successCount} из ${summary.nszFilesProcessed} NSZ файлов (${successRate}%)")
-
-                  if (summary.failedCount > 0) {
-                     appendLine("Ошибок: ${summary.failedCount} файл(ов)")
-                     appendLine("Подробности в логе")
-                  }
-
-                  appendLine()
-                  appendLine("Сохранено в Downloads")
-                  append(logPathMsg)
+               statusMessage = when (statsFormat) {
+                  StatsFormat.COMPACT -> buildCompactStats(context, summary, logPathMsg)
+                  StatsFormat.DETAILED -> buildDetailedStats(context, summary, logPathMsg)
                }
             }.onFailure { e ->
                isSuccess = false
-               statusMessage = "Ошибка обработки папки: ${e.message}$logPathMsg"
+               statusMessage = context.getString(R.string.error_folder_processing, e.message ?: "") + logPathMsg
             }
 
          } catch (e: Exception) {
@@ -401,15 +474,120 @@ class MainViewModel : ViewModel() {
             isSuccess = false
 
             withContext(Dispatchers.IO) {
-               folderLogWriter?.writeLog("ERROR", "Критическая ошибка: ${e.message}")
+               folderLogWriter?.writeLog("ERROR", context.getString(R.string.error_critical, e.message ?: ""))
                folderLogWriter?.close()
             }
 
-            val logPathMsg = if (folderLogPath != null) "\nЛог: $folderLogPath" else ""
-            statusMessage = "Ошибка: ${e.message}$logPathMsg"
+            val logPathMsg = if (folderLogPath != null) "\n${context.getString(R.string.format_log_path, folderLogPath!!)}" else ""
+            statusMessage = context.getString(R.string.error_general, e.message ?: "") + logPathMsg
          } finally {
             withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
          }
       }
+   }
+
+   private fun buildCompactStats(
+      context: android.content.Context,
+      summary: FolderConversionSummary,
+      logPathMsg: String
+   ): String = buildString {
+      appendLine(context.getString(R.string.label_folder_processed))
+      appendLine()
+      appendLine(context.getString(R.string.format_files_completed, summary.successCount, summary.totalFiles))
+      if (summary.failedCount > 0) {
+         appendLine(context.getString(R.string.format_failed_count, summary.failedCount))
+         appendLine(context.getString(R.string.msg_see_log_details))
+      }
+      appendLine()
+      appendLine(context.getString(R.string.msg_saved_to_downloads))
+      append(logPathMsg)
+   }
+
+   private fun buildDetailedStats(
+      context: android.content.Context,
+      summary: FolderConversionSummary,
+      logPathMsg: String
+   ): String = buildString {
+      appendLine(context.getString(R.string.label_folder_processed))
+      appendLine()
+      
+      // === ДЕТАЛЬНАЯ СТАТИСТИКА ===
+      appendLine(context.getString(R.string.stats_title))
+      appendLine("─".repeat(40))
+      appendLine()
+      
+      // 1. Файлов всего
+      appendLine(context.getString(R.string.stats_all_files))
+      appendLine(context.getString(
+         R.string.stats_success, 
+         summary.successCount, 
+         summary.totalFiles
+      ))
+      appendLine(context.getString(
+         R.string.stats_failed,
+         summary.failedCount,
+         summary.totalFiles
+      ))
+      appendLine()
+      
+      // 2. NSZ файлов (если есть)
+      if (summary.nszFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_nsz_conversion))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.nszSuccessCount, 
+            summary.nszFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.nszFailedCount,
+            summary.nszFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      // 3. XCZ файлов (если есть)
+      if (summary.xczFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_xcz_conversion))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.xczSuccessCount, 
+            summary.xczFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.xczFailedCount,
+            summary.xczFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      // 4. Скопированных файлов (если есть)
+      if (summary.copyFilesProcessed > 0) {
+         appendLine(context.getString(R.string.stats_files_copied))
+         appendLine(context.getString(
+            R.string.stats_success, 
+            summary.copySuccessCount, 
+            summary.copyFilesProcessed
+         ))
+         appendLine(context.getString(
+            R.string.stats_failed,
+            summary.copyFailedCount,
+            summary.copyFilesProcessed
+         ))
+         appendLine()
+      }
+      
+      appendLine("─".repeat(40))
+      // === КОНЕЦ ДЕТАЛЬНОЙ СТАТИСТИКИ ===
+
+      if (summary.failedCount > 0) {
+         appendLine(context.getString(R.string.format_failed_count, summary.failedCount))
+         appendLine(context.getString(R.string.msg_see_log_details))
+      }
+
+      appendLine()
+      appendLine(context.getString(R.string.msg_saved_to_downloads))
+      append(logPathMsg)
    }
 }

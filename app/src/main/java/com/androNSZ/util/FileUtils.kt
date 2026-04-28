@@ -16,9 +16,9 @@ data class ResolvedInputFile(
         val deleted = TempFileManager.deleteQuietly(file)
         if (statusCallback != null) {
             if (deleted) {
-                statusCallback.onStatus("NSZ", "Временный исходный файл удалён")
+                statusCallback.onStatus("NSZ", "Temp source file deleted")
             } else if (file.exists()) {
-                statusCallback.onStatus("ERROR", "Не удалось удалить временный исходный файл: ${file.absolutePath}")
+                statusCallback.onStatus("ERROR", "Failed to delete temp source file: ${file.absolutePath}")
             }
         }
     }
@@ -35,7 +35,7 @@ fun resolveToFilePath(
     val tmpFile = TempFileManager.createManagedTempFile(context, fileName, "nsz")
 
     val originalSize = getUriSize(context, uri)
-    statusCallback?.onStatus("NSZ", "Копирование в кэш: $fileName (%.2f MB)".format(originalSize / 1024.0 / 1024.0))
+    statusCallback?.onStatus("NSZ", "Copying to cache: $fileName (%.2f MB)".format(originalSize / 1024.0 / 1024.0))
 
     context.contentResolver.openInputStream(uri)!!.use { ins ->
         tmpFile.outputStream().use { out -> ins.copyTo(out) }
@@ -43,11 +43,11 @@ fun resolveToFilePath(
 
     val copiedSize = tmpFile.length()
     if (originalSize > 0 && copiedSize != originalSize) {
-        statusCallback?.onStatus("ERROR", "Размер файла в кэше ($copiedSize) не совпадает с оригиналом ($originalSize)")
+        statusCallback?.onStatus("ERROR", "Cache file size ($copiedSize) doesn't match original ($originalSize)")
         throw Exception("File size mismatch after copying to cache: expected $originalSize, got $copiedSize")
     }
 
-    statusCallback?.onStatus("NSZ", "Файл успешно скопирован в кэш: ${tmpFile.absolutePath}")
+    statusCallback?.onStatus("NSZ", "File successfully copied to cache: ${tmpFile.absolutePath}")
     return ResolvedInputFile(tmpFile, true)
 }
 

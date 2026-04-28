@@ -4,29 +4,130 @@ import android.net.Uri
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.FolderOpen
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InsertDriveFile
+import androidx.compose.material.icons.filled.MoreVert
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
+import com.androNSZ.nut.KeysManager
+import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ModeSelectionScreen(
    onModeSelected: (ConversionMode) -> Unit,
    keysInstalled: Boolean,
-   onInstallKeys: () -> Unit
+   onInstallKeys: () -> Unit,
+   onNavigateToAbout: () -> Unit,
+   onNavigateToSettings: () -> Unit,
+   onCheckKeys: () -> Unit,
+   onChangeOutputFolder: () -> Unit
 ) {
-   Column(
-      modifier = Modifier
-         .fillMaxSize()
-         .padding(24.dp),
-      horizontalAlignment = Alignment.CenterHorizontally,
-      verticalArrangement = Arrangement.spacedBy(16.dp)
-   ) {
+   val context = LocalContext.current
+   var settingsMenuExpanded by remember { mutableStateOf(false) }
+
+   Scaffold(
+      topBar = {
+         CompactCenterAlignedTopAppBar(
+            title = { Text(stringResource(R.string.app_title)) },
+            actions = {
+               Box {
+                  IconButton(onClick = { settingsMenuExpanded = true }) {
+                     Icon(
+                        imageVector = Icons.Filled.MoreVert,
+                        contentDescription = stringResource(R.string.cd_settings),
+                        tint = MaterialTheme.colorScheme.onPrimary,
+                     )
+                  }
+                  DropdownMenu(
+                     expanded = settingsMenuExpanded,
+                     onDismissRequest = { settingsMenuExpanded = false }
+                  ) {
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_change_prod_keys)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onInstallKeys()
+                        }
+                     )
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_remove_prod_keys)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           KeysManager.deleteKeys(context)
+                           onCheckKeys()
+                        }
+                     )
+                     HorizontalDivider()
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_change_output_folder)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onChangeOutputFolder()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.FolderOpen,
+                              contentDescription = null
+                           )
+                        }
+                     )
+                     HorizontalDivider()
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_settings)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onNavigateToSettings()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.Settings,
+                              contentDescription = null
+                           )
+                        }
+                     )
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.action_about_app)) },
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onNavigateToAbout()
+                        },
+                        leadingIcon = {
+                           Icon(
+                              imageVector = Icons.Filled.Info,
+                              contentDescription = null
+                           )
+                        }
+                     )
+                  }
+               }
+            },
+            colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+               containerColor = MaterialTheme.colorScheme.primary,
+               titleContentColor = MaterialTheme.colorScheme.onPrimary,
+            )
+         )
+      }
+   ) { padding ->
+      Column(
+         modifier = Modifier
+            .fillMaxSize()
+            .padding(padding)
+            .padding(24.dp),
+         horizontalAlignment = Alignment.CenterHorizontally,
+         verticalArrangement = Arrangement.spacedBy(16.dp)
+      ) {
       if (!keysInstalled) {
          Card(
             modifier = Modifier.fillMaxWidth(),
@@ -43,13 +144,13 @@ fun ModeSelectionScreen(
                verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
                Text(
-                  text = "prod.keys required for proper NSZ to NSP decompression.",
+                  text = stringResource(R.string.msg_prod_keys_required),
                   style = MaterialTheme.typography.bodyMedium,
                   color = MaterialTheme.colorScheme.onErrorContainer,
                   textAlign = TextAlign.Center,
                )
                Text(
-                  text = "Install prod.keys",
+                  text = stringResource(R.string.action_install_prod_keys),
                   style = MaterialTheme.typography.labelLarge,
                   color = MaterialTheme.colorScheme.onErrorContainer,
                   textAlign = TextAlign.Center,
@@ -57,32 +158,34 @@ fun ModeSelectionScreen(
             }
          }
       }
-
-      Spacer(modifier = Modifier.height(32.dp))
-
+      
+//      Spacer(modifier = Modifier.height(0.dp))
+      
       Text(
-         text = "Выберите режим работы",
+         text = stringResource(R.string.msg_select_mode),
          style = MaterialTheme.typography.headlineMedium,
-         textAlign = TextAlign.Center,
+         color = MaterialTheme.colorScheme.onSurface,
+         textAlign = TextAlign.Center
       )
-
-      Spacer(modifier = Modifier.height(16.dp))
-
+      
+      Spacer(modifier = Modifier.height(0.dp))
+      
       ModeCard(
-         title = "Выбрать файлы",
-         description = "Выберите один или несколько NSZ файлов для конверсии",
+         title = stringResource(R.string.action_select_files),
+         description = stringResource(R.string.msg_select_files_desc),
          icon = Icons.Filled.InsertDriveFile,
          enabled = keysInstalled,
          onClick = { onModeSelected(ConversionMode.SingleFiles(emptyList())) }
       )
 
       ModeCard(
-         title = "Выбрать папку",
-         description = "Конвертирует все NSZ файлы в папке, сохраняя структуру",
+         title = stringResource(R.string.action_select_folder),
+         description = stringResource(R.string.msg_select_folder_desc),
          icon = Icons.Filled.Folder,
          enabled = keysInstalled,
          onClick = { onModeSelected(ConversionMode.FolderMode(Uri.EMPTY, null)) }
       )
+      }
    }
 }
 

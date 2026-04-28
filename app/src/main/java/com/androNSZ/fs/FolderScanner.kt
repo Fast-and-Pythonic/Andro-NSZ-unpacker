@@ -17,11 +17,12 @@ object FolderScanner {
         statusCallback: NszConverter.StatusCallback? = null
     ): FolderStructure = withContext(Dispatchers.IO) {
         val nszFiles = mutableListOf<Uri>()
+        val xczFiles = mutableListOf<Uri>()
         val totalSizeRef = LongArray(1)
         val fileCountRef = IntArray(1)
         val folderCountRef = IntArray(1)
 
-        statusCallback?.onStatus("SCAN", "Начало сканирования папки...")
+        statusCallback?.onStatus("SCAN", "Starting folder scan...")
         val startTime = System.currentTimeMillis()
 
         val documentId = DocumentsContract.getTreeDocumentId(folderUri)
@@ -35,6 +36,7 @@ object FolderScanner {
             folderUri,
             childrenUri,
             nszFiles,
+            xczFiles,
             fileCountRef,
             folderCountRef,
             statusCallback
@@ -44,13 +46,14 @@ object FolderScanner {
 
         val elapsedMs = System.currentTimeMillis() - startTime
         val totalSizeMB = totalSizeRef[0] / 1024.0 / 1024.0
-        statusCallback?.onStatus("SCAN", "Сканирование завершено за ${elapsedMs}мс")
-        statusCallback?.onStatus("INFO", "Найдено: ${fileCountRef[0]} файлов, ${folderCountRef[0]} папок")
-        statusCallback?.onStatus("INFO", "NSZ файлов: ${nszFiles.size}, общий размер: %.2f MB".format(totalSizeMB))
+        statusCallback?.onStatus("SCAN", "Scan completed in ${elapsedMs}ms")
+        statusCallback?.onStatus("INFO", "Found: ${fileCountRef[0]} files, ${folderCountRef[0]} folders")
+        statusCallback?.onStatus("INFO", "NSZ files: ${nszFiles.size}, XCZ files: ${xczFiles.size}, total size: %.2f MB".format(totalSizeMB))
 
         FolderStructure(
             rootUri = folderUri,
             nszFiles = nszFiles,
+            xczFiles = xczFiles,
             allFiles = tree,
             totalSize = totalSizeRef[0]
         )
@@ -61,6 +64,7 @@ object FolderScanner {
         treeUri: Uri,
         uri: Uri,
         nszFiles: MutableList<Uri>,
+        xczFiles: MutableList<Uri>,
         fileCountRef: IntArray,
         folderCountRef: IntArray,
         statusCallback: NszConverter.StatusCallback?,
@@ -97,7 +101,7 @@ object FolderScanner {
 
                 if (mimeType == DocumentsContract.Document.MIME_TYPE_DIR) {
                     folderCountRef[0]++
-                    statusCallback?.onStatus("SCAN", "Найдена папка: $name")
+                    statusCallback?.onStatus("SCAN", "Found folder: $name")
 
                     val childUri = DocumentsContract.buildChildDocumentsUriUsingTree(
                         treeUri,
@@ -108,6 +112,7 @@ object FolderScanner {
                         treeUri,
                         childUri,
                         nszFiles,
+                        xczFiles,
                         fileCountRef,
                         folderCountRef,
                         statusCallback,
@@ -117,17 +122,24 @@ object FolderScanner {
                 } else {
                     fileCountRef[0]++
                     val isNsz = name.endsWith(".nsz", ignoreCase = true)
+                    val isXcz = name.endsWith(".xcz", ignoreCase = true)
                     val fileUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, docId)
 
                     val sizeMB = size / 1024.0 / 1024.0
-                    val fileType = if (isNsz) "NSZ" else name.substringAfterLast('.', "файл")
-                    statusCallback?.onStatus("SCAN", "Найден файл: $name (%.2f MB, $fileType)".format(sizeMB))
+                    val fileType = when {
+                        isNsz -> "NSZ"
+                        isXcz -> "XCZ"
+                        else -> name.substringAfterLast('.', "file")
+                    }
+                    statusCallback?.onStatus("SCAN", "Found file: $name (%.2f MB, $fileType)".format(sizeMB))
 
                     if (isNsz) {
                         nszFiles.add(fileUri)
+                    } else if (isXcz) {
+                        xczFiles.add(fileUri)
                     }
 
-                    results.add(FileNode.File(fileUri, name, isNsz))
+                    results.add(FileNode.File(fileUri, name, isNsz, isXcz))
                     addToTotalSize(size)
                 }
             }
