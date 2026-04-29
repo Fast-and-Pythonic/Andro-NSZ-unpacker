@@ -10,6 +10,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
+import com.androNSZ.util.toDisplayPath
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -32,7 +33,8 @@ fun ModeSelectionScreen(
    onNavigateToAbout: () -> Unit,
    onNavigateToSettings: () -> Unit,
    onCheckKeys: () -> Unit,
-   onChangeOutputFolder: () -> Unit
+   onChangeOutputFolder: () -> Unit,
+   outputFolderUri: Uri?
 ) {
    val context = LocalContext.current
    var settingsMenuExpanded by remember { mutableStateOf(false) }
@@ -71,7 +73,17 @@ fun ModeSelectionScreen(
                      )
                      HorizontalDivider()
                      DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_change_output_folder)) },
+                        // "Output folder" is intentionally NOT translated — keep as-is for all languages
+                        text = {
+                           Column {
+                              Text("Output folder")
+                              Text(
+                                 text = outputFolderUri?.toDisplayPath() ?: "Downloads",
+                                 style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                              )
+                           }
+                        },
                         onClick = {
                            settingsMenuExpanded = false
                            onChangeOutputFolder()

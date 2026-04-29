@@ -2,6 +2,7 @@ package com.androNSZ.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.FolderOpen
@@ -15,6 +16,7 @@ import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 import com.androNSZ.nut.KeysManager
+import com.androNSZ.util.toDisplayPath
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 import com.androNSZ.ui.conversion.FolderModeUI
 import com.androNSZ.ui.conversion.LegacySingleFileUI
@@ -85,7 +87,17 @@ fun ConversionScreen(
                      )
                      HorizontalDivider()
                      DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_change_output_folder)) },
+                        // "Output folder" is intentionally NOT translated — keep as-is for all languages
+                        text = {
+                           Column {
+                              Text("Output folder")
+                              Text(
+                                 text = vm.outputFolderUri?.toDisplayPath() ?: "Downloads",
+                                 style = MaterialTheme.typography.labelSmall,
+                                 color = MaterialTheme.colorScheme.onSurfaceVariant
+                              )
+                           }
+                        },
                         onClick = {
                            settingsMenuExpanded = false
                            onChangeOutputFolder()
