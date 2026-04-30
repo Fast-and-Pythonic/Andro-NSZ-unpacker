@@ -6,10 +6,10 @@
 
 static char s_err[512];
 
-static uint32_t pfs0_align_0x20(uint32_t n)
+static uint32_t pfs0_align_0x10(uint32_t n)
 {
-    uint32_t rem = n % 0x20u;
-    return rem == 0 ? 0x20u : (0x20u - rem);
+    uint32_t rem = n % 0x10u;
+    return rem == 0 ? 0 : (0x10u - rem);
 }
 
 const char *pfs0_last_error(void) { return s_err; }
@@ -142,10 +142,24 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
     uint32_t header_size_non_padded = 0x10u
                                     + (uint32_t)fc * (uint32_t)sizeof(Pfs0FileEntry)
                                     + strtab_size_non_padded;
-    uint32_t strtab_padding = pfs0_align_0x20(header_size_non_padded);
+    uint32_t strtab_padding = pfs0_align_0x10(header_size_non_padded);
     uint32_t strtab_size = strtab_size_non_padded + strtab_padding;
 
     memset(strtab + strtab_size_non_padded, 0, strtab_padding);
+
+    /* When cert/tik files lead the container, align first-file data to 0x8000
+       by inserting a zero gap — matching the layout of official Nintendo NSP files. */
+    uint32_t header_size = 0x10u + (uint32_t)fc * (uint32_t)sizeof(Pfs0FileEntry)
+                         + strtab_size;
+    uint32_t data_gap = 0;
+    if (fc > 0 && header_size < 0x8000u) {
+        const char *first = container->files[0].name;
+        size_t flen = strlen(first);
+        int is_meta = (flen >= 5 && strcmp(first + flen - 5, ".cert") == 0) ||
+                      (flen >= 4 && strcmp(first + flen - 4, ".tik")  == 0);
+        if (is_meta)
+            data_gap = 0x8000u - header_size;
+    }
 
     Pfs0Header hdr;
     hdr.magic             = PFS0_MAGIC;
@@ -158,7 +172,7 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
         return -1;
     }
 
-    uint64_t cur_offset = 0;
+    uint64_t cur_offset = data_gap;  /* entry offsets skip the alignment gap */
     for (int i = 0; i < fc; i++) {
         Pfs0FileEntry e;
         e.offset        = cur_offset;
@@ -176,6 +190,22 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
     if (fwrite(strtab, 1, strtab_size, out_fp) != strtab_size) {
         snprintf(s_err, sizeof(s_err), "pfs0_write_header: write strtab failed");
         return -3;
+    }
+
+    /* Write alignment gap zeros so first file lands at absolute 0x8000 */
+    if (data_gap > 0) {
+        uint8_t zero_buf[4096];
+        memset(zero_buf, 0, sizeof(zero_buf));
+        uint32_t remaining = data_gap;
+        while (remaining > 0) {
+            uint32_t chunk = remaining < sizeof(zero_buf)
+                           ? remaining : (uint32_t)sizeof(zero_buf);
+            if (fwrite(zero_buf, 1, chunk, out_fp) != chunk) {
+                snprintf(s_err, sizeof(s_err), "pfs0_write_header: write gap failed");
+                return -4;
+            }
+            remaining -= chunk;
+        }
     }
 
     return 0;
