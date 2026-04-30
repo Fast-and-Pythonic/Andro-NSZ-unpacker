@@ -2,6 +2,7 @@ package com.androNSZ.ui.conversion
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -9,6 +10,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.*
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -178,60 +183,6 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
             }
          }
 
-         /* ── Conversion log (collapsible) ── */
-         if (vm.statusLog.isNotEmpty()) {
-            var logVisible by remember { mutableStateOf(false) }
-
-            TextButton(
-               onClick = { logVisible = !logVisible },
-               modifier = Modifier.fillMaxWidth(),
-            ) {
-               Icon(
-                  imageVector = if (logVisible) Icons.Filled.KeyboardArrowUp
-                                else Icons.Filled.KeyboardArrowDown,
-                  contentDescription = null,
-                  modifier = Modifier.size(18.dp),
-               )
-               Spacer(Modifier.width(4.dp))
-               Text(if (logVisible) stringResource(R.string.action_hide_log) else stringResource(R.string.action_show_log))
-            }
-
-            if (logVisible) {
-               val logScrollState = rememberScrollState()
-               LaunchedEffect(vm.statusLog.size) {
-                  logScrollState.animateScrollTo(logScrollState.maxValue)
-               }
-               Surface(
-                  modifier = Modifier
-                     .fillMaxWidth()
-                     .heightIn(min = 80.dp, max = 260.dp),
-                  color  = MaterialTheme.colorScheme.surfaceVariant,
-                  shape  = MaterialTheme.shapes.medium,
-               ) {
-                  Column(
-                     modifier = Modifier
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .verticalScroll(logScrollState),
-                  ) {
-                     for (entry in vm.statusLog) {
-                        val color = when (entry.tag) {
-                           "VERIFIED" -> Color(0xFF4CAF50)
-                           "NCA_HASH" -> MaterialTheme.colorScheme.onSurfaceVariant
-                           "ERROR"    -> MaterialTheme.colorScheme.error
-                           else       -> MaterialTheme.colorScheme.onSurface
-                        }
-                        Text(
-                           text       = "[${entry.tag}]${entry.message}",
-                           style      = MaterialTheme.typography.bodySmall,
-                           fontFamily = FontFamily.Monospace,
-                           color      = color,
-                        )
-                     }
-                  }
-               }
-            }
-         }
-
          /* ── Status message ── */
          val msg = vm.statusMessage
          if (msg != null) {
@@ -253,6 +204,79 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                   else
                      MaterialTheme.colorScheme.onErrorContainer,
                )
+            }
+         }
+
+         /* ── Conversion log (collapsible) ── */
+         if (vm.statusLog.isNotEmpty()) {
+            var logVisible by remember { mutableStateOf(false) }
+            var wordWrap by remember { mutableStateOf(true) }
+
+            Row(
+               modifier = Modifier.fillMaxWidth(),
+               verticalAlignment = Alignment.CenterVertically,
+            ) {
+               TextButton(
+                  onClick = { logVisible = !logVisible },
+                  modifier = Modifier.weight(1f),
+               ) {
+                  Icon(
+                     imageVector = if (logVisible) Icons.Filled.KeyboardArrowUp
+                                   else Icons.Filled.KeyboardArrowDown,
+                     contentDescription = null,
+                     modifier = Modifier.size(18.dp),
+                  )
+                  Spacer(Modifier.width(4.dp))
+                  Text(if (logVisible) stringResource(R.string.action_hide_log) else stringResource(R.string.action_show_log))
+               }
+               TextButton(onClick = { wordWrap = !wordWrap }) {
+                  Text(stringResource(if (wordWrap) R.string.action_wrap_lines_on else R.string.action_wrap_lines_off))
+               }
+            }
+
+            if (logVisible) {
+               val logScrollState = rememberScrollState()
+               val hScrollState = rememberScrollState()
+               val consumeAllScroll = remember {
+                  object : NestedScrollConnection {
+                     override fun onPostScroll(consumed: Offset, available: Offset, source: NestedScrollSource): Offset = available
+                  }
+               }
+               LaunchedEffect(vm.statusLog.size) {
+                  logScrollState.animateScrollTo(logScrollState.maxValue)
+               }
+               Surface(
+                  modifier = Modifier
+                     .fillMaxWidth()
+                     .heightIn(min = 80.dp, max = 390.dp)
+                     .nestedScroll(consumeAllScroll),
+                  color  = MaterialTheme.colorScheme.surfaceVariant,
+                  shape  = MaterialTheme.shapes.medium,
+               ) {
+                  Column(
+                     modifier = Modifier
+                        .padding(horizontal = 10.dp, vertical = 6.dp)
+                        .let { if (!wordWrap) it.horizontalScroll(hScrollState) else it }
+                        .verticalScroll(logScrollState),
+                  ) {
+                     for (entry in vm.statusLog) {
+                        val color = when (entry.tag) {
+                           "VERIFIED" -> Color(0xFF4CAF50)
+                           "NCA_HASH" -> MaterialTheme.colorScheme.onSurfaceVariant
+                           "ERROR"    -> MaterialTheme.colorScheme.error
+                           else       -> MaterialTheme.colorScheme.onSurface
+                        }
+                        Text(
+                           text       = "[${entry.tag}]${entry.message}",
+                           style      = MaterialTheme.typography.bodySmall,
+                           fontFamily = FontFamily.Monospace,
+                           color      = color,
+                           softWrap   = wordWrap,
+                           overflow   = TextOverflow.Clip,
+                        )
+                     }
+                  }
+               }
             }
          }
    }

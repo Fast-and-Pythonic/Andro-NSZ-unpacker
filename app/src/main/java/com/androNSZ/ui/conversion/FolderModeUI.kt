@@ -46,6 +46,9 @@ import com.androNSZ.model.countAllFiles
 import com.androNSZ.ui.components.CompactToggleButton
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.StatusMessageCard
+import com.androNSZ.ui.components.StatsCompact2Card
+import com.androNSZ.ui.components.StatsCompact3Card
+import com.androNSZ.model.StatsFormat
 import com.androNSZ.util.fmtBytes
 import com.androNSZ.viewmodel.MainViewModel
 
@@ -224,8 +227,16 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
          }
       }
 
+      val c2 = vm.compact2Stats
+      if (c2 != null) {
+         when (vm.statsFormat) {
+            StatsFormat.COMPACT3 -> StatsCompact3Card(c2, vm.isSuccess)
+            else                 -> StatsCompact2Card(c2, vm.isSuccess)
+         }
+      } else {
+         StatusMessageCard(vm.statusMessage, vm.isSuccess)
+      }
       StatusLogPanel(vm.statusLog)
-      StatusMessageCard(vm.statusMessage, vm.isSuccess)
    }
 }
 

@@ -18,6 +18,8 @@
     <string name="action_hide_structure">Скрыть структуру</string>
     <string name="action_show_log">Показать лог</string>
     <string name="action_hide_log">Скрыть лог</string>
+    <string name="action_wrap_lines_on">Перенос Включён</string>
+    <string name="action_wrap_lines_off">Перенос Отключён</string>
     <string name="action_install_prod_keys">Установить prod.keys</string>
     <string name="action_change_prod_keys">Изменить prod.keys</string>
     <string name="action_remove_prod_keys">Удалить prod.keys</string>
@@ -100,6 +102,10 @@
     <string name="settings_title">Настройки</string>
     <string name="settings_stats_format">Вариант итоговой статистики</string>
     <string name="stats_format_compact">Компактно</string>
+    <string name="stats_format_compact2">Компактно 2</string>
+    <string name="stats_format_compact3">Компактно 3</string>
+    <string name="stats_c2_total">Всего файлов</string>
+    <string name="stats_c2_copied">Скопировано</string>
     <string name="stats_format_detailed">Развёрнуто</string>
     <string name="settings_language">Язык приложения</string>
     <string name="language_system">Системный</string>

@@ -61,7 +61,11 @@ class MainViewModel : ViewModel() {
    var isConverting  by mutableStateOf(false)
    var progress      by mutableStateOf<ConversionProgress?>(null)
    var statusMessage by mutableStateOf<String?>(null)
+   var compact2Stats by mutableStateOf<Compact2Stats?>(null)
    var isSuccess     by mutableStateOf(false)
+
+   private var lastFolderSummary: FolderConversionSummary? = null
+   private var lastLogPathMsg: String = ""
    var keysInstalled by mutableStateOf(false)
    val statusLog = mutableStateListOf<LogEntry>()
 
@@ -114,8 +118,24 @@ class MainViewModel : ViewModel() {
 
    fun saveStatsFormat(context: android.content.Context, format: StatsFormat) {
       statsFormat = format
+      reapplyStats(context, format)
       viewModelScope.launch {
          SettingsRepository.getInstance(context).saveStatsFormat(format)
+      }
+   }
+
+   private fun reapplyStats(context: android.content.Context, format: StatsFormat) {
+      val summary = lastFolderSummary ?: return
+      if (format == StatsFormat.COMPACT2) {
+         compact2Stats = buildCompact2Data(context, summary, lastLogPathMsg)
+         statusMessage = null
+      } else {
+         compact2Stats = null
+         statusMessage = when (format) {
+            StatsFormat.COMPACT -> buildCompactStats(context, summary, lastLogPathMsg)
+            StatsFormat.DETAILED -> buildDetailedStats(context, summary, lastLogPathMsg)
+            else -> null
+         }
       }
    }
 
@@ -254,7 +274,10 @@ class MainViewModel : ViewModel() {
       folderProcessedFiles = 0
       folderTotalFiles = 0
       statusMessage = null
+      compact2Stats = null
       isSuccess = false
+      lastFolderSummary = null
+      lastLogPathMsg = ""
       statusLog.clear()
       currentFileIndex = 0
    }
@@ -397,6 +420,7 @@ class MainViewModel : ViewModel() {
       isConverting = true
       statusLog.clear()
       statusMessage = null
+      compact2Stats = null
       isSuccess = false
       progress = null
       folderOverallProgress = ConversionProgress(0L, structure.totalSize, 0.0)
@@ -459,9 +483,15 @@ class MainViewModel : ViewModel() {
                } else 100
 
                isSuccess = summary.successCount > 0 && successRate >= 50
+               lastFolderSummary = summary
+               lastLogPathMsg = logPathMsg
 
                statusMessage = when (statsFormat) {
                   StatsFormat.COMPACT -> buildCompactStats(context, summary, logPathMsg)
+                  StatsFormat.COMPACT2, StatsFormat.COMPACT3 -> {
+                     compact2Stats = buildCompact2Data(context, summary, logPathMsg)
+                     null
+                  }
                   StatsFormat.DETAILED -> buildDetailedStats(context, summary, logPathMsg)
                }
             }.onFailure { e ->
@@ -484,6 +514,36 @@ class MainViewModel : ViewModel() {
             withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
          }
       }
+   }
+
+   private fun buildCompact2Data(
+      context: android.content.Context,
+      summary: FolderConversionSummary,
+      logPathMsg: String
+   ): Compact2Stats {
+      val rows = mutableListOf<Compact2Row>()
+      rows += Compact2Row(
+         label = context.getString(R.string.stats_c2_total),
+         success = summary.successCount,
+         failed = summary.failedCount,
+         total = summary.totalFiles
+      )
+      if (summary.nszFilesProcessed > 0)
+         rows += Compact2Row("NSZ", summary.nszSuccessCount, summary.nszFailedCount, summary.nszFilesProcessed)
+      if (summary.xczFilesProcessed > 0)
+         rows += Compact2Row("XCZ", summary.xczSuccessCount, summary.xczFailedCount, summary.xczFilesProcessed)
+      if (summary.copyFilesProcessed > 0)
+         rows += Compact2Row(
+            label = context.getString(R.string.stats_c2_copied),
+            success = summary.copySuccessCount,
+            failed = summary.copyFailedCount,
+            total = summary.copyFilesProcessed
+         )
+      return Compact2Stats(
+         headerLine = context.getString(R.string.label_folder_processed),
+         rows = rows,
+         footerLine = context.getString(R.string.msg_saved_to_downloads) + logPathMsg
+      )
    }
 
    private fun buildCompactStats(
