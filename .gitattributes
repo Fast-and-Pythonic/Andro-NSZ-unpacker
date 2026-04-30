@@ -1,0 +1,11 @@
+# Все текстовые файлы — LF
+* text=auto eol=lf
+
+# Бинарные файлы — без конвертации
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.keystore binary
+*.jks binary

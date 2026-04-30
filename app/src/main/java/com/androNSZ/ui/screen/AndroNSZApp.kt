@@ -42,7 +42,8 @@ fun AndroNSZApp(vm: MainViewModel) {
             onNavigateToAbout = { vm.navigateTo(Screen.About) },
             onNavigateToSettings = { vm.navigateTo(Screen.Settings) },
             onCheckKeys = { vm.checkKeys(context) },
-            onChangeOutputFolder = { outputFolderPicker.launch(null) }
+            onChangeOutputFolder = { outputFolderPicker.launch(null) },
+            outputFolderUri = vm.outputFolderUri
          )
       }
       Screen.Conversion -> {

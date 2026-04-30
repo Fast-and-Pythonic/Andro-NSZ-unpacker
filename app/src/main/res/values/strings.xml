@@ -18,6 +18,8 @@
     <string name="action_hide_structure">Hide structure</string>
     <string name="action_show_log">Show log</string>
     <string name="action_hide_log">Hide log</string>
+    <string name="action_wrap_lines_on">Line breaks Enabled</string>
+    <string name="action_wrap_lines_off">Line breaks Disabled</string>
     <string name="action_install_prod_keys">Install prod.keys</string>
     <string name="action_change_prod_keys">Change prod.keys</string>
     <string name="action_remove_prod_keys">Remove prod.keys</string>
@@ -100,6 +102,10 @@
     <string name="settings_title">Settings</string>
     <string name="settings_stats_format">Final statistics format</string>
     <string name="stats_format_compact">Compact</string>
+    <string name="stats_format_compact2">Compact 2</string>
+    <string name="stats_format_compact3">Compact 3</string>
+    <string name="stats_c2_total">Total files</string>
+    <string name="stats_c2_copied">Files copied</string>
     <string name="stats_format_detailed">Detailed</string>
     <string name="settings_language">App language</string>
     <string name="language_system">System default</string>

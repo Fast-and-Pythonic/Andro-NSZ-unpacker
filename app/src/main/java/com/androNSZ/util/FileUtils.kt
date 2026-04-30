@@ -60,3 +60,15 @@ fun queryFileName(context: Context, uri: Uri): String {
     }
     return "input.nsz"
 }
+
+// Returns a human-readable folder path from a SAF tree URI.
+// SAF tree URIs carry the path as the last path segment in the form "primary:Path/To/Folder".
+// We strip the storage volume prefix to show only the relative path.
+fun Uri.toDisplayPath(): String {
+    val segment = lastPathSegment ?: return toString()
+    val colonIdx = segment.indexOf(':')
+    return if (colonIdx >= 0) {
+        val path = segment.substring(colonIdx + 1)
+        if (path.isEmpty()) "/" else path
+    } else segment
+}

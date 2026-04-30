@@ -78,6 +78,8 @@ fun SettingsScreen(
                   OutlinedTextField(
                      value = when (currentFormat) {
                         StatsFormat.COMPACT -> stringResource(R.string.stats_format_compact)
+                        StatsFormat.COMPACT2 -> stringResource(R.string.stats_format_compact2)
+                        StatsFormat.COMPACT3 -> stringResource(R.string.stats_format_compact3)
                         StatsFormat.DETAILED -> stringResource(R.string.stats_format_detailed)
                      },
                      onValueChange = {},
@@ -102,6 +104,20 @@ fun SettingsScreen(
                         text = { Text(stringResource(R.string.stats_format_compact)) },
                         onClick = {
                            onFormatChange(StatsFormat.COMPACT)
+                           expanded = false
+                        }
+                     )
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.stats_format_compact2)) },
+                        onClick = {
+                           onFormatChange(StatsFormat.COMPACT2)
+                           expanded = false
+                        }
+                     )
+                     DropdownMenuItem(
+                        text = { Text(stringResource(R.string.stats_format_compact3)) },
+                        onClick = {
+                           onFormatChange(StatsFormat.COMPACT3)
                            expanded = false
                         }
                      )

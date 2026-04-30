@@ -2,8 +2,13 @@ package com.androNSZ.ui.screen
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
@@ -15,6 +20,8 @@ import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 import com.androNSZ.nut.KeysManager
+import com.androNSZ.util.toDisplayPath
+import com.androNSZ.ui.components.AppDropdownMenuItem
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 import com.androNSZ.ui.conversion.FolderModeUI
 import com.androNSZ.ui.conversion.LegacySingleFileUI
@@ -66,64 +73,72 @@ fun ConversionScreen(
                   }
                   DropdownMenu(
                      expanded = settingsMenuExpanded,
-                     onDismissRequest = { settingsMenuExpanded = false }
+                     onDismissRequest = { settingsMenuExpanded = false },
+                     shape = RoundedCornerShape(14.dp)
                   ) {
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_change_prod_keys)) },
+                     AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
                            onInstallKeys()
-                        }
-                     )
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_remove_prod_keys)) },
+                        },
+                        leadingIcon = { Icon(Icons.Filled.Edit, contentDescription = null) }
+                     ) {
+                        Text(stringResource(R.string.action_change_prod_keys))
+                     }
+                     AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
                            KeysManager.deleteKeys(context)
                            vm.checkKeys(context)
-                        }
-                     )
+                        },
+                        leadingIcon = { Icon(Icons.Filled.Delete, contentDescription = null) },
+                        destructive = true
+                     ) {
+                        Text(stringResource(R.string.action_remove_prod_keys))
+                     }
                      HorizontalDivider()
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_change_output_folder)) },
+                     AppDropdownMenuItem(
+                        // "Output folder" is intentionally NOT translated — keep as-is for all languages
                         onClick = {
                            settingsMenuExpanded = false
                            onChangeOutputFolder()
                         },
                         leadingIcon = {
-                           Icon(
-                              imageVector = Icons.Filled.FolderOpen,
-                              contentDescription = null
+                           Icon(imageVector = Icons.Filled.FolderOpen, contentDescription = null)
+                        }
+                     ) {
+                        Column {
+                           Text("Output folder")
+                           Text(
+                              text = vm.outputFolderUri?.toDisplayPath() ?: "Downloads",
+                              style = MaterialTheme.typography.labelSmall,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant
                            )
                         }
-                     )
+                     }
                      HorizontalDivider()
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_settings)) },
+                     AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
                            onNavigateToSettings()
                         },
                         leadingIcon = {
-                           Icon(
-                              imageVector = Icons.Filled.Settings,
-                              contentDescription = null
-                           )
+                           Icon(imageVector = Icons.Filled.Settings, contentDescription = null)
                         }
-                     )
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.action_about_app)) },
+                     ) {
+                        Text(stringResource(R.string.action_settings))
+                     }
+                     AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
                            onNavigateToAbout()
                         },
                         leadingIcon = {
-                           Icon(
-                              imageVector = Icons.Filled.Info,
-                              contentDescription = null
-                           )
+                           Icon(imageVector = Icons.Filled.Info, contentDescription = null)
                         }
-                     )
+                     ) {
+                        Text(stringResource(R.string.action_about_app))
+                     }
                   }
                }
             },
