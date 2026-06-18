@@ -1,11 +1,71 @@
 /*
- * Software AES-128-CTR implementation.
+ * AES-128-CTR implementation.
  * Based on FIPS-197 specification.
- * On ARM64 with -march=armv8-a+crypto the compiler will use
- * AESE/AESMC/AESD/AESIMC hardware intrinsics automatically.
+ *
+ * Two code paths:
+ *   - Hardware: on ARM64 with the AES crypto extension, uses the
+ *     AESE/AESMC intrinsics (vaeseq_u8/vaesmcq_u8), processing 4 CTR
+ *     blocks at a time to keep the crypto pipeline busy. ~1-3 GB/s.
+ *   - Software: portable scalar FIPS-197 fallback for CPUs without the
+ *     extension (and all 32-bit builds). ~50-150 MB/s.
+ *
+ * The path is chosen once at runtime via getauxval(AT_HWCAP) & HWCAP_AES.
+ * Note: -march=armv8-a+crypto only *allows* the compiler to emit AES
+ * instructions where we use the intrinsics explicitly; it does NOT turn
+ * the scalar software path below into hardware AES on its own.
  */
 #include "aes_ctr.h"
 #include <string.h>
+
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+
+/* Runtime check for the ARMv8 AES crypto extension (cached). */
+static int hw_aes_supported(void)
+{
+    static int cached = -1;
+    if (cached < 0) {
+        unsigned long hwcap = getauxval(AT_HWCAP);
+        cached = (hwcap & HWCAP_AES) ? 1 : 0;
+    }
+    return cached;
+}
+
+/* Expand the 44-word (big-endian) key schedule into 11 NEON round keys. */
+static inline void neon_load_round_keys(const uint32_t *ks, uint8x16_t rk[11])
+{
+    uint8_t tmp[16];
+    for (int r = 0; r < 11; r++) {
+        for (int c = 0; c < 4; c++) {
+            uint32_t w = ks[r * 4 + c];
+            tmp[4 * c + 0] = (uint8_t)(w >> 24);
+            tmp[4 * c + 1] = (uint8_t)(w >> 16);
+            tmp[4 * c + 2] = (uint8_t)(w >>  8);
+            tmp[4 * c + 3] = (uint8_t)(w      );
+        }
+        rk[r] = vld1q_u8(tmp);
+    }
+}
+
+/* Full AES-128 encryption of one 16-byte block using the crypto extension. */
+static inline uint8x16_t neon_aes_encrypt(uint8x16_t s, const uint8x16_t rk[11])
+{
+    s = vaesmcq_u8(vaeseq_u8(s, rk[0]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[1]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[2]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[3]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[4]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[5]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[6]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[7]));
+    s = vaesmcq_u8(vaeseq_u8(s, rk[8]));
+    s = vaeseq_u8(s, rk[9]);          /* final round: no MixColumns */
+    s = veorq_u8(s, rk[10]);          /* final AddRoundKey */
+    return s;
+}
+#endif /* __aarch64__ */
 
 /* ---------- AES S-box and constants ---------- */
 
@@ -158,10 +218,11 @@ void aes_ctr_set_offset(AesCtrCtx *ctx,
     ctx->ctr[15] ^= (uint8_t)(sector      );
 }
 
-void aes_ctr_crypt(AesCtrCtx *ctx,
-                   const uint8_t *in,
-                   uint8_t *out,
-                   size_t len)
+/* Portable scalar CTR (FIPS-197 software AES). */
+static void aes_ctr_crypt_sw(AesCtrCtx *ctx,
+                             const uint8_t *in,
+                             uint8_t *out,
+                             size_t len)
 {
     uint8_t keystream[16];
     size_t i = 0;
@@ -177,4 +238,70 @@ void aes_ctr_crypt(AesCtrCtx *ctx,
         }
         i += block_bytes;
     }
+}
+
+#if defined(__aarch64__)
+/* Hardware CTR using the ARMv8 AES extension, 4 blocks interleaved. */
+static void aes_ctr_crypt_hw(AesCtrCtx *ctx,
+                             const uint8_t *in,
+                             uint8_t *out,
+                             size_t len)
+{
+    uint8x16_t rk[11];
+    neon_load_round_keys(ctx->key_schedule, rk);
+
+    size_t i = 0;
+
+    /* 4 blocks (64 bytes) at a time — keeps the AES pipeline saturated. */
+    while (i + 64 <= len) {
+        uint8x16_t c0 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+        uint8x16_t c1 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+        uint8x16_t c2 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+        uint8x16_t c3 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+
+        c0 = neon_aes_encrypt(c0, rk);
+        c1 = neon_aes_encrypt(c1, rk);
+        c2 = neon_aes_encrypt(c2, rk);
+        c3 = neon_aes_encrypt(c3, rk);
+
+        vst1q_u8(out + i,      veorq_u8(vld1q_u8(in + i),      c0));
+        vst1q_u8(out + i + 16, veorq_u8(vld1q_u8(in + i + 16), c1));
+        vst1q_u8(out + i + 32, veorq_u8(vld1q_u8(in + i + 32), c2));
+        vst1q_u8(out + i + 48, veorq_u8(vld1q_u8(in + i + 48), c3));
+        i += 64;
+    }
+
+    /* Remaining whole blocks. */
+    while (i + 16 <= len) {
+        uint8x16_t c0 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+        c0 = neon_aes_encrypt(c0, rk);
+        vst1q_u8(out + i, veorq_u8(vld1q_u8(in + i), c0));
+        i += 16;
+    }
+
+    /* Final partial block. */
+    if (i < len) {
+        uint8_t ks[16];
+        uint8x16_t c0 = vld1q_u8(ctx->ctr); ctr_inc(ctx->ctr);
+        c0 = neon_aes_encrypt(c0, rk);
+        vst1q_u8(ks, c0);
+        for (size_t j = 0; i < len; i++, j++) {
+            out[i] = in[i] ^ ks[j];
+        }
+    }
+}
+#endif /* __aarch64__ */
+
+void aes_ctr_crypt(AesCtrCtx *ctx,
+                   const uint8_t *in,
+                   uint8_t *out,
+                   size_t len)
+{
+#if defined(__aarch64__)
+    if (hw_aes_supported()) {
+        aes_ctr_crypt_hw(ctx, in, out, len);
+        return;
+    }
+#endif
+    aes_ctr_crypt_sw(ctx, in, out, len);
 }

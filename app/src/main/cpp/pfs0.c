@@ -3,8 +3,24 @@
 #include <stdlib.h>
 #include <string.h>
 #include <errno.h>
+#include <unistd.h>
 
-static char s_err[512];
+static __thread char s_err[512];  /* per-thread: safe under parallel conversions */
+
+/* Open input, supporting the "fd:N" pseudo-path (dup + fdopen of an already
+ * open descriptor) used for SAF/FUSE sources. Mirrors ncz_engine.c. */
+static FILE *pfs0_open_input(const char *path)
+{
+    if (strncmp(path, "fd:", 3) == 0) {
+        int fd = atoi(path + 3);
+        int dupfd = dup(fd);
+        if (dupfd < 0) return NULL;
+        FILE *fp = fdopen(dupfd, "rb");
+        if (!fp) { close(dupfd); return NULL; }
+        return fp;
+    }
+    return fopen(path, "rb");
+}
 
 static uint32_t pfs0_align_0x10(uint32_t n)
 {
@@ -18,7 +34,7 @@ int pfs0_parse(const char *input_path, Pfs0Container *out)
 {
     DBG("pfs0_parse: opening '%s'", input_path);
 
-    FILE *fp = fopen(input_path, "rb");
+    FILE *fp = pfs0_open_input(input_path);
     if (!fp) {
         snprintf(s_err, sizeof(s_err), "pfs0_parse: cannot open '%s': %s",
                  input_path, strerror(errno));

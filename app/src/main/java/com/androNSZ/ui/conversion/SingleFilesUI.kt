@@ -18,6 +18,7 @@ import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
+import com.androNSZ.ui.components.ElapsedTimeRow
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.util.fmtBytes
@@ -112,6 +113,8 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                   text = stringResource(R.string.format_file_n_of_m, vm.currentFileIndex + 1, vm.fileQueue.size),
                   style = MaterialTheme.typography.titleMedium
                )
+
+               ElapsedTimeRow(vm.elapsedMs)
 
                val isMultiFile = vm.fileQueue.size > 1
                val overall = vm.batchOverallProgress

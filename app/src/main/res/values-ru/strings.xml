@@ -28,6 +28,7 @@
     <!-- Labels -->
     <string name="label_current_file">Текущий файл</string>
     <string name="label_output_downloads">Вывод: папка Downloads</string>
+    <string name="label_elapsed_time">Время:</string>
     <string name="label_folder_selected">Папка выбрана</string>
     <string name="label_processing_folder">Обработка папки…</string>
     <string name="label_folder_processed">Папка обработана!</string>

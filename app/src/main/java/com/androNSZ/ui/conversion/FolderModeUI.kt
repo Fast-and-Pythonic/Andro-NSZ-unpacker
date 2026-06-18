@@ -44,6 +44,7 @@ import com.androNSZ.model.ConversionMode
 import com.androNSZ.model.FileNode
 import com.androNSZ.model.countAllFiles
 import com.androNSZ.ui.components.CompactToggleButton
+import com.androNSZ.ui.components.ElapsedTimeRow
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.ui.components.StatsCompact2Card
@@ -157,6 +158,8 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                   text = stringResource(R.string.label_processing_folder),
                   style = MaterialTheme.typography.titleMedium
                )
+
+               ElapsedTimeRow(vm.elapsedMs)
 
                val overall = vm.folderOverallProgress
                if (overall != null) {

@@ -8,7 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static char s_err[512];
+static __thread char s_err[512];  /* per-thread: safe under parallel conversions */
 
 const char *ncz_last_error(void) { return s_err; }
 

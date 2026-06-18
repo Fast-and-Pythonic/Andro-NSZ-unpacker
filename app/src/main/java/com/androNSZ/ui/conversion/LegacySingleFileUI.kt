@@ -25,6 +25,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
+import com.androNSZ.ui.components.ElapsedTimeRow
 import com.androNSZ.util.fmtBytes
 import com.androNSZ.util.resolveDisplayName
 import com.androNSZ.viewmodel.MainViewModel
@@ -177,6 +178,7 @@ fun LegacySingleFileUI(vm: MainViewModel, padding: PaddingValues, onInstallKeys:
                         fontFamily = FontFamily.Monospace,
                      )
                   }
+                  ElapsedTimeRow(vm.elapsedMs)
                }
             } else {
                LinearProgressIndicator(modifier = Modifier.fillMaxWidth())

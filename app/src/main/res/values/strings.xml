@@ -28,6 +28,7 @@
     <!-- Labels -->
     <string name="label_current_file">Current file</string>
     <string name="label_output_downloads">Output: Downloads folder</string>
+    <string name="label_elapsed_time">Time:</string>
     <string name="label_folder_selected">Folder selected</string>
     <string name="label_processing_folder">Processing folder…</string>
     <string name="label_folder_processed">Folder processed!</string>

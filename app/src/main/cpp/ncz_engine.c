@@ -44,6 +44,25 @@ const char *ncz_error_string(int code)
 /* ---------- I/O buffer size ---------- */
 #define IO_BUF_SIZE (4 * 1024 * 1024)
 
+/*
+ * Open an input stream. A path of the form "fd:N" reads an already-open file
+ * descriptor directly (via dup + fdopen), bypassing a path re-open. This is
+ * required for SAF/FUSE-backed sources whose /proc/self/fd path cannot be
+ * re-opened by native code. Any other path is opened normally.
+ */
+static FILE *open_input_file(const char *path)
+{
+    if (strncmp(path, "fd:", 3) == 0) {
+        int fd = atoi(path + 3);
+        int dupfd = dup(fd);
+        if (dupfd < 0) return NULL;
+        FILE *fp = fdopen(dupfd, "rb");
+        if (!fp) { close(dupfd); return NULL; }
+        return fp;
+    }
+    return fopen(path, "rb");
+}
+
 /* ---------- helpers ---------- */
 
 /* Returns 1 if filename looks like a hash-named NCA: 32 hex chars before extension */
@@ -131,7 +150,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
     }
 
     /* 2. Pre-scan NCZ headers for decompressed sizes */
-    FILE *in_fp = fopen(input_path, "rb");
+    FILE *in_fp = open_input_file(input_path);
     if (!in_fp) return NCZ_ERR_OPEN_INPUT;
     setvbuf(in_fp, NULL, _IOFBF, IO_BUF_SIZE);
 

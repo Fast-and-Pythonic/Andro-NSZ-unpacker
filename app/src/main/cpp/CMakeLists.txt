@@ -20,6 +20,16 @@ set(ZSTD_BUILD_CONTRIB   OFF CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(zstd)
 
+# In a debug build the zstd dependency inherits CMAKE_BUILD_TYPE=Debug, which
+# compiles it at -O0 with -DDEBUGLEVEL=1 (internal asserts) — that cripples
+# decompression throughput, the dominant cost on the conversion hot path.
+# Force it to build fully optimized regardless of the app's build type so the
+# debug APK decompresses at release speed. (-U then -D ensures DEBUGLEVEL wins.)
+if(TARGET libzstd_static)
+    target_compile_options(libzstd_static PRIVATE
+        -O3 -DNDEBUG -UDEBUGLEVEL -DDEBUGLEVEL=0)
+endif()
+
 # ── native engine library ────────────────────────────────────────────────────
 add_library(${CMAKE_PROJECT_NAME} SHARED
     nsz_debug.c
@@ -29,6 +39,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     pfs0.c
     hfs0.c
     ncz.c
+    async_writer.c
     ncz_decompress.c
     ncz_engine.c
     nca_verifier.c

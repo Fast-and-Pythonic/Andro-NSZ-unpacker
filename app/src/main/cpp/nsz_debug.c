@@ -3,26 +3,31 @@
 #include <stdarg.h>
 #include <stdint.h>
 #include <time.h>
+#include <pthread.h>
 #include <android/log.h>
 
 #define LOG_TAG "AndroNSZ"
 
 static FILE            *s_fp         = NULL;
 static struct timespec  s_start_time = {0, 0};
+/* Guards the shared log file so concurrent conversions can't race on s_fp. */
+static pthread_mutex_t  s_mtx        = PTHREAD_MUTEX_INITIALIZER;
 
 /* ── open / close ─────────────────────────────────────────────────── */
 
 void dbg_open(const char *path)
 {
+    pthread_mutex_lock(&s_mtx);
     if (s_fp) {
         fprintf(s_fp, "\n=== session closed (new session started) ===\n");
         fclose(s_fp);
         s_fp = NULL;
     }
-    if (!path || !path[0]) return;
+    if (!path || !path[0]) { pthread_mutex_unlock(&s_mtx); return; }
 
     s_fp = fopen(path, "w");
     if (!s_fp) {
+        pthread_mutex_unlock(&s_mtx);
         __android_log_print(ANDROID_LOG_WARN, LOG_TAG,
                             "dbg_open: cannot create log at '%s'", path);
         return;
@@ -36,6 +41,7 @@ void dbg_open(const char *path)
             "Format   : [elapsed ms] message\n\n",
             path);
     fflush(s_fp);
+    pthread_mutex_unlock(&s_mtx);
 
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG,
                         "debug log opened: %s", path);
@@ -43,7 +49,8 @@ void dbg_open(const char *path)
 
 void dbg_close(void)
 {
-    if (!s_fp) return;
+    pthread_mutex_lock(&s_mtx);
+    if (!s_fp) { pthread_mutex_unlock(&s_mtx); return; }
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     long ms = (now.tv_sec  - s_start_time.tv_sec)  * 1000
@@ -52,6 +59,7 @@ void dbg_close(void)
     fflush(s_fp);
     fclose(s_fp);
     s_fp = NULL;
+    pthread_mutex_unlock(&s_mtx);
     __android_log_print(ANDROID_LOG_INFO, LOG_TAG, "debug log closed");
 }
 
@@ -69,15 +77,17 @@ void dbg_log(const char *fmt, ...)
     __android_log_vprint(ANDROID_LOG_DEBUG, LOG_TAG, fmt, ap_log);
     va_end(ap_log);
 
-    if (!s_fp) return;
-
-    fprintf(s_fp, "[%6ld ms] ", ms);
-    va_list ap;
-    va_start(ap, fmt);
-    vfprintf(s_fp, fmt, ap);
-    va_end(ap);
-    fprintf(s_fp, "\n");
-    fflush(s_fp);
+    pthread_mutex_lock(&s_mtx);
+    if (s_fp) {
+        fprintf(s_fp, "[%6ld ms] ", ms);
+        va_list ap;
+        va_start(ap, fmt);
+        vfprintf(s_fp, fmt, ap);
+        va_end(ap);
+        fprintf(s_fp, "\n");
+        fflush(s_fp);
+    }
+    pthread_mutex_unlock(&s_mtx);
 }
 
 /* ── dbg_hex ──────────────────────────────────────────────────────── */
@@ -106,9 +116,11 @@ void dbg_hex(const char *label, const void *buf, size_t len)
                         "%s (%zu B): %s%s", label, len,
                         hex, len > 32 ? "..." : "");
 
-    if (!s_fp) return;
-
-    fprintf(s_fp, "[%6ld ms] %s (%zu bytes): %s%s\n",
-            ms, label, len, hex, len > 32 ? "..." : "");
-    fflush(s_fp);
+    pthread_mutex_lock(&s_mtx);
+    if (s_fp) {
+        fprintf(s_fp, "[%6ld ms] %s (%zu bytes): %s%s\n",
+                ms, label, len, hex, len > 32 ? "..." : "");
+        fflush(s_fp);
+    }
+    pthread_mutex_unlock(&s_mtx);
 }

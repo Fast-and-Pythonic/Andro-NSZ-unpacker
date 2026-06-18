@@ -30,6 +30,7 @@
  */
 #include "ncz_decompress.h"
 #include "aes_ctr.h"
+#include "async_writer.h"
 #include "nsz_debug.h"
 
 #include <stdlib.h>
@@ -253,12 +254,26 @@ int ncz_decompress(FILE *in_fp,
         if (ret != NCZ_OK) return ret;
     }
 
-    /* Chunk buffer for reading decompressed data */
+    /* Chunk buffer for reading decompressed data (used when there is no
+     * output stream; otherwise the async writer owns the buffers). */
     uint8_t *chunk_buf = malloc(0x10000);
     if (!chunk_buf) {
         if (use_block) block_reader_free(&block_reader);
         else solid_reader_free(&solid_reader);
         return NCZ_ERR_OOM;
+    }
+
+    /* Async writer overlaps disk writes (and SHA-256) with the next chunk's
+     * decompress + AES on this thread. */
+    AsyncWriter *aw = NULL;
+    if (out_fp) {
+        aw = aw_start(out_fp, sha_ctx, 0x10000, 32);
+        if (!aw) {
+            free(chunk_buf);
+            if (use_block) block_reader_free(&block_reader);
+            else solid_reader_free(&solid_reader);
+            return NCZ_ERR_OOM;
+        }
     }
 
     /* Throttle progress callbacks */
@@ -326,32 +341,39 @@ int ncz_decompress(FILE *in_fp,
             int64_t remain = end - i;
             size_t chunk_sz = remain > 0x10000 ? 0x10000 : (size_t)remain;
 
+            /* Acquire a buffer: an async-writer buffer when writing, else the
+             * local scratch buffer. */
+            uint8_t *buf;
+            if (aw) {
+                buf = aw_get_buffer(aw);
+                if (!buf) { ret = NCZ_ERR_IO; break; }  /* writer hit I/O error */
+            } else {
+                buf = chunk_buf;
+            }
+
             /* Read decompressed data from appropriate reader */
             size_t got = 0;
             if (use_block) {
-                ret = block_reader_read(&block_reader, chunk_buf, chunk_sz, &got);
+                ret = block_reader_read(&block_reader, buf, chunk_sz, &got);
             } else {
-                ret = solid_reader_read(&solid_reader, chunk_buf, chunk_sz, &got);
+                ret = solid_reader_read(&solid_reader, buf, chunk_sz, &got);
             }
-            if (ret != NCZ_OK) break;
+            if (ret != NCZ_OK) { if (aw) aw_return_unused(aw, buf); break; }
 
             /* Python: if not len(inputChunk): break */
-            if (got == 0) break;
+            if (got == 0) { if (aw) aw_return_unused(aw, buf); break; }
 
             /* Python: if useCrypto: inputChunk = crypto.encrypt(inputChunk) */
             if (use_crypto) {
-                aes_ctr_crypt(&aes, chunk_buf, chunk_buf, got);
+                aes_ctr_crypt(&aes, buf, buf, got);
             }
 
-            /* Write and hash */
-            if (out_fp) {
-                if (fwrite(chunk_buf, 1, got, out_fp) != got) {
-                    ret = NCZ_ERR_IO;
-                    break;
-                }
-            }
-            if (sha_ctx) {
-                sha256_update(sha_ctx, chunk_buf, got);
+            /* Hand off to the async writer (writes + hashes in the background),
+             * or hash inline when there is no output stream. */
+            if (aw) {
+                aw_submit(aw, buf, got);
+            } else if (sha_ctx) {
+                sha256_update(sha_ctx, buf, got);
             }
 
             i          += (int64_t)got;
@@ -369,6 +391,12 @@ int ncz_decompress(FILE *in_fp,
                 }
             }
         }
+    }
+
+    /* Drain and join the writer (also flushes remaining buffers + hashing). */
+    if (aw) {
+        if (aw_finish(aw) != 0 && ret == NCZ_OK)
+            ret = NCZ_ERR_IO;
     }
 
     free(chunk_buf);

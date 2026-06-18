@@ -1,6 +1,11 @@
 /*
- * Compact public-domain SHA-256 implementation.
- * Based on FIPS 180-4.
+ * SHA-256 implementation (FIPS 180-4).
+ *
+ * Uses the ARMv8 SHA2 crypto extension (sha256h/sha256h2/sha256su0/su1)
+ * when the CPU supports it, falling back to a compact public-domain scalar
+ * implementation otherwise. The extension turns ~150-300 MB/s software
+ * hashing into 1+ GB/s, which matters because every output byte is hashed
+ * for NCA verification on the conversion hot path.
  */
 #include "sha256.h"
 #include <string.h>
@@ -32,7 +37,7 @@ static const uint32_t K[64] = {
 #define SIG0(x) (ROTR32(x,7)^ROTR32(x,18)^((x)>>3))
 #define SIG1(x) (ROTR32(x,17)^ROTR32(x,19)^((x)>>10))
 
-static void sha256_compress(uint32_t h[8], const uint8_t blk[64])
+static void sha256_compress_sw(uint32_t h[8], const uint8_t blk[64])
 {
    uint32_t w[64];
    for (int i = 0; i < 16; i++) {
@@ -57,6 +62,175 @@ static void sha256_compress(uint32_t h[8], const uint8_t blk[64])
 
    h[0]+=a; h[1]+=b; h[2]+=c; h[3]+=d;
    h[4]+=e; h[5]+=f; h[6]+=g; h[7]+=hh;
+}
+
+#if defined(__aarch64__)
+#include <arm_neon.h>
+#include <sys/auxv.h>
+#include <asm/hwcap.h>
+
+/* Runtime check for the ARMv8 SHA2 crypto extension (cached). */
+static int hw_sha2_supported(void)
+{
+   static int cached = -1;
+   if (cached < 0) {
+      unsigned long hwcap = getauxval(AT_HWCAP);
+      cached = (hwcap & HWCAP_SHA2) ? 1 : 0;
+   }
+   return cached;
+}
+
+/* One 64-byte block via the SHA2 extension (canonical 16-quad schedule). */
+static void sha256_compress_hw(uint32_t h[8], const uint8_t blk[64])
+{
+   uint32x4_t STATE0 = vld1q_u32(&h[0]);
+   uint32x4_t STATE1 = vld1q_u32(&h[4]);
+   uint32x4_t ABEF_SAVE = STATE0, CDGH_SAVE = STATE1;
+
+   uint32x4_t MSG0 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(blk +  0)));
+   uint32x4_t MSG1 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(blk + 16)));
+   uint32x4_t MSG2 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(blk + 32)));
+   uint32x4_t MSG3 = vreinterpretq_u32_u8(vrev32q_u8(vld1q_u8(blk + 48)));
+   uint32x4_t TMP0, TMP1, TMP2;
+
+   TMP0 = vaddq_u32(MSG0, vld1q_u32(&K[0]));
+
+   /* Rounds 0-3 */
+   MSG0 = vsha256su0q_u32(MSG0, MSG1);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG1, vld1q_u32(&K[4]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG0 = vsha256su1q_u32(MSG0, MSG2, MSG3);
+
+   /* Rounds 4-7 */
+   MSG1 = vsha256su0q_u32(MSG1, MSG2);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG2, vld1q_u32(&K[8]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG1 = vsha256su1q_u32(MSG1, MSG3, MSG0);
+
+   /* Rounds 8-11 */
+   MSG2 = vsha256su0q_u32(MSG2, MSG3);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG3, vld1q_u32(&K[12]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG2 = vsha256su1q_u32(MSG2, MSG0, MSG1);
+
+   /* Rounds 12-15 */
+   MSG3 = vsha256su0q_u32(MSG3, MSG0);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG0, vld1q_u32(&K[16]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG3 = vsha256su1q_u32(MSG3, MSG1, MSG2);
+
+   /* Rounds 16-19 */
+   MSG0 = vsha256su0q_u32(MSG0, MSG1);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG1, vld1q_u32(&K[20]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG0 = vsha256su1q_u32(MSG0, MSG2, MSG3);
+
+   /* Rounds 20-23 */
+   MSG1 = vsha256su0q_u32(MSG1, MSG2);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG2, vld1q_u32(&K[24]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG1 = vsha256su1q_u32(MSG1, MSG3, MSG0);
+
+   /* Rounds 24-27 */
+   MSG2 = vsha256su0q_u32(MSG2, MSG3);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG3, vld1q_u32(&K[28]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG2 = vsha256su1q_u32(MSG2, MSG0, MSG1);
+
+   /* Rounds 28-31 */
+   MSG3 = vsha256su0q_u32(MSG3, MSG0);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG0, vld1q_u32(&K[32]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG3 = vsha256su1q_u32(MSG3, MSG1, MSG2);
+
+   /* Rounds 32-35 */
+   MSG0 = vsha256su0q_u32(MSG0, MSG1);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG1, vld1q_u32(&K[36]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG0 = vsha256su1q_u32(MSG0, MSG2, MSG3);
+
+   /* Rounds 36-39 */
+   MSG1 = vsha256su0q_u32(MSG1, MSG2);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG2, vld1q_u32(&K[40]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG1 = vsha256su1q_u32(MSG1, MSG3, MSG0);
+
+   /* Rounds 40-43 */
+   MSG2 = vsha256su0q_u32(MSG2, MSG3);
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG3, vld1q_u32(&K[44]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+   MSG2 = vsha256su1q_u32(MSG2, MSG0, MSG1);
+
+   /* Rounds 44-47 */
+   MSG3 = vsha256su0q_u32(MSG3, MSG0);
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG0, vld1q_u32(&K[48]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+   MSG3 = vsha256su1q_u32(MSG3, MSG1, MSG2);
+
+   /* Rounds 48-51 */
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG1, vld1q_u32(&K[52]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+
+   /* Rounds 52-55 */
+   TMP2 = STATE0;
+   TMP0 = vaddq_u32(MSG2, vld1q_u32(&K[56]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+
+   /* Rounds 56-59 */
+   TMP2 = STATE0;
+   TMP1 = vaddq_u32(MSG3, vld1q_u32(&K[60]));
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP0);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP0);
+
+   /* Rounds 60-63 */
+   TMP2 = STATE0;
+   STATE0 = vsha256hq_u32(STATE0, STATE1, TMP1);
+   STATE1 = vsha256h2q_u32(STATE1, TMP2, TMP1);
+
+   STATE0 = vaddq_u32(STATE0, ABEF_SAVE);
+   STATE1 = vaddq_u32(STATE1, CDGH_SAVE);
+
+   vst1q_u32(&h[0], STATE0);
+   vst1q_u32(&h[4], STATE1);
+}
+#endif /* __aarch64__ */
+
+static inline void sha256_compress(uint32_t h[8], const uint8_t blk[64])
+{
+#if defined(__aarch64__)
+   if (hw_sha2_supported()) {
+      sha256_compress_hw(h, blk);
+      return;
+   }
+#endif
+   sha256_compress_sw(h, blk);
 }
 
 void sha256(const uint8_t *data, size_t len, uint8_t *digest_out)

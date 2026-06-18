@@ -4,7 +4,7 @@
 #include <string.h>
 #include <errno.h>
 
-static char s_err[512];
+static __thread char s_err[512];  /* per-thread: safe under parallel conversions */
 
 static uint32_t hfs0_align_0x20(uint32_t n)
 {
