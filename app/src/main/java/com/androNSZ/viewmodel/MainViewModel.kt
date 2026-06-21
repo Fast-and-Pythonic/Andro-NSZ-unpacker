@@ -3,6 +3,7 @@ package com.androNSZ.viewmodel
 import android.net.Uri
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
@@ -68,6 +69,11 @@ class MainViewModel : ViewModel() {
    var batchCurrentFileName by mutableStateOf<String?>(null)
    var batchProcessedFiles by mutableStateOf(0)
    var batchTotalFiles by mutableStateOf(0)
+
+   // Per-file progress for the files currently being converted in parallel,
+   // keyed by their index in [fileQueue]. An entry exists only while a file is
+   // actively converting, so the UI can draw one progress bar per active file.
+   val activeFileProgress = mutableStateMapOf<Int, ConversionProgress>()
 
    // Folder mode
    var folderStructure by mutableStateOf<FolderStructure?>(null)
@@ -316,6 +322,7 @@ class MainViewModel : ViewModel() {
       stopTimer()
       elapsedMs = 0L
       progress = null
+      activeFileProgress.clear()
       batchOverallProgress = null
       batchCurrentFileName = null
       batchProcessedFiles = 0
@@ -340,6 +347,7 @@ class MainViewModel : ViewModel() {
       isConverting = true
       currentFileIndex = 0
       progress = null
+      activeFileProgress.clear()
       batchCurrentFileName = null
       batchProcessedFiles = 0
       batchTotalFiles = fileQueue.size
@@ -414,6 +422,7 @@ class MainViewModel : ViewModel() {
                            }
                            .collect { p ->
                               progress = p
+                              activeFileProgress[i] = p
                               val t = p.totalBytes.coerceAtLeast(0L)
                               if (t > 0L) fileTotals[i] = t
                               perFileDone[i] = p.doneBytes.coerceAtLeast(0L).coerceAtMost(fileTotals[i])
@@ -424,6 +433,7 @@ class MainViewModel : ViewModel() {
                         fileQueue[i] = file.copy(status = FileStatus.Failed)
                         statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
                      } finally {
+                        activeFileProgress.remove(i)
                         perFileDone[i] = fileTotals[i]
                         batchProcessedFiles = processed.incrementAndGet()
                      }

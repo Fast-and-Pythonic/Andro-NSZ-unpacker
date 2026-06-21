@@ -109,15 +109,18 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                modifier = Modifier.padding(16.dp),
                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
+               val isMultiFile = vm.fileQueue.size > 1
+               val overall = vm.batchOverallProgress
+
                Text(
-                  text = stringResource(R.string.format_file_n_of_m, vm.currentFileIndex + 1, vm.fileQueue.size),
+                  text = if (isMultiFile)
+                     stringResource(R.string.status_converting)
+                  else
+                     stringResource(R.string.format_file_n_of_m, vm.currentFileIndex + 1, vm.fileQueue.size),
                   style = MaterialTheme.typography.titleMedium
                )
 
                ElapsedTimeRow(vm.elapsedMs)
-
-               val isMultiFile = vm.fileQueue.size > 1
-               val overall = vm.batchOverallProgress
                if (isMultiFile && overall != null) {
                   LinearProgressIndicator(
                      progress = { overall.percent },
@@ -146,45 +149,68 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                   )
                }
 
-               val p = vm.progress
-               if (p != null) {
-                  if (isMultiFile) {
+               if (isMultiFile) {
+                  // One progress bar per file currently converting in parallel.
+                  val active = vm.activeFileProgress.entries.sortedBy { it.key }
+                  active.forEach { (idx, p) ->
                      Spacer(Modifier.height(4.dp))
                      Text(
-                        text = vm.batchCurrentFileName ?: stringResource(R.string.label_current_file),
+                        text = vm.fileQueue.getOrNull(idx)?.displayName
+                           ?: stringResource(R.string.label_current_file),
                         style = MaterialTheme.typography.bodyMedium,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                      )
-                  }
-                  LinearProgressIndicator(
-                     progress = { p.percent },
-                     modifier = Modifier.fillMaxWidth()
-                  )
-                  Row(
-                     modifier = Modifier.fillMaxWidth(),
-                     horizontalArrangement = Arrangement.SpaceBetween
-                  ) {
-                     Text(
-                        text = if (isMultiFile) stringResource(R.string.label_current_file) else "%.1f%%".format(p.percent * 100f),
-                        style = MaterialTheme.typography.bodySmall
+                     LinearProgressIndicator(
+                        progress = { p.percent },
+                        modifier = Modifier.fillMaxWidth()
                      )
-                     Text(
-                        text = if (isMultiFile) "%.1f%%".format(p.percent * 100f) else "%.1f MB/s".format(p.speedMBps),
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                     if (!isMultiFile && p.totalBytes > 0) {
+                     Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                     ) {
                         Text(
-                           text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
+                           text = "%.1f%%".format(p.percent * 100f),
                            style = MaterialTheme.typography.bodySmall
                         )
+                        Text(
+                           text = "%.1f MB/s".format(p.speedMBps),
+                           style = MaterialTheme.typography.bodySmall
+                        )
+                        if (p.totalBytes > 0) {
+                           Text(
+                              text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
+                              style = MaterialTheme.typography.bodySmall
+                           )
+                        }
                      }
                   }
-                  if (isMultiFile && p.totalBytes > 0) {
-                     Text(
-                        text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
-                        style = MaterialTheme.typography.bodySmall
+               } else {
+                  val p = vm.progress
+                  if (p != null) {
+                     LinearProgressIndicator(
+                        progress = { p.percent },
+                        modifier = Modifier.fillMaxWidth()
                      )
+                     Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                     ) {
+                        Text(
+                           text = "%.1f%%".format(p.percent * 100f),
+                           style = MaterialTheme.typography.bodySmall
+                        )
+                        Text(
+                           text = "%.1f MB/s".format(p.speedMBps),
+                           style = MaterialTheme.typography.bodySmall
+                        )
+                        if (p.totalBytes > 0) {
+                           Text(
+                              text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
+                              style = MaterialTheme.typography.bodySmall
+                           )
+                        }
+                     }
                   }
                }
             }

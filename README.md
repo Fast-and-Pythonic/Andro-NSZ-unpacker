@@ -10,7 +10,7 @@ The app is being developed using vibe coding. I am not a programmer and I am not
 
 ## Overview
 
-**AndroNSZ** converts compressed files to standard formats:
+**Andro-NSZ** converts compressed files to standard formats:
 - **NSZ → NSP** (compressed packages to standard packages)
 - **XCZ → XCI** (compressed cartridge images to standard images)
 
@@ -139,7 +139,7 @@ Recursively process entire folders while preserving structure.
 └──────────────┬──────────────────────────┘
                │ JNI
 ┌──────────────▼──────────────────────────┐
-│  Native C Engine (libAndroNSZ)          │
+│  Native C Engine (libAndro-NSZ)          │
 │  - ncz_engine: Conversion orchestration │
 │  - ncz_decompress: Zstd + AES-CTR       │
 │  - pfs0/hfs0: Container parsing         │
@@ -251,7 +251,7 @@ The C engine is compiled automatically during Gradle build:
 
 ```cmake
 # Zstd library: Fetched from GitHub and built as static library
-# AndroNSZ native library: Compiled with -O3 -ffast-math optimizations
+# Andro-NSZ native library: Compiled with -O3 -ffast-math optimizations
 # ARM64: Enabled with -march=armv8-a+crypto for hardware AES
 ```
 
@@ -265,7 +265,7 @@ To force native rebuild:
 
 ### What's Different
 
-- **No Compression**: AndroNSZ only **decompresses** (NSZ→NSP, XCZ→XCI). For compression (NSP→NSZ), use the original nsz tool on desktop.  
+- **No Compression**: Andro-NSZ only **decompresses** (NSZ→NSP, XCZ→XCI). For compression (NSP→NSZ), use the original nsz tool on desktop.  
   (This restriction is temporary. It is not yet completely certain that the application packages data completely correctly, like the original nicoboss/nsz. So far, this is exactly the unpacker. I don't know if the packaging will be added in the future.)
 - **Mobile-Optimized**: Designed for touchscreens and mobile workflows.
 - **Native Performance**: C engine built with Android NDK, not Python.
@@ -284,7 +284,7 @@ To force native rebuild:
 - Created by [nicoboss](https://github.com/nicoboss)
 - Original repository: [nicoboss/nsz](https://github.com/nicoboss/nsz)
 
-**AndroNSZ Development:**
+**Andro-NSZ Development:**
 - Android port with native C engine
 - Repository: [Fast-and-Pythonic/Andro-NSZ-unpacker](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker)
 
