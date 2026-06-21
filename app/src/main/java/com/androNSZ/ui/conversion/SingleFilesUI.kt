@@ -11,17 +11,19 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
-import com.androNSZ.ui.components.ElapsedTimeRow
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.util.fmtBytes
+import com.androNSZ.util.fmtDuration
 import com.androNSZ.util.getUriSize
 import com.androNSZ.util.resolveDisplayName
 import com.androNSZ.viewmodel.MainViewModel
@@ -112,15 +114,26 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                val isMultiFile = vm.fileQueue.size > 1
                val overall = vm.batchOverallProgress
 
-               Text(
-                  text = if (isMultiFile)
-                     stringResource(R.string.status_converting)
-                  else
-                     stringResource(R.string.format_file_n_of_m, vm.currentFileIndex + 1, vm.fileQueue.size),
-                  style = MaterialTheme.typography.titleMedium
-               )
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = if (vm.isConverting)
+                        stringResource(R.string.status_unpacking)
+                     else
+                        stringResource(R.string.status_unpacked),
+                     style = MaterialTheme.typography.titleMedium
+                  )
+                  Text(
+                     text = fmtDuration(vm.elapsedMs),
+                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                     fontSize = 14.sp,
+                     color = MaterialTheme.colorScheme.onSurface
+                  )
+               }
 
-               ElapsedTimeRow(vm.elapsedMs)
                if (isMultiFile && overall != null) {
                   LinearProgressIndicator(
                      progress = { overall.percent },

@@ -34,23 +34,25 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 import com.androNSZ.model.FileNode
 import com.androNSZ.model.countAllFiles
 import com.androNSZ.ui.components.CompactToggleButton
-import com.androNSZ.ui.components.ElapsedTimeRow
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.ui.components.StatsCompact2Card
 import com.androNSZ.ui.components.StatsCompact3Card
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.util.fmtBytes
+import com.androNSZ.util.fmtDuration
 import com.androNSZ.viewmodel.MainViewModel
 
 @Composable
@@ -154,12 +156,25 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                modifier = Modifier.padding(16.dp),
                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-               Text(
-                  text = stringResource(R.string.label_processing_folder),
-                  style = MaterialTheme.typography.titleMedium
-               )
-
-               ElapsedTimeRow(vm.elapsedMs)
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = if (vm.isConverting)
+                        stringResource(R.string.status_unpacking)
+                     else
+                        stringResource(R.string.status_unpacked),
+                     style = MaterialTheme.typography.titleMedium
+                  )
+                  Text(
+                     text = fmtDuration(vm.elapsedMs),
+                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                     fontSize = 14.sp,
+                     color = MaterialTheme.colorScheme.onSurface
+                  )
+               }
 
                val overall = vm.folderOverallProgress
                if (overall != null) {

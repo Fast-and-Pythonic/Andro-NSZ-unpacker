@@ -11,8 +11,6 @@
     <string name="action_convert">Convert</string>
     <string name="action_convert_files">Convert %d file(s)</string>
     <string name="action_convert_folder">Convert folder</string>
-    <string name="action_convert_to_nsp">Convert to NSP</string>
-    <string name="action_cancel">Cancel</string>
     <string name="action_delete">Delete</string>
     <string name="action_show_structure">Show structure</string>
     <string name="action_hide_structure">Hide structure</string>
@@ -27,10 +25,7 @@
 
     <!-- Labels -->
     <string name="label_current_file">Current file</string>
-    <string name="label_output_downloads">Output: Downloads folder</string>
-    <string name="label_elapsed_time">Time:</string>
     <string name="label_folder_selected">Folder selected</string>
-    <string name="label_processing_folder">Processing folder…</string>
     <string name="label_folder_processed">Folder processed!</string>
 
     <!-- Messages -->
@@ -38,8 +33,6 @@
     <string name="msg_select_mode">Select working mode</string>
     <string name="msg_select_files_desc">Select one or more NSZ files for conversion</string>
     <string name="msg_select_folder_desc">Converts all NSZ files in folder, preserving structure</string>
-    <string name="msg_tap_to_select">Tap to select NSZ file</string>
-    <string name="msg_selected_file">Selected file</string>
     <string name="msg_tap_add_files">Tap \"Add files\" to begin</string>
     <string name="msg_saved_to_downloads">Saved to Downloads</string>
     <string name="msg_see_log_details">See log for details</string>
@@ -47,6 +40,8 @@
     <!-- Status -->
     <string name="status_waiting">Waiting</string>
     <string name="status_converting">Converting…</string>
+    <string name="status_unpacking">Unpacking…</string>
+    <string name="status_unpacked">Unpacked</string>
     <string name="status_done">Done</string>
     <string name="status_error">Error</string>
     <string name="status_scanning_folder">Scanning folder…</string>

@@ -24,7 +24,6 @@ import com.androNSZ.util.toDisplayPath
 import com.androNSZ.ui.components.AppDropdownMenuItem
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 import com.androNSZ.ui.conversion.FolderModeUI
-import com.androNSZ.ui.conversion.LegacySingleFileUI
 import com.androNSZ.ui.conversion.SingleFilesUI
 import com.androNSZ.viewmodel.MainViewModel
 
@@ -150,9 +149,9 @@ fun ConversionScreen(
       }
    ) { padding ->
       when (val mode = vm.conversionMode) {
-         ConversionMode.None -> {
-            LegacySingleFileUI(vm, padding, onInstallKeys)
-         }
+         // None only occurs on the mode-selection screen, so this screen never
+         // renders it; kept here just to make the `when` exhaustive.
+         ConversionMode.None -> Unit
          is ConversionMode.SingleFiles -> {
             SingleFilesUI(vm, padding)
          }

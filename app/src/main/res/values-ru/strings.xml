@@ -11,8 +11,6 @@
     <string name="action_convert">Конвертировать</string>
     <string name="action_convert_files">Конвертировать %d файл(ов)</string>
     <string name="action_convert_folder">Конвертировать папку</string>
-    <string name="action_convert_to_nsp">Конвертировать в NSP</string>
-    <string name="action_cancel">Отмена</string>
     <string name="action_delete">Удалить</string>
     <string name="action_show_structure">Показать структуру</string>
     <string name="action_hide_structure">Скрыть структуру</string>
@@ -27,10 +25,7 @@
 
     <!-- Labels -->
     <string name="label_current_file">Текущий файл</string>
-    <string name="label_output_downloads">Вывод: папка Downloads</string>
-    <string name="label_elapsed_time">Время:</string>
     <string name="label_folder_selected">Папка выбрана</string>
-    <string name="label_processing_folder">Обработка папки…</string>
     <string name="label_folder_processed">Папка обработана!</string>
 
     <!-- Messages -->
@@ -38,8 +33,6 @@
     <string name="msg_select_mode">Выберите режим работы</string>
     <string name="msg_select_files_desc">Выберите один или несколько NSZ файлов для конверсии</string>
     <string name="msg_select_folder_desc">Конвертирует все NSZ файлы в папке, сохраняя структуру</string>
-    <string name="msg_tap_to_select">Нажмите, чтобы выбрать NSZ файл</string>
-    <string name="msg_selected_file">Выбранный файл</string>
     <string name="msg_tap_add_files">Нажмите \"Добавить файлы\" чтобы начать</string>
     <string name="msg_saved_to_downloads">Сохранено в Downloads</string>
     <string name="msg_see_log_details">Подробности в логе</string>
@@ -47,6 +40,8 @@
     <!-- Status -->
     <string name="status_waiting">Ожидает</string>
     <string name="status_converting">Конвертируется…</string>
+    <string name="status_unpacking">Распаковываем…</string>
+    <string name="status_unpacked">Распаковано</string>
     <string name="status_done">Завершено</string>
     <string name="status_error">Ошибка</string>
     <string name="status_scanning_folder">Сканирование папки…</string>

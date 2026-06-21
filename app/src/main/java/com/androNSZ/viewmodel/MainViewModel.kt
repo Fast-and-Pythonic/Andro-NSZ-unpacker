@@ -400,11 +400,16 @@ class MainViewModel : ViewModel() {
             if (batchOverallProgress == null) return
             val now = System.currentTimeMillis()
             if (now - lastEmitMs < Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) return
-            val done = perFileDone.sum().coerceAtMost(totalBytes)
+            // fileTotals[i] starts as the compressed input size but is replaced by
+            // the (larger) uncompressed total once a file's progress arrives. The
+            // denominator must track the same units as perFileDone, otherwise the
+            // bar fills to 100% before every file is unpacked.
+            val total = fileTotals.sum().coerceAtLeast(1L)
+            val done = perFileDone.sum().coerceAtMost(total)
             val dt = (now - lastSpeedTimeMs).coerceAtLeast(1L) / 1000.0
             val speed = (done - lastBytes).toDouble() / 1024 / 1024 / dt
             lastBytes = done; lastSpeedTimeMs = now; lastEmitMs = now
-            batchOverallProgress = ConversionProgress(done, totalBytes, speed)
+            batchOverallProgress = ConversionProgress(done, total, speed)
          }
 
          coroutineScope {
@@ -440,6 +445,13 @@ class MainViewModel : ViewModel() {
                   }
                }
             }.awaitAll()
+         }
+
+         // All files are unpacked: pin the overall bar to 100% (throttling can
+         // otherwise leave the last emit a hair below full).
+         if (batchOverallProgress != null) {
+            val finalTotal = fileTotals.sum().coerceAtLeast(1L)
+            batchOverallProgress = ConversionProgress(finalTotal, finalTotal, 0.0)
          }
 
          batchCurrentFileName = null
