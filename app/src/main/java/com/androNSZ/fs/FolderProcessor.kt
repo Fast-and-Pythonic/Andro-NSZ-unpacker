@@ -5,9 +5,9 @@ import android.content.Context
 import android.net.Uri
 import android.provider.DocumentsContract
 import android.provider.MediaStore
-import com.androNSZ.Constants
 import com.androNSZ.NszConverter
 import com.androNSZ.model.*
+import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.getUriSize
 import com.androNSZ.util.resolveToFilePath
@@ -33,11 +33,7 @@ object FolderProcessor {
         statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
 
         var cumulativeBytesProcessed = 0L
-        var lastCumulativeBytes = 0L
-        var lastTimeMs = System.currentTimeMillis()
-        var lastEmitTimeMs = System.currentTimeMillis()
-        var lastNumericEmitTimeMs = System.currentTimeMillis()
-        var lastSpeed = 0.0
+        val overallThrottler = ProgressThrottler()
 
         val outputFolderName = generateOutputFolderName(context, structure.rootUri, outputBaseUri)
         statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
@@ -54,52 +50,33 @@ object FolderProcessor {
 
         statusCallback?.onStatus("FOLDER", "Output folder created: $outputFolderUri")
 
-        val emitProgress = { currentFileName: String?, currentFileDone: Long, currentFileTotal: Long, cumulativeDone: Long, processedFiles: Int ->
+        val emitProgress = emitProgress@{ currentFileName: String?, currentFileDone: Long, currentFileTotal: Long, cumulativeDone: Long, processedFiles: Int ->
             val safeFileTotal = currentFileTotal.coerceAtLeast(0L)
             val safeFileDone = currentFileDone.coerceAtLeast(0L).coerceAtMost(safeFileTotal)
             val baseDone = cumulativeDone.coerceAtLeast(0L).coerceAtMost(structure.totalSize)
             val currentCumulative = (baseDone + safeFileDone).coerceAtMost(structure.totalSize)
 
-            val now = System.currentTimeMillis()
-            
-            val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
-            
-            // Update progress bar every 250ms (4 times per second)
-            if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
-                if (shouldUpdateNumeric) {
-                    val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-                    lastSpeed = if (elapsedSec > 0) {
-                        (currentCumulative - lastCumulativeBytes).toDouble() / 1024 / 1024 / elapsedSec
-                    } else {
-                        0.0
-                    }
-                    lastCumulativeBytes = currentCumulative
-                    lastTimeMs = now
-                    lastNumericEmitTimeMs = now
-                }
-                
-                lastEmitTimeMs = now
+            // The bar follows the live cumulative byte count; the overall percent,
+            // speed and size readouts are frozen on their own cadences inside the
+            // throttler. Skip the whole update until the bar interval elapses.
+            val overall = overallThrottler.sample(currentCumulative, structure.totalSize)
+                ?: return@emitProgress
 
-                progressCallback(
-                    FolderProgressUpdate(
-                        overallProgress = ConversionProgress(
-                            doneBytes = currentCumulative,
-                            totalBytes = structure.totalSize,
-                            speedMBps = lastSpeed
-                        ),
-                        currentFileProgress = currentFileName?.takeIf { safeFileTotal > 0 }?.let {
-                            ConversionProgress(
-                                doneBytes = safeFileDone,
-                                totalBytes = safeFileTotal,
-                                speedMBps = 0.0
-                            )
-                        },
-                        currentFileName = currentFileName,
-                        processedFiles = processedFiles,
-                        totalFiles = totalFileCount
-                    )
+            progressCallback(
+                FolderProgressUpdate(
+                    overallProgress = overall,
+                    currentFileProgress = currentFileName?.takeIf { safeFileTotal > 0 }?.let {
+                        ConversionProgress(
+                            doneBytes = safeFileDone,
+                            totalBytes = safeFileTotal,
+                            speedMBps = 0.0
+                        )
+                    },
+                    currentFileName = currentFileName,
+                    processedFiles = processedFiles,
+                    totalFiles = totalFileCount
                 )
-            }
+            )
         }
 
         val results = mutableListOf<FileConversionResult>()

@@ -1,17 +1,28 @@
 package com.androNSZ.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowDropDown
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.androNSZ.R
+import com.androNSZ.model.AccentMode
 import com.androNSZ.model.StatsFormat
+import com.androNSZ.model.ThemeMode
+import com.androNSZ.ui.components.ColorWheelPicker
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -21,6 +32,12 @@ fun SettingsScreen(
    onFormatChange: (StatsFormat) -> Unit,
    currentLanguage: String,
    onLanguageChange: (String) -> Unit,
+   currentTheme: ThemeMode,
+   onThemeChange: (ThemeMode) -> Unit,
+   currentAccentMode: AccentMode,
+   currentAccentColor: Int,
+   onAccentModeChange: (AccentMode) -> Unit,
+   onAccentColorChange: (Int) -> Unit,
    onBack: () -> Unit
 ) {
    BackHandler { onBack() }
@@ -48,6 +65,7 @@ fun SettingsScreen(
          modifier = Modifier
             .fillMaxSize()
             .padding(padding)
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
          verticalArrangement = Arrangement.spacedBy(16.dp)
       ) {
@@ -197,6 +215,205 @@ fun SettingsScreen(
                }
             }
          }
+
+         Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+               containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+         ) {
+            Column(
+               modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+               verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+               Text(
+                  text = stringResource(R.string.settings_theme),
+                  style = MaterialTheme.typography.titleMedium,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
+
+               var themeExpanded by remember { mutableStateOf(false) }
+
+               val themes = listOf(
+                  ThemeMode.SYSTEM to stringResource(R.string.theme_system),
+                  ThemeMode.LIGHT  to stringResource(R.string.theme_light),
+                  ThemeMode.DARK   to stringResource(R.string.theme_dark),
+               )
+
+               ExposedDropdownMenuBox(
+                  expanded = themeExpanded,
+                  onExpandedChange = { themeExpanded = !themeExpanded }
+               ) {
+                  OutlinedTextField(
+                     value = themes.firstOrNull { it.first == currentTheme }?.second
+                        ?: stringResource(R.string.theme_system),
+                     onValueChange = {},
+                     readOnly = true,
+                     trailingIcon = {
+                        Icon(
+                           imageVector = Icons.Filled.ArrowDropDown,
+                           contentDescription = null
+                        )
+                     },
+                     modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                     colors = OutlinedTextFieldDefaults.colors()
+                  )
+
+                  ExposedDropdownMenu(
+                     expanded = themeExpanded,
+                     onDismissRequest = { themeExpanded = false }
+                  ) {
+                     themes.forEach { (mode, label) ->
+                        DropdownMenuItem(
+                           text = { Text(label) },
+                           onClick = {
+                              onThemeChange(mode)
+                              themeExpanded = false
+                           }
+                        )
+                     }
+                  }
+               }
+            }
+         }
+
+         Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+               containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+         ) {
+            Column(
+               modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+               verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+               Text(
+                  text = stringResource(R.string.settings_accent),
+                  style = MaterialTheme.typography.titleMedium,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
+
+               var accentExpanded by remember { mutableStateOf(false) }
+
+               val accentModes = listOf(
+                  AccentMode.SYSTEM to stringResource(R.string.accent_system),
+                  AccentMode.CUSTOM to stringResource(R.string.accent_custom),
+               )
+
+               ExposedDropdownMenuBox(
+                  expanded = accentExpanded,
+                  onExpandedChange = { accentExpanded = !accentExpanded }
+               ) {
+                  OutlinedTextField(
+                     value = accentModes.firstOrNull { it.first == currentAccentMode }?.second
+                        ?: stringResource(R.string.accent_system),
+                     onValueChange = {},
+                     readOnly = true,
+                     trailingIcon = {
+                        Icon(
+                           imageVector = Icons.Filled.ArrowDropDown,
+                           contentDescription = null
+                        )
+                     },
+                     modifier = Modifier
+                        .fillMaxWidth()
+                        .menuAnchor(),
+                     colors = OutlinedTextFieldDefaults.colors()
+                  )
+
+                  ExposedDropdownMenu(
+                     expanded = accentExpanded,
+                     onDismissRequest = { accentExpanded = false }
+                  ) {
+                     accentModes.forEach { (mode, label) ->
+                        DropdownMenuItem(
+                           text = { Text(label) },
+                           onClick = {
+                              onAccentModeChange(mode)
+                              accentExpanded = false
+                           }
+                        )
+                     }
+                  }
+               }
+
+               // Manual color controls: a color wheel, preset swatches, a hex field.
+               if (currentAccentMode == AccentMode.CUSTOM) {
+                  ColorWheelPicker(
+                     color = currentAccentColor,
+                     onColorChange = onAccentColorChange,
+                     modifier = Modifier.fillMaxWidth()
+                  )
+
+                  val presets = listOf(
+                     0xFF6650A4, 0xFF1565C0, 0xFF00897B,
+                     0xFF2E7D32, 0xFFEF6C00, 0xFFC62828
+                  ).map { it.toInt() }
+
+                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                     presets.forEach { argb ->
+                        val selected = argb == currentAccentColor
+                        Box(
+                           modifier = Modifier
+                              .size(36.dp)
+                              .clip(CircleShape)
+                              .background(Color(argb))
+                              .border(
+                                 width = if (selected) 3.dp else 1.dp,
+                                 color = if (selected) MaterialTheme.colorScheme.onSurface
+                                         else MaterialTheme.colorScheme.outline,
+                                 shape = CircleShape
+                              )
+                              .clickable { onAccentColorChange(argb) }
+                        )
+                     }
+                  }
+
+                  var hexText by remember(currentAccentColor) {
+                     mutableStateOf(argbToHex(currentAccentColor))
+                  }
+                  OutlinedTextField(
+                     value = hexText,
+                     onValueChange = { input ->
+                        hexText = input
+                        parseHexColor(input)?.let { onAccentColorChange(it) }
+                     },
+                     label = { Text(stringResource(R.string.accent_hex_label)) },
+                     singleLine = true,
+                     leadingIcon = {
+                        Box(
+                           modifier = Modifier
+                              .size(24.dp)
+                              .clip(CircleShape)
+                              .background(Color(currentAccentColor))
+                        )
+                     },
+                     modifier = Modifier.fillMaxWidth(),
+                     colors = OutlinedTextFieldDefaults.colors()
+                  )
+               }
+            }
+         }
       }
+   }
+}
+
+/** Format the RGB part of an ARGB color as `#RRGGBB`. */
+private fun argbToHex(argb: Int): String = "#%06X".format(0xFFFFFF and argb)
+
+/** Parse `#RRGGBB` / `RRGGBB` into an opaque ARGB color, or null if invalid. */
+private fun parseHexColor(input: String): Int? {
+   val cleaned = input.removePrefix("#").trim()
+   if (cleaned.length != 6) return null
+   return try {
+      0xFF000000.toInt() or cleaned.toInt(16)
+   } catch (e: NumberFormatException) {
+      null
    }
 }

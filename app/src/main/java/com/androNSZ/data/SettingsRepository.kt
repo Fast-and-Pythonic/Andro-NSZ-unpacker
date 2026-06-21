@@ -8,7 +8,9 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.androNSZ.model.AccentMode
 import com.androNSZ.model.StatsFormat
+import com.androNSZ.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -29,8 +31,15 @@ class SettingsRepository private constructor(private val context: Context) {
       private val STATS_FORMAT_KEY = stringPreferencesKey("stats_format")
       private val OUTPUT_FOLDER_KEY = stringPreferencesKey("output_folder_uri")
       private const val LANGUAGE_KEY = "language"
+      private const val THEME_KEY = "theme_mode"
+      private const val ACCENT_MODE_KEY = "accent_mode"
+      private const val ACCENT_COLOR_KEY = "accent_color"
+      // Default custom accent = the app's built-in purple (Purple40).
+      const val DEFAULT_ACCENT_COLOR = 0xFF6650A4.toInt()
    }
 
+   // Read synchronously at startup (before the first frame), so these live in
+   // SharedPreferences rather than the async DataStore.
    private val langPrefs: SharedPreferences =
       context.getSharedPreferences("settings_lang", Context.MODE_PRIVATE)
 
@@ -38,6 +47,38 @@ class SettingsRepository private constructor(private val context: Context) {
 
    fun saveLanguage(lang: String) {
       langPrefs.edit().putString(LANGUAGE_KEY, lang).apply()
+   }
+
+   fun getThemeMode(): ThemeMode {
+      val stored = langPrefs.getString(THEME_KEY, ThemeMode.SYSTEM.name) ?: ThemeMode.SYSTEM.name
+      return try {
+         ThemeMode.valueOf(stored)
+      } catch (e: IllegalArgumentException) {
+         ThemeMode.SYSTEM
+      }
+   }
+
+   fun saveThemeMode(mode: ThemeMode) {
+      langPrefs.edit().putString(THEME_KEY, mode.name).apply()
+   }
+
+   fun getAccentMode(): AccentMode {
+      val stored = langPrefs.getString(ACCENT_MODE_KEY, AccentMode.SYSTEM.name) ?: AccentMode.SYSTEM.name
+      return try {
+         AccentMode.valueOf(stored)
+      } catch (e: IllegalArgumentException) {
+         AccentMode.SYSTEM
+      }
+   }
+
+   fun saveAccentMode(mode: AccentMode) {
+      langPrefs.edit().putString(ACCENT_MODE_KEY, mode.name).apply()
+   }
+
+   fun getAccentColor(): Int = langPrefs.getInt(ACCENT_COLOR_KEY, DEFAULT_ACCENT_COLOR)
+
+   fun saveAccentColor(color: Int) {
+      langPrefs.edit().putInt(ACCENT_COLOR_KEY, color).apply()
    }
 
    val statsFormatFlow: Flow<StatsFormat> = context.dataStore.data

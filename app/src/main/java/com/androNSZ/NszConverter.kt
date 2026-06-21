@@ -9,6 +9,7 @@ import com.androNSZ.fs.TempFileManager
 import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
+import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.queryFileName
 import com.androNSZ.util.resolveToFilePath
@@ -147,31 +148,11 @@ object NszConverter {
 
             val nativePath = "/proc/self/fd/${openedPfd.fd}"
 
-            var lastDone = 0L
-            var lastTimeMs = System.currentTimeMillis()
-            var lastEmitTimeMs = System.currentTimeMillis()
-            var lastNumericEmitTimeMs = System.currentTimeMillis()
-            var lastSpeed = 0.0
+            val throttler = ProgressThrottler()
 
             val cb = object : ProgressCallback {
                 override fun onProgress(done: Long, total: Long) {
-                    val now = System.currentTimeMillis()
-                    
-                    val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
-                    
-                    // Update progress bar every 250ms (4 times per second)
-                    if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
-                        if (shouldUpdateNumeric) {
-                            val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-                            lastSpeed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
-                            lastDone = done
-                            lastTimeMs = now
-                            lastNumericEmitTimeMs = now
-                        }
-                        
-                        lastEmitTimeMs = now
-                        trySend(ConversionProgress(done, total, lastSpeed))
-                    }
+                    throttler.sample(done, total)?.let { trySend(it) }
                 }
             }
 
@@ -280,30 +261,11 @@ object NszConverter {
 
             val nativePath = "/proc/self/fd/${openedPfd.fd}"
 
-            var lastDone = 0L
-            var lastTimeMs = System.currentTimeMillis()
-            var lastEmitTimeMs = System.currentTimeMillis()
-            var lastNumericEmitTimeMs = System.currentTimeMillis()
-            var lastSpeed = 0.0
+            val throttler = ProgressThrottler()
 
             val cb = object : ProgressCallback {
                 override fun onProgress(done: Long, total: Long) {
-                    val now = System.currentTimeMillis()
-                    
-                    val shouldUpdateNumeric = (now - lastNumericEmitTimeMs >= Constants.PROGRESS_NUMERIC_UPDATE_INTERVAL_MS)
-                    
-                    if (now - lastEmitTimeMs >= Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) {
-                        if (shouldUpdateNumeric) {
-                            val elapsedSec = (now - lastTimeMs).coerceAtLeast(1L) / 1000.0
-                            lastSpeed = (done - lastDone).toDouble() / 1024 / 1024 / elapsedSec
-                            lastDone = done
-                            lastTimeMs = now
-                            lastNumericEmitTimeMs = now
-                        }
-                        
-                        lastEmitTimeMs = now
-                        trySend(ConversionProgress(done, total, lastSpeed))
-                    }
+                    throttler.sample(done, total)?.let { trySend(it) }
                 }
             }
 

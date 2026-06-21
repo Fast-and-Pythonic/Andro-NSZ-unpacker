@@ -191,7 +191,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(
-                        text = "%.1f%%".format(overall.percent * 100f),
+                        text = "%.1f%%".format(overall.displayPercent * 100f),
                         style = MaterialTheme.typography.bodySmall
                      )
                      Text(
@@ -201,7 +201,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                   }
                   if (overall.totalBytes > 0) {
                      Text(
-                        text = "${fmtBytes(overall.doneBytes)} / ${fmtBytes(overall.totalBytes)}",
+                        text = "${fmtBytes(overall.displayDoneBytes)} / ${fmtBytes(overall.displayTotalBytes)}",
                         style = MaterialTheme.typography.bodySmall
                      )
                   }

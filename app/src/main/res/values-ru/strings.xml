@@ -30,9 +30,9 @@
 
     <!-- Messages -->
     <string name="msg_prod_keys_required">prod.keys требуется для правильной декомпрессии NSZ в NSP.</string>
-    <string name="msg_select_mode">Выберите режим работы</string>
-    <string name="msg_select_files_desc">Выберите один или несколько NSZ файлов для конверсии</string>
-    <string name="msg_select_folder_desc">Конвертирует все NSZ файлы в папке, сохраняя структуру</string>
+    <string name="msg_select_mode">Выберите режим распаковки</string>
+    <string name="msg_select_files_desc">Выберите один или несколько NSZ/XCZ файлов для распаковки</string>
+    <string name="msg_select_folder_desc">Конвертирует все NSZ/XCZ файлы в выбранной папке, сохраняя её структуру</string>
     <string name="msg_tap_add_files">Нажмите \"Добавить файлы\" чтобы начать</string>
     <string name="msg_saved_to_downloads">Сохранено в Downloads</string>
     <string name="msg_see_log_details">Подробности в логе</string>
@@ -42,7 +42,7 @@
     <string name="status_converting">Конвертируется…</string>
     <string name="status_unpacking">Распаковываем…</string>
     <string name="status_unpacked">Распаковано</string>
-    <string name="status_done">Завершено</string>
+    <string name="status_done">Готово</string>
     <string name="status_error">Ошибка</string>
     <string name="status_scanning_folder">Сканирование папки…</string>
     <string name="status_cancelled">Отменено.</string>
@@ -63,6 +63,7 @@
     <string name="format_total_files_count">Всего файлов: %d</string>
     <string name="format_size">Размер: %s</string>
     <string name="format_files_completed">Обработано %1$d из %2$d файлов</string>
+    <string name="format_average_speed">Средняя скорость: %1$.1f MB/s</string>
     <string name="format_success_rate">Успешно: %1$d из %2$d NSZ файлов (%3$s)</string>
     <string name="format_failed_count">Ошибок: %d файл(ов)</string>
     <string name="format_log_path">Лог: %s</string>
@@ -107,6 +108,14 @@
     <string name="language_system">Системный</string>
     <string name="language_english">Английский</string>
     <string name="language_russian">Русский</string>
+    <string name="settings_theme">Тема</string>
+    <string name="theme_system">Как в системе</string>
+    <string name="theme_light">Светлая</string>
+    <string name="theme_dark">Тёмная</string>
+    <string name="settings_accent">Акцентный цвет</string>
+    <string name="accent_system">Системный</string>
+    <string name="accent_custom">Вручную</string>
+    <string name="accent_hex_label">Hex (#RRGGBB)</string>
 
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>

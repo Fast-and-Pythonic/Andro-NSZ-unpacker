@@ -5,16 +5,32 @@ package com.androNSZ
  */
 object Constants {
     /**
-     * Progress bar update interval (in milliseconds)
-     * More frequent updates for smooth animation
-     * Value 250ms = 4 updates per second
+     * Progress bar refresh interval (in milliseconds).
+     * Drives only the smooth animation of the bar itself, which follows the live
+     * byte counter. Keep this short.
+     * Value 100ms = 10 updates per second.
      */
     const val PROGRESS_BAR_UPDATE_INTERVAL_MS = 100L
-    
+
     /**
-     * Numeric indicators update interval (in milliseconds)
-     * Less frequent updates for better readability of percentages, speed and size
-     * Value 500ms = 2 updates per second
+     * Percentage readout refresh interval (in milliseconds).
+     * The "%" text is frozen between ticks so the number stays readable while the
+     * bar keeps animating.
+     * Value 250ms = 4 updates per second.
      */
-    const val PROGRESS_NUMERIC_UPDATE_INTERVAL_MS = 500L
+    const val PROGRESS_PERCENT_UPDATE_INTERVAL_MS = 250L
+
+    /**
+     * Speed readout refresh interval (in milliseconds).
+     * Also the window over which MB/s is averaged: a longer interval yields a
+     * steadier, less jumpy speed.
+     * Value 250ms = 4 updates per second.
+     */
+    const val PROGRESS_SPEED_UPDATE_INTERVAL_MS = 250L
+
+    /**
+     * Size readout ("X / Y") refresh interval (in milliseconds).
+     * Value 250ms = 4 updates per second.
+     */
+    const val PROGRESS_SIZE_UPDATE_INTERVAL_MS = 250L
 }

@@ -73,6 +73,12 @@ fun AndroNSZApp(vm: MainViewModel) {
                vm.saveLanguage(context, lang)
                (context as Activity).recreate()
             },
+            currentTheme = vm.themeMode,
+            onThemeChange = { vm.saveThemeMode(context, it) },
+            currentAccentMode = vm.accentMode,
+            currentAccentColor = vm.accentColorArgb,
+            onAccentModeChange = { vm.saveAccentMode(context, it) },
+            onAccentColorChange = { vm.saveAccentColor(context, it) },
             onBack = { vm.navigateBack() }
          )
       }

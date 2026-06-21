@@ -30,9 +30,9 @@
 
     <!-- Messages -->
     <string name="msg_prod_keys_required">prod.keys required for proper NSZ to NSP decompression.</string>
-    <string name="msg_select_mode">Select working mode</string>
-    <string name="msg_select_files_desc">Select one or more NSZ files for conversion</string>
-    <string name="msg_select_folder_desc">Converts all NSZ files in folder, preserving structure</string>
+    <string name="msg_select_mode">Select unpacking mode</string>
+    <string name="msg_select_files_desc">Select one or more NSZ/XCZ files for unpacking</string>
+    <string name="msg_select_folder_desc">Converts all NSZ/XCZ files in the selected folder, preserving its structure</string>
     <string name="msg_tap_add_files">Tap \"Add files\" to begin</string>
     <string name="msg_saved_to_downloads">Saved to Downloads</string>
     <string name="msg_see_log_details">See log for details</string>
@@ -63,6 +63,7 @@
     <string name="format_total_files_count">Total files: %d</string>
     <string name="format_size">Size: %s</string>
     <string name="format_files_completed">Processed %1$d of %2$d files</string>
+    <string name="format_average_speed">Average speed: %1$.1f MB/s</string>
     <string name="format_success_rate">Successful: %1$d of %2$d NSZ files (%3$s)</string>
     <string name="format_failed_count">Failed: %d file(s)</string>
     <string name="format_log_path">Log: %s</string>
@@ -107,6 +108,14 @@
     <string name="language_system">System default</string>
     <string name="language_english">English</string>
     <string name="language_russian">Russian</string>
+    <string name="settings_theme">Theme</string>
+    <string name="theme_system">System default</string>
+    <string name="theme_light">Light</string>
+    <string name="theme_dark">Dark</string>
+    <string name="settings_accent">Accent color</string>
+    <string name="accent_system">System</string>
+    <string name="accent_custom">Manual</string>
+    <string name="accent_hex_label">Hex (#RRGGBB)</string>
 
     <!-- About screen -->
     <string name="action_about_app">About the app</string>

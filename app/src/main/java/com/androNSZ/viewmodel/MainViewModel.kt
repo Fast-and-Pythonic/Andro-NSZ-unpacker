@@ -8,7 +8,6 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.androNSZ.Constants
 import com.androNSZ.R
 import com.androNSZ.NszConverter
 import com.androNSZ.data.SettingsRepository
@@ -19,6 +18,7 @@ import com.androNSZ.fs.TempFileManager
 import com.androNSZ.model.*
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.nut.KeysParser
+import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.getUriSize
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -69,6 +69,8 @@ class MainViewModel : ViewModel() {
    var batchCurrentFileName by mutableStateOf<String?>(null)
    var batchProcessedFiles by mutableStateOf(0)
    var batchTotalFiles by mutableStateOf(0)
+   // Average unpack speed across all completed files, set once the batch finishes.
+   var batchAverageSpeedMBps by mutableStateOf<Double?>(null)
 
    // Per-file progress for the files currently being converted in parallel,
    // keyed by their index in [fileQueue]. An entry exists only while a file is
@@ -127,6 +129,9 @@ class MainViewModel : ViewModel() {
    var statsFormat by mutableStateOf(StatsFormat.DETAILED)
    var outputFolderUri by mutableStateOf<Uri?>(null)
    var appLanguage by mutableStateOf("system")
+   var themeMode by mutableStateOf(ThemeMode.SYSTEM)
+   var accentMode by mutableStateOf(AccentMode.SYSTEM)
+   var accentColorArgb by mutableStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
 
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
@@ -151,11 +156,34 @@ class MainViewModel : ViewModel() {
          }
       }
       appLanguage = SettingsRepository.getInstance(context).getLanguage()
+      themeMode = SettingsRepository.getInstance(context).getThemeMode()
+      accentMode = SettingsRepository.getInstance(context).getAccentMode()
+      accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
    }
 
    fun saveLanguage(context: android.content.Context, lang: String) {
       SettingsRepository.getInstance(context).saveLanguage(lang)
       appLanguage = lang
+   }
+
+   fun saveThemeMode(context: android.content.Context, mode: ThemeMode) {
+      themeMode = mode
+      SettingsRepository.getInstance(context).saveThemeMode(mode)
+   }
+
+   fun saveAccentMode(context: android.content.Context, mode: AccentMode) {
+      accentMode = mode
+      SettingsRepository.getInstance(context).saveAccentMode(mode)
+   }
+
+   fun saveAccentColor(context: android.content.Context, colorArgb: Int) {
+      // Picking a color implies switching to the custom accent.
+      accentColorArgb = colorArgb
+      accentMode = AccentMode.CUSTOM
+      SettingsRepository.getInstance(context).apply {
+         saveAccentColor(colorArgb)
+         saveAccentMode(AccentMode.CUSTOM)
+      }
    }
 
    fun saveOutputFolder(context: android.content.Context, uri: Uri) {
@@ -351,6 +379,7 @@ class MainViewModel : ViewModel() {
       batchCurrentFileName = null
       batchProcessedFiles = 0
       batchTotalFiles = fileQueue.size
+      batchAverageSpeedMBps = null
       statusLog.clear()
       statusMessage = null
       isSuccess = false
@@ -392,24 +421,17 @@ class MainViewModel : ViewModel() {
          val perFileDone = LongArray(fileQueue.size)
          val processed = AtomicInteger(0)
          val sem = Semaphore(BATCH_CONCURRENCY)
-         var lastEmitMs = System.currentTimeMillis()
-         var lastBytes = 0L
-         var lastSpeedTimeMs = System.currentTimeMillis()
+         val overallThrottler = ProgressThrottler()
 
          fun emitOverall() {
             if (batchOverallProgress == null) return
-            val now = System.currentTimeMillis()
-            if (now - lastEmitMs < Constants.PROGRESS_BAR_UPDATE_INTERVAL_MS) return
             // fileTotals[i] starts as the compressed input size but is replaced by
             // the (larger) uncompressed total once a file's progress arrives. The
             // denominator must track the same units as perFileDone, otherwise the
             // bar fills to 100% before every file is unpacked.
             val total = fileTotals.sum().coerceAtLeast(1L)
             val done = perFileDone.sum().coerceAtMost(total)
-            val dt = (now - lastSpeedTimeMs).coerceAtLeast(1L) / 1000.0
-            val speed = (done - lastBytes).toDouble() / 1024 / 1024 / dt
-            lastBytes = done; lastSpeedTimeMs = now; lastEmitMs = now
-            batchOverallProgress = ConversionProgress(done, total, speed)
+            overallThrottler.sample(done, total)?.let { batchOverallProgress = it }
          }
 
          coroutineScope {
@@ -418,7 +440,13 @@ class MainViewModel : ViewModel() {
                   sem.withPermit {
                      val file = fileQueue[i]
                      batchCurrentFileName = file.displayName
-                     fileQueue[i] = file.copy(status = FileStatus.Converting)
+                     fileQueue[i] = file.copy(
+                        status = FileStatus.Converting,
+                        unpackDurationMs = null,
+                        unpackSpeedMBps = null,
+                        unpackedSize = null
+                     )
+                     val fileStartMs = System.currentTimeMillis()
                      try {
                         NszConverter.convert(context, file.uri, headerKey, statusCb)
                            .catch { e ->
@@ -433,7 +461,15 @@ class MainViewModel : ViewModel() {
                               perFileDone[i] = p.doneBytes.coerceAtLeast(0L).coerceAtMost(fileTotals[i])
                               emitOverall()
                            }
-                        fileQueue[i] = file.copy(status = FileStatus.Completed)
+                        val fileDurationMs = (System.currentTimeMillis() - fileStartMs).coerceAtLeast(1L)
+                        val unpackedBytes = fileTotals[i].coerceAtLeast(0L)
+                        val fileSpeedMBps = unpackedBytes / 1024.0 / 1024.0 / (fileDurationMs / 1000.0)
+                        fileQueue[i] = file.copy(
+                           status = FileStatus.Completed,
+                           unpackDurationMs = fileDurationMs,
+                           unpackSpeedMBps = fileSpeedMBps,
+                           unpackedSize = unpackedBytes
+                        )
                      } catch (e: Exception) {
                         fileQueue[i] = file.copy(status = FileStatus.Failed)
                         statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
@@ -459,6 +495,18 @@ class MainViewModel : ViewModel() {
 
          isConverting = false
          stopTimer()
+         // Overall average speed = total unpacked bytes of completed files over the
+         // whole elapsed time (includes any parallelism overlap, so it reflects the
+         // real wall-clock throughput).
+         val completedBytes = fileQueue.indices
+            .filter { fileQueue[it].status == FileStatus.Completed }
+            .sumOf { fileTotals[it].coerceAtLeast(0L) }
+         val elapsedSec = elapsedMs.coerceAtLeast(1L) / 1000.0
+         batchAverageSpeedMBps = if (completedBytes > 0L) {
+            completedBytes / 1024.0 / 1024.0 / elapsedSec
+         } else {
+            null
+         }
          val completed = fileQueue.count { it.status == FileStatus.Completed }
          statusMessage = context.getString(R.string.format_files_completed, completed, fileQueue.size)
          isSuccess = completed == fileQueue.size

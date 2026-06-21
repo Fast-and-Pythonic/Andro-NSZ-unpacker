@@ -66,6 +66,9 @@ dependencies {
    implementation(libs.androidx.compose.material3)
    implementation("androidx.compose.material:material-icons-extended:1.7.6")
    implementation("androidx.datastore:datastore-preferences:1.1.1")
+   // Generates a full Material 3 tonal color scheme from a single seed color
+   // (wraps material-color-utilities with a Compose-friendly API).
+   implementation("com.materialkolor:material-kolor:2.0.0")
    testImplementation(libs.junit)
    androidTestImplementation(libs.androidx.junit)
    androidTestImplementation(libs.androidx.espresso.core)

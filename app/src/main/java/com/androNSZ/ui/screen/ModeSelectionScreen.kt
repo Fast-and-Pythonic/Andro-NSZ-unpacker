@@ -3,6 +3,7 @@ package com.androNSZ.ui.screen
 import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -182,8 +183,10 @@ fun ModeSelectionScreen(
          Text(
             text = stringResource(R.string.msg_select_mode).uppercase(),
             style = MaterialTheme.typography.labelMedium,
+            fontSize = 18.sp,
             color = MaterialTheme.colorScheme.outline,
             letterSpacing = 1.2.sp,
+            textAlign = TextAlign.Center,
             modifier = Modifier
                .fillMaxWidth()
                .padding(top = 4.dp, bottom = 4.dp)
@@ -245,10 +248,25 @@ fun ModeCard(
    enabled: Boolean,
    onClick: () -> Unit
 ) {
+   // Card background tone. In the dark theme the default ElevatedCard color
+   // (surfaceContainerLow) looks too dark, so we lift it a step. Adjust here:
+   //   surfaceContainerLow  -> darkest  (Material default)
+   //   surfaceContainer     -> a bit lighter
+   //   surfaceContainerHigh -> lighter (current)
+   //   surfaceContainerHighest -> lightest
+   val cardContainerColor = if (isSystemInDarkTheme()) {
+      MaterialTheme.colorScheme.surfaceContainer
+   } else {
+      MaterialTheme.colorScheme.surfaceContainerLow // keep Material default in light theme
+   }
+
    ElevatedCard(
       modifier = Modifier.fillMaxWidth(),
       onClick = onClick,
       enabled = enabled,
+      colors = CardDefaults.elevatedCardColors(
+         containerColor = cardContainerColor
+      ),
       elevation = CardDefaults.elevatedCardElevation(
          defaultElevation = 2.dp,
          pressedElevation = 6.dp

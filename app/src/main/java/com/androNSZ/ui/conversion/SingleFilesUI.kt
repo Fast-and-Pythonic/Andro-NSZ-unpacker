@@ -10,7 +10,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -21,6 +26,7 @@ import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
 import com.androNSZ.ui.components.StatusLogPanel
+import com.androNSZ.ui.theme.SuccessGreen
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.util.fmtBytes
 import com.androNSZ.util.fmtDuration
@@ -134,6 +140,17 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                   )
                }
 
+               // Final summary: average speed across all unpacked files.
+               vm.batchAverageSpeedMBps?.let { avg ->
+                  if (!vm.isConverting) {
+                     Text(
+                        text = stringResource(R.string.format_average_speed, avg),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                     )
+                  }
+               }
+
                if (isMultiFile && overall != null) {
                   LinearProgressIndicator(
                      progress = { overall.percent },
@@ -143,21 +160,14 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                      modifier = Modifier.fillMaxWidth(),
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
-                     Text(
-                        text = stringResource(R.string.format_files_processed, vm.batchProcessedFiles, vm.batchTotalFiles),
-                        style = MaterialTheme.typography.bodySmall
+                     MetricText(
+                        text = stringResource(R.string.format_files_processed, vm.batchProcessedFiles, vm.batchTotalFiles)
                      )
-                     Text(
-                        text = "%.1f%%".format(overall.percent * 100f),
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                     Text(
-                        text = "%.1f MB/s".format(overall.speedMBps),
-                        style = MaterialTheme.typography.bodySmall
-                     )
+                     MetricText(text = "%.1f%%".format(overall.displayPercent * 100f))
+                     MetricText(text = "%.1f MB/s".format(overall.speedMBps))
                   }
                   Text(
-                     text = "${fmtBytes(overall.doneBytes)} / ${fmtBytes(overall.totalBytes)}",
+                     text = "${fmtBytes(overall.displayDoneBytes)} / ${fmtBytes(overall.displayTotalBytes)}",
                      style = MaterialTheme.typography.bodySmall
                   )
                }
@@ -166,7 +176,15 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                   // One progress bar per file currently converting in parallel.
                   val active = vm.activeFileProgress.entries.sortedBy { it.key }
                   active.forEach { (idx, p) ->
-                     Spacer(Modifier.height(4.dp))
+                     // Thin rule separating each file's stats from the block above.
+                     // A hairline + outlineVariant blends into the surfaceVariant card,
+                     // so use 1dp and a higher-contrast colour. fullBleedWidth makes it
+                     // span the whole card, escaping the Column's 16dp side padding.
+                     HorizontalDivider(
+                        modifier = Modifier.fullBleedWidth(16.dp),
+                        thickness = 1.dp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                     )
                      Text(
                         text = vm.fileQueue.getOrNull(idx)?.displayName
                            ?: stringResource(R.string.label_current_file),
@@ -182,18 +200,11 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                      ) {
-                        Text(
-                           text = "%.1f%%".format(p.percent * 100f),
-                           style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                           text = "%.1f MB/s".format(p.speedMBps),
-                           style = MaterialTheme.typography.bodySmall
-                        )
+                        MetricText(text = "%.1f MB/s".format(p.speedMBps))
+                        MetricText(text = "%.1f%%".format(p.displayPercent * 100f))
                         if (p.totalBytes > 0) {
-                           Text(
-                              text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
-                              style = MaterialTheme.typography.bodySmall
+                           MetricText(
+                              text = "${fmtBytes(p.displayDoneBytes)} / ${fmtBytes(p.displayTotalBytes)}"
                            )
                         }
                      }
@@ -209,18 +220,11 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                      ) {
-                        Text(
-                           text = "%.1f%%".format(p.percent * 100f),
-                           style = MaterialTheme.typography.bodySmall
-                        )
-                        Text(
-                           text = "%.1f MB/s".format(p.speedMBps),
-                           style = MaterialTheme.typography.bodySmall
-                        )
+                        MetricText(text = "%.1f MB/s".format(p.speedMBps))
+                        MetricText(text = "%.1f%%".format(p.displayPercent * 100f))
                         if (p.totalBytes > 0) {
-                           Text(
-                              text = "${fmtBytes(p.doneBytes)} / ${fmtBytes(p.totalBytes)}",
-                              style = MaterialTheme.typography.bodySmall
+                           MetricText(
+                              text = "${fmtBytes(p.displayDoneBytes)} / ${fmtBytes(p.displayTotalBytes)}"
                            )
                         }
                      }
@@ -233,6 +237,41 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
       StatusLogPanel(vm.statusLog)
       StatusMessageCard(vm.statusMessage, vm.isSuccess)
    }
+}
+
+/**
+ * Lets a child stretch [horizontalPadding] beyond each side of its parent — used
+ * to make a divider span the full card width despite the Column's side padding.
+ * It measures the child wider by 2×padding and shifts it left by one padding.
+ */
+private fun Modifier.fullBleedWidth(horizontalPadding: Dp): Modifier = layout { measurable, constraints ->
+   val pad = horizontalPadding.roundToPx()
+   val targetWidth = constraints.maxWidth + pad * 2
+   // Measure the child wider than the available space (both edges)...
+   val placeable = measurable.measure(
+      constraints.copy(minWidth = targetWidth, maxWidth = targetWidth)
+   )
+   // ...but report the original width so the parent layout is undisturbed; only
+   // the drawing bleeds out, shifted left by one padding so it reaches both edges.
+   layout(constraints.maxWidth, placeable.height) {
+      placeable.place(-pad, 0)
+   }
+}
+
+/**
+ * A progress metric rendered at its natural width in monospace. The parent row
+ * spaces metrics with `Arrangement.SpaceBetween`, so the gaps between them are
+ * equal while each value keeps its real width — nothing is squeezed into a fixed
+ * slot, so no digits get clipped.
+ */
+@Composable
+private fun MetricText(text: String) {
+   Text(
+      text = text,
+      style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+      maxLines = 1,
+      softWrap = false
+   )
 }
 
 @Composable
@@ -285,9 +324,38 @@ fun FileQueueItem(
                FileStatus.Failed -> stringResource(R.string.status_error)
             }
             val sizeText = if (file.fileSize > 0) fmtBytes(file.fileSize) else null
+            // All segments are joined here with the same "  |  " separator. (Keeping
+            // a separator inside a string resource won't match: Android collapses its
+            // double spaces to one, making that gap visibly narrower.)
+            val sep = "  |  "
             Text(
-               text = if (sizeText != null) "$sizeText  |  $statusText" else statusText,
-               style = MaterialTheme.typography.bodySmall,
+               text = buildAnnotatedString {
+                  if (file.status == FileStatus.Completed && file.unpackDurationMs != null) {
+                     // Готово | Время | Скорость | размер до → размер после
+                     withStyle(SpanStyle(color = SuccessGreen)) { append(statusText) }
+                     append(sep)
+                     append(fmtDuration(file.unpackDurationMs))
+                     append(sep)
+                     append("%.1f MB/s".format(file.unpackSpeedMBps ?: 0.0))
+                     val after = file.unpackedSize
+                     if (after != null && after > 0L) {
+                        append(sep)
+                        if (file.fileSize > 0L) {
+                           append("${fmtBytes(file.fileSize)} → ${fmtBytes(after)}")
+                        } else {
+                           append(fmtBytes(after))
+                        }
+                     }
+                  } else {
+                     // Pending / converting / failed: size | status.
+                     if (sizeText != null) {
+                        append(sizeText)
+                        append(sep)
+                     }
+                     append(statusText)
+                  }
+               },
+               style = MaterialTheme.typography.bodyMedium,
                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
          }

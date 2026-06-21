@@ -1,6 +1,7 @@
 package com.androNSZ.ui.components
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.LocalMinimumInteractiveComponentSize
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.LocalContentColor
@@ -11,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import com.androNSZ.ui.theme.DestructiveRed
 
 @Composable
 fun AppDropdownMenuItem(
@@ -20,9 +22,13 @@ fun AppDropdownMenuItem(
     destructive: Boolean = false,
     content: @Composable RowScope.() -> Unit
 ) {
-    val iconColor = if (destructive) MaterialTheme.colorScheme.error
+    // In the dark theme MaterialTheme.colorScheme.error is a pale red; use the
+    // stronger DestructiveRed so destructive items match the light theme.
+    val destructiveColor = if (isSystemInDarkTheme()) DestructiveRed
+                           else MaterialTheme.colorScheme.error
+    val iconColor = if (destructive) destructiveColor
                     else MaterialTheme.colorScheme.onSurfaceVariant
-    val textColor = if (destructive) MaterialTheme.colorScheme.error
+    val textColor = if (destructive) destructiveColor
                     else LocalContentColor.current
 
     // Disable the Material3 global 48dp minimum touch target so items wrap their content.
