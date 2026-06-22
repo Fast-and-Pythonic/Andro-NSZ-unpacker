@@ -244,7 +244,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
  * to make a divider span the full card width despite the Column's side padding.
  * It measures the child wider by 2×padding and shifts it left by one padding.
  */
-private fun Modifier.fullBleedWidth(horizontalPadding: Dp): Modifier = layout { measurable, constraints ->
+internal fun Modifier.fullBleedWidth(horizontalPadding: Dp): Modifier = layout { measurable, constraints ->
    val pad = horizontalPadding.roundToPx()
    val targetWidth = constraints.maxWidth + pad * 2
    // Measure the child wider than the available space (both edges)...

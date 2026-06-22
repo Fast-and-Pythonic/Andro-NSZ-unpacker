@@ -45,8 +45,21 @@ typedef struct {
 
 /* API functions */
 int  hfs0_parse(const char *input_path, Hfs0Container *out);
+
+/* Parse an HFS0 partition that starts at [hfs0_abs_offset] inside the already-open
+ * stream [fp]. Used for the nested HFS0 layout of XCI containers (root partition →
+ * sub-partitions → files). Each out->files[i].data_offset is an ABSOLUTE offset
+ * inside the file (base + header + entry offset), ready to fseeko() to. */
+int  hfs0_parse_at(FILE *fp, uint64_t hfs0_abs_offset, Hfs0Container *out);
+
 int  hfs0_write_header(FILE *out_fp, Hfs0Container *container,
                        const uint64_t *new_file_sizes);
+
+/* Number of bytes hfs0_write_header() will emit for [container] (header + entries
+ * + padded string table). Lets callers reserve/account a partition's header size
+ * before writing it. Matches hfs0_write_header byte-for-byte. */
+uint64_t hfs0_computed_header_size(const Hfs0Container *container);
+
 const char *hfs0_last_error(void);
 
 #endif /* HFS0_H */

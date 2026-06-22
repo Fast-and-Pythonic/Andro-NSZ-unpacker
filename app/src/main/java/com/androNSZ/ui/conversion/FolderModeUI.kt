@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
@@ -136,6 +137,25 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
             }
          }
 
+         var showUnpackFiles by remember { mutableStateOf(false) }
+         CompactToggleButton(
+            expanded = showUnpackFiles,
+            collapsedText = stringResource(R.string.action_show_unpack_files),
+            expandedText = stringResource(R.string.action_hide_unpack_files),
+            onClick = { showUnpackFiles = !showUnpackFiles }
+         )
+
+         if (showUnpackFiles) {
+            // Same cards as single-files mode (size + status + per-file stats).
+            // enabled = false so no remove button appears — the folder list is
+            // not editable.
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+               vm.folderFileEntries.forEach { entry ->
+                  FileQueueItem(file = entry, onRemove = {}, enabled = false)
+               }
+            }
+         }
+
          Button(
             onClick = { vm.startFolderConversion(context) },
             enabled = !vm.isConverting,
@@ -176,6 +196,17 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                   )
                }
 
+               // Final summary: average speed across the whole run.
+               vm.folderAverageSpeedMBps?.let { avg ->
+                  if (!vm.isConverting) {
+                     Text(
+                        text = stringResource(R.string.format_average_speed, avg),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurface
+                     )
+                  }
+               }
+
                val overall = vm.folderOverallProgress
                if (overall != null) {
                   LinearProgressIndicator(
@@ -186,18 +217,11 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                      modifier = Modifier.fillMaxWidth(),
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
-                     Text(
-                        text = stringResource(R.string.format_files_processed, vm.folderProcessedFiles, vm.folderTotalFiles),
-                        style = MaterialTheme.typography.bodySmall
+                     FolderMetricText(
+                        text = stringResource(R.string.format_files_processed, vm.folderProcessedFiles, vm.folderTotalFiles)
                      )
-                     Text(
-                        text = "%.1f%%".format(overall.displayPercent * 100f),
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                     Text(
-                        text = "%.1f MB/s".format(overall.speedMBps),
-                        style = MaterialTheme.typography.bodySmall
-                     )
+                     FolderMetricText(text = "%.1f%%".format(overall.displayPercent * 100f))
+                     FolderMetricText(text = "%.1f MB/s".format(overall.speedMBps))
                   }
                   if (overall.totalBytes > 0) {
                      Text(
@@ -207,38 +231,36 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
                   }
                }
 
-               val currentFileProgress = vm.folderCurrentFileProgress
-               val currentFileName = vm.folderCurrentFileName
-               if (currentFileName != null && currentFileProgress != null) {
-                  Spacer(Modifier.size(4.dp))
+               // One progress bar per file currently converting in parallel.
+               vm.folderActiveFiles.forEach { activeFile ->
+                  val p = activeFile.progress
+                  // Span the full card width, escaping the Column's 16dp side padding.
+                  HorizontalDivider(
+                     modifier = Modifier.fullBleedWidth(16.dp),
+                     thickness = 1.dp,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+                  )
                   Text(
-                     text = currentFileName,
+                     text = activeFile.name,
                      style = MaterialTheme.typography.bodyMedium,
                      maxLines = 1,
                      overflow = TextOverflow.Ellipsis
                   )
                   LinearProgressIndicator(
-                     progress = { currentFileProgress.percent },
+                     progress = { p.percent },
                      modifier = Modifier.fillMaxWidth()
                   )
                   Row(
                      modifier = Modifier.fillMaxWidth(),
                      horizontalArrangement = Arrangement.SpaceBetween
                   ) {
-                     Text(
-                        text = stringResource(R.string.label_current_file),
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                     Text(
-                        text = "%.1f%%".format(currentFileProgress.percent * 100f),
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                  }
-                  if (currentFileProgress.totalBytes > 0) {
-                     Text(
-                        text = "${fmtBytes(currentFileProgress.doneBytes)} / ${fmtBytes(currentFileProgress.totalBytes)}",
-                        style = MaterialTheme.typography.bodySmall
-                     )
+                     FolderMetricText(text = "%.1f MB/s".format(p.speedMBps))
+                     FolderMetricText(text = "%.1f%%".format(p.displayPercent * 100f))
+                     if (p.totalBytes > 0) {
+                        FolderMetricText(
+                           text = "${fmtBytes(p.displayDoneBytes)} / ${fmtBytes(p.displayTotalBytes)}"
+                        )
+                     }
                   }
                }
             }
@@ -256,6 +278,21 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
       }
       StatusLogPanel(vm.statusLog)
    }
+}
+
+/**
+ * A progress metric at its natural width in monospace, spaced by the parent row's
+ * `SpaceBetween` so values keep their real width and nothing gets clipped.
+ * (Same idea as MetricText in SingleFilesUI.)
+ */
+@Composable
+private fun FolderMetricText(text: String) {
+   Text(
+      text = text,
+      style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+      maxLines = 1,
+      softWrap = false
+   )
 }
 
 @Composable

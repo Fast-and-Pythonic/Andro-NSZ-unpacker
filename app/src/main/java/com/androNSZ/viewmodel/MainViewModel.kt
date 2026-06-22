@@ -79,13 +79,20 @@ class MainViewModel : ViewModel() {
 
    // Folder mode
    var folderStructure by mutableStateOf<FolderStructure?>(null)
+   // The NSZ/XCZ files that will be unpacked, as a queue mirroring batch mode:
+   // each entry carries size + live status + final per-file stats, so the
+   // "files to unpack" list can show the same details as single-files mode.
+   val folderFileEntries = mutableStateListOf<FileEntry>()
    private var folderLogWriter: FolderLogWriter? = null
    var folderLogPath by mutableStateOf<String?>(null)
    var folderOverallProgress by mutableStateOf<ConversionProgress?>(null)
-   var folderCurrentFileProgress by mutableStateOf<ConversionProgress?>(null)
-   var folderCurrentFileName by mutableStateOf<String?>(null)
+   // One entry per file currently converting in parallel (drives the per-file
+   // bars, mirroring [activeFileProgress] in batch mode).
+   var folderActiveFiles by mutableStateOf<List<ActiveFolderFile>>(emptyList())
    var folderProcessedFiles by mutableStateOf(0)
    var folderTotalFiles by mutableStateOf(0)
+   // Average unpack speed across the whole run, set once the folder finishes.
+   var folderAverageSpeedMBps by mutableStateOf<Double?>(null)
 
    // Conversion state
    var isConverting  by mutableStateOf(false)
@@ -328,6 +335,7 @@ class MainViewModel : ViewModel() {
 
             val structure = FolderScanner.scanFolder(context, uri, statusCb)
             folderStructure = structure
+            buildFolderFileEntries(structure)
             conversionMode = ConversionMode.FolderMode(uri, structure)
             statusMessage = null
          } catch (e: Exception) {
@@ -340,10 +348,34 @@ class MainViewModel : ViewModel() {
       }
    }
 
+   /** Rebuilds [folderFileEntries] (all Pending) from the scanned NSZ/XCZ files. */
+   private fun buildFolderFileEntries(structure: FolderStructure) {
+      folderFileEntries.clear()
+      folderFileEntries.addAll(
+         collectCompressedFiles(structure.allFiles).map { node ->
+            FileEntry(node.uri, node.name, node.sizeBytes)
+         }
+      )
+   }
+
+   /** Applies a per-file lifecycle event from the folder processor to its entry. */
+   private fun applyFolderFileEvent(event: FolderFileEvent) {
+      val idx = folderFileEntries.indexOfFirst { it.uri == event.sourceUri }
+      if (idx < 0) return
+      val e = folderFileEntries[idx]
+      folderFileEntries[idx] = e.copy(
+         status = event.status,
+         unpackDurationMs = event.durationMs ?: e.unpackDurationMs,
+         unpackSpeedMBps = event.speedMBps ?: e.unpackSpeedMBps,
+         unpackedSize = event.unpackedSize ?: e.unpackedSize
+      )
+   }
+
    fun resetConversionState() {
       conversionMode = ConversionMode.None
       fileQueue.clear()
       folderStructure = null
+      folderFileEntries.clear()
       selectedUri = null
       selectedName = null
       isConverting = false
@@ -356,10 +388,10 @@ class MainViewModel : ViewModel() {
       batchProcessedFiles = 0
       batchTotalFiles = 0
       folderOverallProgress = null
-      folderCurrentFileProgress = null
-      folderCurrentFileName = null
+      folderActiveFiles = emptyList()
       folderProcessedFiles = 0
       folderTotalFiles = 0
+      folderAverageSpeedMBps = null
       statusMessage = null
       compact2Stats = null
       isSuccess = false
@@ -448,7 +480,13 @@ class MainViewModel : ViewModel() {
                      )
                      val fileStartMs = System.currentTimeMillis()
                      try {
-                        NszConverter.convert(context, file.uri, headerKey, statusCb)
+                        // XCZ → XCI, everything else → NSZ → NSP.
+                        val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
+                           NszConverter.convertXcz(context, file.uri, headerKey, statusCb)
+                        } else {
+                           NszConverter.convert(context, file.uri, headerKey, statusCb)
+                        }
+                        flow
                            .catch { e ->
                               fileQueue[i] = file.copy(status = FileStatus.Failed)
                               statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
@@ -523,10 +561,12 @@ class MainViewModel : ViewModel() {
       isSuccess = false
       progress = null
       folderOverallProgress = ConversionProgress(0L, structure.totalSize, 0.0)
-      folderCurrentFileProgress = null
-      folderCurrentFileName = null
+      folderActiveFiles = emptyList()
       folderProcessedFiles = 0
       folderTotalFiles = countAllFiles(structure.allFiles)
+      folderAverageSpeedMBps = null
+      // Reset the per-file list to Pending so a re-run clears previous stats.
+      buildFolderFileEntries(structure)
       startTimer()
 
       folderLogWriter = FolderLogWriter(context)
@@ -536,15 +576,11 @@ class MainViewModel : ViewModel() {
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
+            // The internal NCA file name (EXISTS/FILE_START) is no longer surfaced
+            // here: with several files converting in parallel a single "current
+            // file" name is ambiguous. Per-file names come from FolderProgressUpdate.
             viewModelScope.launch(Dispatchers.Main.immediate) {
                statusLog.add(LogEntry(tag, msg.trim()))
-               
-               // Instant file name update from C++ code
-               when (tag) {
-                  "EXISTS", "FILE_START" -> {
-                     folderCurrentFileName = msg.trim()
-                  }
-               }
             }
             viewModelScope.launch(Dispatchers.IO) {
                folderLogWriter?.writeLog(tag, msg.trim())
@@ -561,15 +597,16 @@ class MainViewModel : ViewModel() {
                outputFolderUri,
                { update ->
                   folderOverallProgress = update.overallProgress
-                  folderCurrentFileProgress = update.currentFileProgress
-                  folderCurrentFileName = update.currentFileName
+                  folderActiveFiles = update.activeFiles
                   folderProcessedFiles = update.processedFiles
                   folderTotalFiles = update.totalFiles
                },
-               statusCb
+               statusCb,
+               { event -> applyFolderFileEvent(event) }
             )
 
             isConverting = false
+            folderActiveFiles = emptyList()
 
             withContext(Dispatchers.IO) {
                folderLogWriter?.close()
@@ -585,6 +622,13 @@ class MainViewModel : ViewModel() {
                isSuccess = summary.successCount > 0 && successRate >= 50
                lastFolderSummary = summary
                lastLogPathMsg = logPathMsg
+
+               // Wall-clock average: total processed bytes over the whole run
+               // (includes parallel overlap, so it reflects real throughput).
+               val elapsedSec = summary.totalDurationMs.coerceAtLeast(1L) / 1000.0
+               folderAverageSpeedMBps = if (summary.totalBytesProcessed > 0L) {
+                  summary.totalBytesProcessed / 1024.0 / 1024.0 / elapsedSec
+               } else null
 
                statusMessage = when (statsFormat) {
                   StatsFormat.COMPACT -> buildCompactStats(context, summary, logPathMsg)
@@ -611,6 +655,7 @@ class MainViewModel : ViewModel() {
             val logPathMsg = if (folderLogPath != null) "\n${context.getString(R.string.format_log_path, folderLogPath!!)}" else ""
             statusMessage = context.getString(R.string.error_general, e.message ?: "") + logPathMsg
          } finally {
+            folderActiveFiles = emptyList()
             stopTimer()
             withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
          }

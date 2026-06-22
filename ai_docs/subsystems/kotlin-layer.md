@@ -33,7 +33,9 @@ UI на Jetpack Compose + вся логика конвертации. Единс
 - **SingleFilesUI.kt** — очередь файлов: добавление, список, общий бар + по бару на
   каждый активно конвертируемый файл (`activeFileProgress`), контекстный статус
   «Распаковываем…/Распаковано» + таймер.
-- **FolderModeUI.kt** — папка: инфо о структуре, дерево, общий + текущий бар.
+- **FolderModeUI.kt** — папка: инфо о структуре, дерево, общий бар + по бару на
+  каждый активно распаковываемый файл (`folderActiveFiles`) + средняя скорость в
+  конце (как `SingleFilesUI`).
 
 ## MainViewModel
 
@@ -41,8 +43,9 @@ UI на Jetpack Compose + вся логика конвертации. Единс
 - Навигация/режим: `_screenStack`/`currentScreen`, `conversionMode`, `keysInstalled`.
 - Очередь: `fileQueue`, `currentFileIndex`, `batchOverallProgress`,
   `batchProcessedFiles/TotalFiles`, `activeFileProgress` (по индексу файла).
-- Папка: `folderStructure`, `folderOverallProgress`, `folderCurrentFileProgress`,
-  `folderProcessedFiles/TotalFiles`, `folderLogPath`.
+- Папка: `folderStructure`, `folderOverallProgress`, `folderActiveFiles`
+  (список активно конвертируемых файлов для пер-файловых баров),
+  `folderProcessedFiles/TotalFiles`, `folderAverageSpeedMBps`, `folderLogPath`.
 - Общее: `isConverting`, `progress`, `elapsedMs` (таймер), `statusMessage`,
   `statusLog`, `isSuccess`, `compact2Stats`.
 - Настройки: `statsFormat`, `outputFolderUri`, `appLanguage`.
@@ -81,16 +84,25 @@ UI на Jetpack Compose + вся логика конвертации. Единс
 - **nut/** — `KeysManager` (хранит prod.keys в `filesDir`), `KeysParser`
   (извлекает `header_key`, 32 байта).
 - **fs/** — `FolderScanner` (рекурсивный обход `DocumentsContract` → дерево +
-  списки NSZ/XCZ), `FolderProcessor` (батч: NSZ→NSP, XCZ→XCI, прочее → копия;
-  сохраняет структуру, продолжает при ошибках; свой троттлинг прогресса),
+  списки NSZ/XCZ), `FolderProcessor` (NSZ→NSP, XCZ→XCI, прочее → копия; сохраняет
+  структуру, продолжает при ошибках). С 2026-06-22 повторяет «новый» пайплайн
+  режима файлов: фаза 1 создаёт дерево выходных папок и плоский список
+  `WorkItem`; фаза 2 гоняет файлы параллельно через `Semaphore(FOLDER_CONCURRENCY)`.
+  Вход читается через `fd:N` (no-copy, FUSE-fallback на temp), результат пишется
+  **сразу** в дескриптор назначения (без temp-output+копии), verify через
+  `nativeVerifyNsp` включён (несовпадение → файл помечается ошибочным). Прогресс:
+  per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
   `TempFileManager` (`cacheDir`, `andronsz_<UUID>_<name>.<ext>`), `FolderLogWriter`
   (потокобезопасная запись лога под `Mutex`).
 
 ## Data flow (кратко)
 
 - **Очередь:** добавление → `startBatchConversion` → до `BATCH_CONCURRENCY` файлов
-  параллельно через `Semaphore`, каждый `NszConverter.convert()`; статусы
-  Pending→Converting→Completed/Failed; общий прогресс по сумме `fileTotals`.
+  параллельно через `Semaphore`, по расширению `.xcz` → `NszConverter.convertXcz()`,
+  иначе `NszConverter.convert()`; статусы Pending→Converting→Completed/Failed;
+  общий прогресс по сумме `fileTotals`.
 - **Папка:** `FolderScanner.scanFolder` → `FolderStructure` →
-  `startFolderConversion` → `FolderProcessor.processFolder` рекурсивно →
-  `FolderConversionSummary` → лог закрывается, temp чистится.
+  `startFolderConversion` → `FolderProcessor.processFolder` (фаза 1: дерево папок +
+  план, фаза 2: параллельная распаковка через `Semaphore`) →
+  `FolderConversionSummary` → лог закрывается, temp чистится. Прогресс стримится
+  через `FolderProgressUpdate` (общий бар + `activeFiles`).

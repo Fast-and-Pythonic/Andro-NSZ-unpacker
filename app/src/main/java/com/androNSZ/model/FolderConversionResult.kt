@@ -1,5 +1,7 @@
 package com.androNSZ.model
 
+import android.net.Uri
+
 enum class FileOperationType {
     NSZ_CONVERSION,  // NSZ → NSP
     XCZ_CONVERSION,  // XCZ → XCI
@@ -13,6 +15,8 @@ sealed class FileConversionResult {
         override val fileName: String,
         val outputName: String,
         val sizeBytes: Long,
+        // Size of the produced (uncompressed) file. For copies it equals sizeBytes.
+        val unpackedSizeBytes: Long,
         val durationMs: Long,
         val operationType: FileOperationType
     ) : FileConversionResult()
@@ -51,10 +55,30 @@ data class FolderConversionSummary(
     val copyFilesProcessed: Int
 )
 
+/**
+ * A live per-file status update for the "files to unpack" list, keyed by source
+ * [Uri]. Lets the UI mirror single-files mode: a file goes Converting when its
+ * work starts and Completed/Failed when it finishes, with the final stats filled
+ * in on success. Emitted only for NSZ/XCZ files (the ones shown in that list).
+ */
+data class FolderFileEvent(
+    val sourceUri: Uri,
+    val status: FileStatus,
+    val durationMs: Long? = null,
+    val speedMBps: Double? = null,
+    val unpackedSize: Long? = null
+)
+
+/** A single file currently being converted in parallel, for the per-file bars. */
+data class ActiveFolderFile(
+    val name: String,
+    val progress: ConversionProgress
+)
+
 data class FolderProgressUpdate(
     val overallProgress: ConversionProgress,
-    val currentFileProgress: ConversionProgress?,
-    val currentFileName: String?,
+    // One entry per file currently converting in parallel (empty between files).
+    val activeFiles: List<ActiveFolderFile>,
     val processedFiles: Int,
     val totalFiles: Int
 )

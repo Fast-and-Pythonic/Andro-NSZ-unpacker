@@ -17,7 +17,7 @@ Python-референс nicoboss/nsz.
 | `ncz_decompress.c` | Распаковка: `BlockReader` (поблочный zstd с кэшем) и `SolidReader` (потоковый `ZSTD_DStream`). AES-CTR только для crypto_type 3/4; FakeSection (type 1) — plaintext. Кормит SHA-256 |
 | `async_writer.c` | Фоновый поток записи+хеширования (см. [../architecture.md](../architecture.md) A04) |
 | `pfs0.c` | Контейнер PFS0 (NSP/NSZ). Запись — 24 байта. `pfs0_parse`, `pfs0_write_header` (.ncz→.nca, пересчёт размеров) |
-| `hfs0.c` | Контейнер HFS0 (XCI/XCZ). Запись — 64 байта (есть поле SHA-256). Хеш-поля обнуляются ради совместимости с референсом |
+| `hfs0.c` | Контейнер HFS0 (XCI/XCZ). Запись — 64 байта (есть поле SHA-256, обнуляется как в референсе). `hfs0_parse_at(fp, offset)` — потоковый парс вложенного раздела; `hfs0_computed_header_size()` — предрасчёт размера заголовка для пересборки |
 | `aes_ctr.c` | AES-128-CTR для секций NCA. Counter: `nonce[0:8] \|\| (offset>>4)` big-endian. Hardware + software (A02) |
 | `aes_xts.c` | AES-128-XTS для расшифровки заголовка NCA (сектора 0x200, IEEE 1619) |
 | `sha256.c` | SHA-256: one-shot `sha256()` и streaming (`init/update/final`). Hardware + software (A03) |
@@ -55,12 +55,19 @@ nsz_debug.c         (используется повсюду)
 5. SHA-256-сверка по имени файла (hex-префикс).
 6. При ошибке — удалить частичный вывод.
 
-**`ncz_convert_xcz_to_xci()`** (XCZ→XCI):
-1. Копирование XCI-хедера (0x200 байт) как есть.
-2. Парс HFS0 по смещению (обычно 0xF000).
-3. Пре-скан NCZ → размеры; запись обновлённого HFS0.
-4. По каждому файлу: NCZ → распаковать, иначе → скопировать.
-5. Обновление XCI-хедера новым размером HFS0.
+**`ncz_convert_xcz_to_xci()`** (XCZ→XCI): XCI — **вложенный** HFS0 (корень →
+под-разделы update/normal/secure/logo → NCA/NCZ-файлы), повторяет
+`NszDecompressor.__decompressXcz`.
+1. Вход через `open_input_file` (поддержка `fd:N`); чтение 0x200 XCI-хедера, проверка «HEAD».
+2. Парс корневого HFS0 (`hfs0_parse_at` по смещению из 0x130; обычно 0xF000).
+3. По каждому под-разделу: парс вложенного HFS0, пре-скан NCZ → размеры файлов,
+   расчёт нового размера раздела (`hfs0_computed_header_size` + сумма файлов).
+4. Запись XCI-хедера и метаданных (0x200..hfs0_offset) как есть; запись корневого
+   HFS0 с новыми размерами разделов.
+5. По каждому под-разделу: запись вложенного HFS0-хедера, затем файлы (NCZ →
+   распаковать через `ncz_decompress`, иначе → копировать), SHA-256-сверка NCA.
+6. При ошибке — удалить частичный вывод. (XCI-хеши/`hfs0HeaderHash` не пересчитываются —
+   как в референсе, который копирует хедер дословно.)
 
 ## JNI-интерфейс
 

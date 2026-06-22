@@ -139,7 +139,7 @@ object FolderScanner {
                         xczFiles.add(fileUri)
                     }
 
-                    results.add(FileNode.File(fileUri, name, isNsz, isXcz))
+                    results.add(FileNode.File(fileUri, name, isNsz, isXcz, size))
                     addToTotalSize(size)
                 }
             }

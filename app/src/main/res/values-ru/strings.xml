@@ -12,8 +12,10 @@
     <string name="action_convert_files">Конвертировать %d файл(ов)</string>
     <string name="action_convert_folder">Конвертировать папку</string>
     <string name="action_delete">Удалить</string>
-    <string name="action_show_structure">Показать структуру</string>
-    <string name="action_hide_structure">Скрыть структуру</string>
+    <string name="action_show_structure">Показать структуру папки</string>
+    <string name="action_hide_structure">Скрыть структуру папки</string>
+    <string name="action_show_unpack_files">Файлы NSZ/XCZ для распаковки</string>
+    <string name="action_hide_unpack_files">Скрыть файлы NSZ/XCZ</string>
     <string name="action_show_log">Показать лог</string>
     <string name="action_hide_log">Скрыть лог</string>
     <string name="action_wrap_lines_on">Перенос Включён</string>
@@ -63,7 +65,7 @@
     <string name="format_total_files_count">Всего файлов: %d</string>
     <string name="format_size">Размер: %s</string>
     <string name="format_files_completed">Обработано %1$d из %2$d файлов</string>
-    <string name="format_average_speed">Средняя скорость: %1$.1f MB/s</string>
+    <string name="format_average_speed">Средняя суммарная скорость: %1$.1f MB/s</string>
     <string name="format_success_rate">Успешно: %1$d из %2$d NSZ файлов (%3$s)</string>
     <string name="format_failed_count">Ошибок: %d файл(ов)</string>
     <string name="format_log_path">Лог: %s</string>

@@ -228,14 +228,13 @@ object NszConverter {
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
-        val resolvedInput = withContext(Dispatchers.IO) {
-            resolveToFilePath(context, inputUri)
-        }
         val outputName = originalFileName.substringBeforeLast('.') + ".xci"
 
         val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
         var pfd: ParcelFileDescriptor? = null
+        var inputPfd: ParcelFileDescriptor? = null
+        var resolvedInput: ResolvedInputFile? = null
 
         lastDebugLogPath = debugLogFile.absolutePath
         lastVerifyError = null
@@ -243,6 +242,26 @@ object NszConverter {
 
         try {
             withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
+
+            // Resolve the input to a native path. Prefer reading the source
+            // directly through its file descriptor (no copy); fall back to a
+            // temp-file copy only when the provider returns a non-seekable fd.
+            val inputPath = withContext(Dispatchers.IO) {
+                if (inputUri.scheme == "file") {
+                    inputUri.path!!
+                } else {
+                    val p = context.contentResolver.openFileDescriptor(inputUri, "r")
+                    if (p != null && p.statSize >= 0L) {
+                        inputPfd = p
+                        "fd:${p.fd}"
+                    } else {
+                        p?.close()
+                        val r = resolveToFilePath(context, inputUri, statusCallback)
+                        resolvedInput = r
+                        r.file.absolutePath
+                    }
+                }
+            }
 
             val cv = ContentValues().apply {
                 put(MediaStore.Downloads.DISPLAY_NAME, outputName)
@@ -269,8 +288,24 @@ object NszConverter {
                 }
             }
 
-            val result = withContext(Dispatchers.IO) {
-                nativeConvertXcz(resolvedInput.file.absolutePath, nativePath, cb, statusCallback)
+            var result = withContext(Dispatchers.IO) {
+                nativeConvertXcz(inputPath, nativePath, cb, statusCallback)
+            }
+
+            // FUSE fallback: a descriptor whose /proc/self/fd path can't be
+            // re-opened by native code surfaces as an input/parse error. Retry
+            // through a temp copy (same rationale as convert()).
+            if (result != OK && inputPfd != null &&
+                (result == ERR_OPEN_INPUT || result == ERR_INVALID_PFS0 ||
+                 result == ERR_INVALID_NCZ || result == ERR_IO)) {
+                statusCallback?.onStatus("XCZ", "Direct read failed (code $result), copying to cache and retrying")
+                withContext(Dispatchers.IO) { runCatching { inputPfd?.close() } }
+                inputPfd = null
+                val r = withContext(Dispatchers.IO) { resolveToFilePath(context, inputUri, statusCallback) }
+                resolvedInput = r
+                result = withContext(Dispatchers.IO) {
+                    nativeConvertXcz(r.file.absolutePath, nativePath, cb, statusCallback)
+                }
             }
 
             when (result) {
@@ -299,7 +334,8 @@ object NszConverter {
             withContext(Dispatchers.IO) {
                 runCatching { nativeCloseDebugLog() }
                 runCatching { pfd?.close() }
-                resolvedInput.deleteIfTemp()
+                runCatching { inputPfd?.close() }
+                resolvedInput?.deleteIfTemp()
             }
         }
 

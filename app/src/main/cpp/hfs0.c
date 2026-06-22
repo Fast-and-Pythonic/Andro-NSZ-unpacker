@@ -14,42 +14,36 @@ static uint32_t hfs0_align_0x20(uint32_t n)
 
 const char *hfs0_last_error(void) { return s_err; }
 
-int hfs0_parse(const char *input_path, Hfs0Container *out)
+/* Core parser: reads an HFS0 partition starting at [base] inside the open stream
+ * [fp]. File offsets in [out] are stored absolute (base + header + entry offset). */
+static int hfs0_parse_stream(FILE *fp, uint64_t base, Hfs0Container *out)
 {
-    DBG("hfs0_parse: opening '%s'", input_path);
-
-    FILE *fp = fopen(input_path, "rb");
-    if (!fp) {
-        snprintf(s_err, sizeof(s_err), "hfs0_parse: cannot open '%s': %s",
-                 input_path, strerror(errno));
-        DBG("hfs0_parse: ERROR — %s", s_err);
+    if (fseeko(fp, (off_t)base, SEEK_SET) != 0) {
+        snprintf(s_err, sizeof(s_err), "hfs0_parse: seek to 0x%llX failed",
+                 (unsigned long long)base);
         return -1;
     }
-    setvbuf(fp, NULL, _IOFBF, 4 * 1024 * 1024);
 
     Hfs0Header hdr;
     if (fread(&hdr, sizeof(hdr), 1, fp) != 1) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read header");
         DBG("hfs0_parse: ERROR — %s", s_err);
-        fclose(fp);
         return -2;
     }
 
-    DBG("hfs0_parse: magic=0x%08X (expected 0x%08X), file_count=%u, str_table_size=%u",
-        hdr.magic, HFS0_MAGIC, hdr.file_count, hdr.string_table_size);
+    DBG("hfs0_parse: base=0x%llX magic=0x%08X (expected 0x%08X), file_count=%u, str_table_size=%u",
+        (unsigned long long)base, hdr.magic, HFS0_MAGIC, hdr.file_count, hdr.string_table_size);
 
     if (hdr.magic != HFS0_MAGIC) {
         snprintf(s_err, sizeof(s_err),
-                 "hfs0_parse: bad magic 0x%08X (expected 0x%08X)",
-                 hdr.magic, HFS0_MAGIC);
-        fclose(fp);
+                 "hfs0_parse: bad magic 0x%08X (expected 0x%08X) at 0x%llX",
+                 hdr.magic, HFS0_MAGIC, (unsigned long long)base);
         return -3;
     }
 
     if (hdr.file_count == 0 || hdr.file_count > HFS0_MAX_FILES) {
         snprintf(s_err, sizeof(s_err),
                  "hfs0_parse: file_count %u out of range", hdr.file_count);
-        fclose(fp);
         return -4;
     }
 
@@ -57,14 +51,12 @@ int hfs0_parse(const char *input_path, Hfs0Container *out)
     Hfs0FileEntry *entries = calloc(hdr.file_count, sizeof(Hfs0FileEntry));
     if (!entries) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: OOM entries");
-        fclose(fp);
         return -5;
     }
     if (fread(entries, sizeof(Hfs0FileEntry), hdr.file_count, fp)
             != hdr.file_count) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read entries");
         free(entries);
-        fclose(fp);
         return -6;
     }
 
@@ -72,19 +64,19 @@ int hfs0_parse(const char *input_path, Hfs0Container *out)
     if (!strtab) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: OOM string table");
         free(entries);
-        fclose(fp);
         return -7;
     }
     if (fread(strtab, 1, hdr.string_table_size, fp) != hdr.string_table_size) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read string table");
         free(strtab);
         free(entries);
-        fclose(fp);
         return -8;
     }
 
-    /* HFS0 data area offset: 16-byte header + (file_count * 64) + string_table_size */
-    uint64_t data_area = 0x10
+    /* HFS0 data area: 16-byte header + (file_count * 64) + string_table_size,
+     * relative to the partition start [base]. */
+    uint64_t data_area = base
+                       + 0x10
                        + (uint64_t)hdr.file_count * sizeof(Hfs0FileEntry)
                        + hdr.string_table_size;
 
@@ -114,8 +106,44 @@ int hfs0_parse(const char *input_path, Hfs0Container *out)
 
     free(strtab);
     free(entries);
-    fclose(fp);
     return 0;
+}
+
+int hfs0_parse(const char *input_path, Hfs0Container *out)
+{
+    DBG("hfs0_parse: opening '%s'", input_path);
+
+    FILE *fp = fopen(input_path, "rb");
+    if (!fp) {
+        snprintf(s_err, sizeof(s_err), "hfs0_parse: cannot open '%s': %s",
+                 input_path, strerror(errno));
+        DBG("hfs0_parse: ERROR — %s", s_err);
+        return -1;
+    }
+    setvbuf(fp, NULL, _IOFBF, 4 * 1024 * 1024);
+
+    int rc = hfs0_parse_stream(fp, 0, out);
+    fclose(fp);
+    return rc;
+}
+
+int hfs0_parse_at(FILE *fp, uint64_t hfs0_abs_offset, Hfs0Container *out)
+{
+    return hfs0_parse_stream(fp, hfs0_abs_offset, out);
+}
+
+uint64_t hfs0_computed_header_size(const Hfs0Container *container)
+{
+    /* Mirror exactly what hfs0_write_header() emits: 16-byte header + entries +
+     * padded string table (with .ncz → .nca rename, which keeps name length). */
+    uint32_t strtab_non_padded = 0;
+    for (int i = 0; i < container->file_count; i++) {
+        strtab_non_padded += (uint32_t)strlen(container->files[i].name) + 1;
+    }
+    uint32_t header_non_padded = 0x10u
+                               + (uint32_t)container->file_count * (uint32_t)sizeof(Hfs0FileEntry)
+                               + strtab_non_padded;
+    return (uint64_t)header_non_padded + hfs0_align_0x20(header_non_padded);
 }
 
 int hfs0_write_header(FILE *out_fp, Hfs0Container *container,

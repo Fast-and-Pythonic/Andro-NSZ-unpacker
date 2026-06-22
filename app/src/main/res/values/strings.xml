@@ -12,8 +12,10 @@
     <string name="action_convert_files">Convert %d file(s)</string>
     <string name="action_convert_folder">Convert folder</string>
     <string name="action_delete">Delete</string>
-    <string name="action_show_structure">Show structure</string>
-    <string name="action_hide_structure">Hide structure</string>
+    <string name="action_show_structure">Show folder structure</string>
+    <string name="action_hide_structure">Hide folder structure</string>
+    <string name="action_show_unpack_files">NSZ/XCZ files to unpack</string>
+    <string name="action_hide_unpack_files">Hide NSZ/XCZ files</string>
     <string name="action_show_log">Show log</string>
     <string name="action_hide_log">Hide log</string>
     <string name="action_wrap_lines_on">Line breaks Enabled</string>
@@ -63,7 +65,7 @@
     <string name="format_total_files_count">Total files: %d</string>
     <string name="format_size">Size: %s</string>
     <string name="format_files_completed">Processed %1$d of %2$d files</string>
-    <string name="format_average_speed">Average speed: %1$.1f MB/s</string>
+    <string name="format_average_speed">Average total speed: %1$.1f MB/s</string>
     <string name="format_success_rate">Successful: %1$d of %2$d NSZ files (%3$s)</string>
     <string name="format_failed_count">Failed: %d file(s)</string>
     <string name="format_log_path">Log: %s</string>
