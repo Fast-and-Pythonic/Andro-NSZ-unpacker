@@ -257,7 +257,7 @@ class MainViewModel : ViewModel() {
       }
 
       viewModelScope.launch {
-         NszConverter.convert(context, uri, headerKey, statusCb)
+         NszConverter.convert(context, uri, headerKey, outputFolderUri, statusCb)
             .catch { e ->
                isConverting = false
                withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
@@ -482,9 +482,9 @@ class MainViewModel : ViewModel() {
                      try {
                         // XCZ → XCI, everything else → NSZ → NSP.
                         val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
-                           NszConverter.convertXcz(context, file.uri, headerKey, statusCb)
+                           NszConverter.convertXcz(context, file.uri, headerKey, outputFolderUri, statusCb)
                         } else {
-                           NszConverter.convert(context, file.uri, headerKey, statusCb)
+                           NszConverter.convert(context, file.uri, headerKey, outputFolderUri, statusCb)
                         }
                         flow
                            .catch { e ->

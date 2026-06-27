@@ -41,19 +41,23 @@ static int hfs0_parse_stream(FILE *fp, uint64_t base, Hfs0Container *out)
         return -3;
     }
 
-    if (hdr.file_count == 0 || hdr.file_count > HFS0_MAX_FILES) {
+    if (hdr.file_count > HFS0_MAX_FILES) {
         snprintf(s_err, sizeof(s_err),
                  "hfs0_parse: file_count %u out of range", hdr.file_count);
         return -4;
     }
 
     /* HFS0 file entries are 64 bytes (vs PFS0's 24 bytes) */
-    Hfs0FileEntry *entries = calloc(hdr.file_count, sizeof(Hfs0FileEntry));
-    if (!entries) {
+    Hfs0FileEntry *entries = NULL;
+    if (hdr.file_count > 0) {
+        entries = calloc(hdr.file_count, sizeof(Hfs0FileEntry));
+    }
+    if (hdr.file_count > 0 && !entries) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: OOM entries");
         return -5;
     }
-    if (fread(entries, sizeof(Hfs0FileEntry), hdr.file_count, fp)
+    if (hdr.file_count > 0 &&
+            fread(entries, sizeof(Hfs0FileEntry), hdr.file_count, fp)
             != hdr.file_count) {
         snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read entries");
         free(entries);

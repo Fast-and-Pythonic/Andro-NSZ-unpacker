@@ -4,7 +4,34 @@
 #include <stdint.h>
 #include <time.h>
 #include <pthread.h>
+#if defined(__ANDROID__)
 #include <android/log.h>
+#else
+#define ANDROID_LOG_WARN  0
+#define ANDROID_LOG_INFO  0
+#define ANDROID_LOG_DEBUG 0
+
+static int __android_log_print(int prio, const char *tag, const char *fmt, ...)
+{
+   (void)prio;
+   fprintf(stderr, "%s: ", tag);
+   va_list ap;
+   va_start(ap, fmt);
+   int written = vfprintf(stderr, fmt, ap);
+   va_end(ap);
+   fputc('\n', stderr);
+   return written;
+}
+
+static int __android_log_vprint(int prio, const char *tag, const char *fmt, va_list ap)
+{
+   (void)prio;
+   fprintf(stderr, "%s: ", tag);
+   int written = vfprintf(stderr, fmt, ap);
+   fputc('\n', stderr);
+   return written;
+}
+#endif
 
 #define LOG_TAG "AndroNSZ"
 
