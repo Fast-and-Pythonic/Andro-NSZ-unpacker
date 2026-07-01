@@ -10,9 +10,7 @@ Entry point is `ai_docs/start.md`, pointed to by the root `CLAUDE.md`.
 
 **All documentation is written in English** — including the `ai_docs/` files
 themselves (this `_meta.md`, gotchas, architecture, status, subsystems, etc.),
-not just README and code comments. User-facing conversation stays in Russian, but
-anything committed to the repository as docs is English. See
-[conventions.md](conventions.md).
+not just README and code comments. See [conventions.md](conventions.md).
 
 ## Update triggers
 

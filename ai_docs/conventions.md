@@ -2,7 +2,6 @@
 
 ## Language
 
-- **User-facing conversation** (for this project) — **Russian**.
 - **Code, comments, documentation, commit messages** — **English**. This includes
   the `ai_docs/` files themselves, not only README and code comments (see
   [_meta.md](_meta.md)).

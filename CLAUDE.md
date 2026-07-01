@@ -1,14 +1,13 @@
 # CLAUDE.md
 
-AndroNSZ — Android-приложение, распаковывающее сжатые файлы Nintendo Switch
-(NSZ → NSP, XCZ → XCI). Kotlin/Compose UI + нативный C-движок через JNI.
+AndroNSZ — an Android app that unpacks compressed Nintendo Switch files
+(NSZ → NSP, XCZ → XCI). Kotlin/Compose UI + a native C engine via JNI.
 
-**Точка входа в документацию:** [`ai_docs/start.md`](ai_docs/start.md) — прочитай первым.
+**Documentation entry point:** [`ai_docs/start.md`](ai_docs/start.md) — read it first.
 
 Critical rules:
-- Общение с пользователем — на русском. Все комментарии в коде, документация и
-  commit-сообщения — на английском.
-- Не трогать без явного запроса: криптографию (`aes_ctr.c`, `aes_xts.c`,
-  `sha256.c`), алгоритм распаковки (`ncz_decompress.c`), сигнатуры JNI.
-- Отступы — ровно 3 пробела, с сохранением отступа на пустых строках. См.
+- Code comments, documentation, and commit messages — in English.
+- Don't touch without an explicit request: cryptography (`aes_ctr.c`, `aes_xts.c`,
+  `sha256.c`), the decompression algorithm (`ncz_decompress.c`), JNI signatures.
+- Indentation — exactly 3 spaces, keeping the indentation on blank lines. See
   [`ai_docs/conventions.md`](ai_docs/conventions.md).
