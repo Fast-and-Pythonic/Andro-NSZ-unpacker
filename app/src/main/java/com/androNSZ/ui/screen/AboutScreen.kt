@@ -178,6 +178,17 @@ fun AboutScreen(
                             text = stringResource(R.string.about_credits_content),
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        Spacer(modifier = Modifier.height(12.dp))
+                        Text(
+                            text = stringResource(R.string.about_contributors_title),
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = stringResource(R.string.about_contributors_content),
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                     }
                 }
             }

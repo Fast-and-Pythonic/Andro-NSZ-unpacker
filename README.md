@@ -288,6 +288,9 @@ To force native rebuild:
 - Android port with native C engine
 - Repository: [Fast-and-Pythonic/Andro-NSZ-unpacker](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker)
 
+**Contributors:**
+- [manx98](https://github.com/manx98) — fix for XCZ→XCI extraction on gamecards with an empty HFS0 partition ([#6](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/pull/6))
+
 **Libraries Used:**
 - [Zstandard (zstd) 1.5.5](https://github.com/facebook/zstd) - Fast real-time compression algorithm
 - [Jetpack Compose](https://developer.android.com/jetpack/compose) - Modern Android UI toolkit
