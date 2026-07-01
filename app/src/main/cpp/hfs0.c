@@ -35,23 +35,29 @@ static int hfs0_parse_stream(FILE *fp, uint64_t base, Hfs0Container *out)
         return -3;
     }
 
-    if (hdr.file_count == 0 || hdr.file_count > HFS0_MAX_FILES) {
+    if (hdr.file_count > HFS0_MAX_FILES) {
         snprintf(s_err, sizeof(s_err),
                  "hfs0_parse: file_count %u out of range", hdr.file_count);
         return -4;
     }
 
+    /* An empty partition (file_count == 0) is legal — XCI gamecards routinely
+     * ship an empty 'update' partition. calloc(0, ...) may return NULL, so guard
+     * the allocation and the entry read on a non-zero count. */
     /* HFS0 file entries are 64 bytes (vs PFS0's 24 bytes) */
-    Hfs0FileEntry *entries = calloc(hdr.file_count, sizeof(Hfs0FileEntry));
-    if (!entries) {
-        snprintf(s_err, sizeof(s_err), "hfs0_parse: OOM entries");
-        return -5;
-    }
-    if (fread(entries, sizeof(Hfs0FileEntry), hdr.file_count, fp)
-            != hdr.file_count) {
-        snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read entries");
-        free(entries);
-        return -6;
+    Hfs0FileEntry *entries = NULL;
+    if (hdr.file_count > 0) {
+        entries = calloc(hdr.file_count, sizeof(Hfs0FileEntry));
+        if (!entries) {
+            snprintf(s_err, sizeof(s_err), "hfs0_parse: OOM entries");
+            return -5;
+        }
+        if (fread(entries, sizeof(Hfs0FileEntry), hdr.file_count, fp)
+                != hdr.file_count) {
+            snprintf(s_err, sizeof(s_err), "hfs0_parse: failed to read entries");
+            free(entries);
+            return -6;
+        }
     }
 
     char *strtab = calloc(1, hdr.string_table_size + 1);
