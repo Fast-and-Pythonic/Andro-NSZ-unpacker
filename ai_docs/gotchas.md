@@ -89,3 +89,30 @@ PFS0-парс показывает `entries[0].offset == 0` там, где в и
 [architecture.md](architecture.md) A11.
 **Как заметить:** выход XCI не совпадает с эталоном по размеру → проверь, что заголовок
 раздела = 0x8000 и `0x200..0xF000` занулён. Для full XCI — лог `treating as full XCI`.
+
+## G07: XCZ→XCI падает на XCI с пустым разделом (`file_count == 0`)
+**Симптом:** XCZ→XCI обрывается на парсинге раздела: лог `Partition 'update' parse
+failed: hfs0_parse: file_count 0 out of range`, затем `Invalid PFS0 container`, а
+готовый вывод удаляется.
+**Корень:** XCI-картриджи штатно содержат **пустой** раздел `update` (`file_count == 0`).
+`hfs0_parse` отвергал `file_count == 0` как out-of-range. Плюс `calloc(0, …)` может
+вернуть NULL — просто снять проверку мало, нужно обойти calloc/fread при 0.
+**Решение:** [hfs0.c](../app/src/main/cpp/hfs0.c) `hfs0_parse_stream` — разрешить 0,
+аллокацию и чтение записей делать только при `file_count > 0` (дальше цикл идёт 0 раз,
+`free(NULL)` безопасен). Пришло из PR #6 (manx98).
+**Диагностика (на будущее):** file-лог `nsz_debug.log` тут бесполезен — `dbg_open`
+открывает его на `"w"` (перезапись на каждый прогон), а десктоп-копия устаревает.
+Помогли кнопка «Сохранить лог с экрана» (`nsz_screen_log.txt`) и `adb logcat`. Если
+нативный лог «пустой/старый» — смотреть экранный лог и logcat, а не файл.
+
+## G08: `Flow.catch` в batch-режиме маскирует сбой под «Готово»
+**Симптом:** в режиме «файлы» упавший XCZ→XCI показывался зелёным «Готово», внизу
+«Обработано 1 из 1», без текста ошибки. В режиме «папка» — корректно.
+**Корень:** в `startBatchConversion` на flow висел `.catch { … Failed }`. `Flow.catch`
+ловит исключение и **завершает поток штатно**, поэтому код после `collect` безусловно
+ставил `FileStatus.Completed`, перезатирая `Failed`.
+**Решение:** [MainViewModel.kt](../app/src/main/java/com/androNSZ/viewmodel/MainViewModel.kt)
+`startBatchConversion` — убрать `.catch`, дать исключению уйти во внешний `try/catch`
+(он ставит `Failed` и не доходит до `Completed`); финальный summary добавляет строку об
+ошибках. Режим папки не затронут — там статусы идут через `FolderProcessor`.
+**Как заметить:** файл в очереди «Готово», хотя в логе есть `ERROR` по нему.
