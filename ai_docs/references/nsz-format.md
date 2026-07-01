@@ -1,7 +1,7 @@
-# Reference: формат NSZ/NCZ (анализ Python-референса nicoboss/nsz)
+# Reference: NSZ/NCZ format (analysis of the Python reference nicoboss/nsz)
 
-> Внешняя спецификация — про формат, не про наш код. Сохранена как есть, из разбора
-> референсной реализации. Для деталей нашего движка см.
+> An external spec — about the format, not our code. Kept as-is, from an analysis of
+> the reference implementation. For our engine's details see
 > [../subsystems/native-engine.md](../subsystems/native-engine.md).
 
 ===============================================================================

@@ -1,31 +1,31 @@
 # Subsystem: Native engine (libAndroNSZ)
 
-C11-движок распаковки. Собирается через CMake (`app/src/main/cpp/CMakeLists.txt`)
-вместе со static-zstd. Вызывается из Kotlin через JNI. Логика повторяет
-Python-референс nicoboss/nsz.
+A C11 decompression engine. Built via CMake (`app/src/main/cpp/CMakeLists.txt`)
+together with static zstd. Called from Kotlin via JNI. The logic mirrors the
+Python reference nicoboss/nsz.
 
-> Криптографию, распаковку, парсеры контейнеров и сигнатуры JNI **не менять без
-> явного запроса** — см. [../conventions.md](../conventions.md).
+> Do **not** change the cryptography, decompression, container parsers, or JNI
+> signatures without an explicit request — see [../conventions.md](../conventions.md).
 
-## Модули
+## Modules
 
-| Файл | Назначение |
-|------|-----------|
-| `jni_bridge.c` | JNI entry points; маршалинг строк/коллбэков; attach потока к JVM |
-| `ncz_engine.c` | Оркестратор: `ncz_convert_nsz_to_nsp`, `ncz_convert_xcz_to_xci`, cancel, `ncz_error_string` |
-| `ncz.c` | Парсер NCZ-заголовка: секции (`NczSection`), блоки (`NczBlockHeader`), FakeSection (зазор между NCA-хедером и первой секцией) |
-| `ncz_decompress.c` | Распаковка: `BlockReader` (поблочный zstd с кэшем) и `SolidReader` (потоковый `ZSTD_DStream`). AES-CTR только для crypto_type 3/4; FakeSection (type 1) — plaintext. Кормит SHA-256 |
-| `async_writer.c` | Фоновый поток записи+хеширования (см. [../architecture.md](../architecture.md) A04) |
-| `pfs0.c` | Контейнер PFS0 (NSP/NSZ). Запись — 24 байта. `pfs0_parse`, `pfs0_write_header` (.ncz→.nca, пересчёт размеров) |
-| `hfs0.c` | Контейнер HFS0 (XCI/XCZ). Запись — 64 байта на запись (SHA-256/`hashed_region_size` обнуляются, как в референсе). Заголовок раздела выровнен до `0x8000` (зазор в `entry.offset` + нули, strtab raw); `hfs0_parse_at(fp, offset)` — потоковый парс вложенного раздела; `hfs0_computed_header_size()` → `0x8000`. См. [../architecture.md](../architecture.md) A11 |
-| `aes_ctr.c` | AES-128-CTR для секций NCA. Counter: `nonce[0:8] \|\| (offset>>4)` big-endian. Hardware + software (A02) |
-| `aes_xts.c` | AES-128-XTS для расшифровки заголовка NCA (сектора 0x200, IEEE 1619) |
-| `sha256.c` | SHA-256: one-shot `sha256()` и streaming (`init/update/final`). Hardware + software (A03) |
-| `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS заголовка, проверка magic «NCA3», SHA-256 секций |
-| `nsz_debug.c` | `dbg_open/close/log/hex` — лог в файл + logcat, миллисекундные таймстампы |
-| `nsz_types.h` | Коды ошибок, типы коллбэков, константы (`NCA_HEADER_SIZE=0x4000`) |
+| File | Purpose |
+|------|---------|
+| `jni_bridge.c` | JNI entry points; string/callback marshaling; attaching the thread to the JVM |
+| `ncz_engine.c` | Orchestrator: `ncz_convert_nsz_to_nsp`, `ncz_convert_xcz_to_xci`, cancel, `ncz_error_string` |
+| `ncz.c` | NCZ header parser: sections (`NczSection`), blocks (`NczBlockHeader`), FakeSection (the gap between the NCA header and the first section) |
+| `ncz_decompress.c` | Decompression: `BlockReader` (block-wise zstd with a cache) and `SolidReader` (streaming `ZSTD_DStream`). AES-CTR only for crypto_type 3/4; FakeSection (type 1) — plaintext. Feeds SHA-256 |
+| `async_writer.c` | Background write+hashing thread (see [../architecture.md](../architecture.md) A04) |
+| `pfs0.c` | PFS0 container (NSP/NSZ). Entry — 24 bytes. `pfs0_parse`, `pfs0_write_header` (.ncz→.nca, size recompute) |
+| `hfs0.c` | HFS0 container (XCI/XCZ). Entry — 64 bytes (SHA-256/`hashed_region_size` zeroed, as in the reference). Partition header aligned to `0x8000` (gap in `entry.offset` + zeros, raw strtab); `hfs0_parse_at(fp, offset)` — streaming parse of a nested partition; `hfs0_computed_header_size()` → `0x8000`. See [../architecture.md](../architecture.md) A11 |
+| `aes_ctr.c` | AES-128-CTR for NCA sections. Counter: `nonce[0:8] \|\| (offset>>4)` big-endian. Hardware + software (A02) |
+| `aes_xts.c` | AES-128-XTS for decrypting the NCA header (0x200 sectors, IEEE 1619) |
+| `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
+| `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS of the header, "NCA3" magic check, SHA-256 of sections |
+| `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps |
+| `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
-## Граф зависимостей (C)
+## Dependency graph (C)
 
 ```
 jni_bridge.c
@@ -37,77 +37,78 @@ jni_bridge.c
          ├─ sha256.c
          └─ async_writer.c
 
-nca_verifier.c      (отдельный entry point через JNI)
+nca_verifier.c      (separate entry point via JNI)
  ├─ pfs0.c
  ├─ aes_xts.c
  └─ sha256.c
 
-nsz_debug.c         (используется повсюду)
+nsz_debug.c         (used everywhere)
 ```
 
-## Потоки конвертации
+## Conversion flows
 
 **`ncz_convert_nsz_to_nsp()`** (NSZ→NSP):
-1. Парс PFS0 входа.
-2. Пре-скан NCZ-файлов → размеры распакованного.
-3. Запись нового PFS0-хедера с обновлёнными размерами.
-4. По каждому файлу: NCZ → распаковать, иначе → скопировать.
-5. SHA-256-сверка по имени файла (hex-префикс).
-6. При ошибке — удалить частичный вывод.
+1. Parse the input PFS0.
+2. Pre-scan NCZ files → decompressed sizes.
+3. Write the new PFS0 header with updated sizes.
+4. Per file: NCZ → decompress, otherwise → copy.
+5. SHA-256 check against the filename (hex prefix). **Non-fatal** — a mismatch warns
+   (`WARN`) and keeps the output; see [../architecture.md](../architecture.md) A12.
+6. On a real error — remove the partial output (but not for `/dev/null` / fd sinks).
 
-**`ncz_convert_xcz_to_xci()`** (XCZ→XCI): XCI — **вложенный** HFS0 (корень →
-под-разделы update/normal/secure/logo → NCA/NCZ-файлы), зеркалит
-`NszDecompressor.__decompressXcz` + `Xci.XciStream` (см. [../architecture.md](../architecture.md) A11).
-1. Вход через `open_input_file` (поддержка `fd:N`); чтение первых 0x200. Если на 0x100
-   нет «HEAD» → полный XCI: заголовок на 0x1000 (`Xci.isFullXci`). Корень во входе —
-   по `header_base + hfs0_offset` (из +0x130).
-2. Парс корневого HFS0 (`hfs0_parse_at`).
-3. По каждому под-разделу: парс вложенного HFS0, пре-скан NCZ → размеры файлов,
-   расчёт нового размера раздела (`hfs0_computed_header_size`=0x8000 + сумма файлов).
-4. Вывод: первые 0x200 входа дословно, **нули** до `XCI_ROOT_HFS0_OFFSET=0xF000`,
-   корневой HFS0 на 0xF000 (с новыми размерами разделов). Раскладка — точная копия
-   `XciStream`.
-5. По каждому под-разделу: запись вложенного HFS0-хедера (выровнен до 0x8000), затем
-   файлы (NCZ → распаковать через `ncz_decompress`, иначе → копировать), SHA-256-сверка NCA.
-6. При ошибке — удалить частичный вывод. (XCI-хеши/`hfs0HeaderHash` не пересчитываются —
-   как в референсе, который копирует хедер дословно. ⚠️ Полный XCI эталон не
-   round-трипит — байт-эталона нет, нужен реальный сэмпл; см. [../gotchas.md](../gotchas.md) G06.)
+**`ncz_convert_xcz_to_xci()`** (XCZ→XCI): an XCI is a **nested** HFS0 (root →
+update/normal/secure/logo sub-partitions → NCA/NCZ files), mirroring
+`NszDecompressor.__decompressXcz` + `Xci.XciStream` (see [../architecture.md](../architecture.md) A11).
+1. Input via `open_input_file` (`fd:N` support); read the first 0x200. If there's no
+   "HEAD" at 0x100 → full XCI: header at 0x1000 (`Xci.isFullXci`). The root in the input
+   is at `header_base + hfs0_offset` (from +0x130).
+2. Parse the root HFS0 (`hfs0_parse_at`).
+3. Per sub-partition: parse the nested HFS0, pre-scan NCZ → file sizes, compute the new
+   partition size (`hfs0_computed_header_size`=0x8000 + sum of files).
+4. Output: the first 0x200 of the input verbatim, **zeros** up to
+   `XCI_ROOT_HFS0_OFFSET=0xF000`, the root HFS0 at 0xF000 (with new partition sizes). The
+   layout is an exact copy of `XciStream`.
+5. Per sub-partition: write the nested HFS0 header (aligned to 0x8000), then the files
+   (NCZ → decompress via `ncz_decompress`, otherwise → copy), NCA SHA-256 check (non-fatal, A12).
+6. On error — remove the partial output. (XCI hashes/`hfs0HeaderHash` are not recomputed —
+   as in the reference, which copies the header verbatim. ⚠️ The reference doesn't
+   round-trip full XCI — no byte reference, needs a real sample; see [../gotchas.md](../gotchas.md) G06.)
 
-## JNI-интерфейс
+## JNI interface
 
-Сигнатуры — в `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
+Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 
-| Kotlin-метод | Описание |
-|--------------|----------|
+| Kotlin method | Description |
+|---------------|-------------|
 | `nativeConvert(input, output, progressCb, statusCb): Int` | NSZ → NSP |
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
-| `nativeVerifyNsp(nspPath, headerKey): String?` | Проверка NCA в NSP |
-| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug-лог |
-| `nativeCancel()` | Запрос отмены |
-| `nativeErrorString(code): String` | Код ошибки → текст |
+| `nativeVerifyNsp(nspPath, headerKey): String?` | NCA verification in an NSP |
+| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log |
+| `nativeCancel()` | Cancellation request |
+| `nativeErrorString(code): String` | Error code → text |
 
-`input` принимает обычный путь, `"file://"` или `"fd:N"` (no-copy, см.
+`input` accepts a plain path, `"file://"`, or `"fd:N"` (no-copy, see
 [../architecture.md](../architecture.md) A05). `output` — `/proc/self/fd/<fd>`.
 
-**Коллбэки:**
-- `ProgressCallback.onProgress(done, total)` — байты распакованного вывода.
-- `StatusCallback.onStatus(tag, msg)` — структурированные сообщения. Теги (нативные):
-  `OPEN`, `EXISTS`, `HEAD`, `NCA_HASH`, `VERIFIED`, `OK`, `SUCCESS`, `CANCELLED`,
-  `ERROR`. Kotlin дополнительно использует `FILE_START`, `FOLDER`, `NSZ`, `INFO`.
+**Callbacks:**
+- `ProgressCallback.onProgress(done, total)` — bytes of decompressed output.
+- `StatusCallback.onStatus(tag, msg)` — structured messages. Tags (native):
+  `OPEN`, `EXISTS`, `HEAD`, `NCA_HASH`, `VERIFIED`, `WARN`, `PATH`, `OK`, `SUCCESS`,
+  `CANCELLED`, `ERROR`. Kotlin additionally uses `FILE_START`, `FOLDER`, `NSZ`, `INFO`.
 
-## Коды ошибок (`nsz_types.h`)
+## Error codes (`nsz_types.h`)
 
-| Код | Константа | Описание |
-|-----|-----------|----------|
-| 0 | `NCZ_OK` | Успех |
-| -1 | `NCZ_ERR_OPEN_INPUT` | Не открылся вход |
-| -2 | `NCZ_ERR_OPEN_OUTPUT` | Не открылся выход |
-| -3 | `NCZ_ERR_INVALID_PFS0` | Невалидный PFS0 |
-| -4 | `NCZ_ERR_INVALID_NCZ` | Невалидный NCZ-хедер |
-| -5 | `NCZ_ERR_ZSTD` | Ошибка zstd |
-| -6 | `NCZ_ERR_IO` | I/O-ошибка |
-| -7 | `NCZ_ERR_OOM` | Нет памяти |
-| -8 | `NCZ_ERR_CANCELLED` | Отменено пользователем |
-| -9 | `NCZ_ERR_HASH_MISMATCH` | Несовпадение SHA-256 |
+| Code | Constant | Description |
+|------|----------|-------------|
+| 0 | `NCZ_OK` | Success |
+| -1 | `NCZ_ERR_OPEN_INPUT` | Input didn't open |
+| -2 | `NCZ_ERR_OPEN_OUTPUT` | Output didn't open |
+| -3 | `NCZ_ERR_INVALID_PFS0` | Invalid PFS0 |
+| -4 | `NCZ_ERR_INVALID_NCZ` | Invalid NCZ header |
+| -5 | `NCZ_ERR_ZSTD` | zstd error |
+| -6 | `NCZ_ERR_IO` | I/O error |
+| -7 | `NCZ_ERR_OOM` | Out of memory |
+| -8 | `NCZ_ERR_CANCELLED` | Cancelled by the user |
+| -9 | `NCZ_ERR_HASH_MISMATCH` | SHA-256 mismatch (no longer returned by the content-id check — A12) |
 
-Формат NSZ/NCZ как таковой — в [../references/nsz-format.md](../references/nsz-format.md).
+The NSZ/NCZ format itself — in [../references/nsz-format.md](../references/nsz-format.md).

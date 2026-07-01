@@ -1,75 +1,75 @@
 # Subsystem: Localization
 
-Стандартная Android-локализация: все строки UI вынесены в ресурсы, языки
-добавляются без правки кода. Источник истины по самим строкам — файлы
-`strings.xml` (точные значения и счётчики здесь не дублируем — устаревают).
+Standard Android localization: all UI strings live in resources, languages are
+added without touching code. The source of truth for the strings themselves is the
+`strings.xml` files (don't duplicate exact values/counters here — they go stale).
 
-## Файлы
+## Files
 
 ```
 app/src/main/res/
-├── values/strings.xml       # English — fallback по умолчанию
-└── values-ru/strings.xml     # Русский
+├── values/strings.xml       # English — default fallback
+└── values-ru/strings.xml     # Russian
 ```
 
-Android сам выбирает файл по языку (с учётом per-app локали, см.
-[../architecture.md](../architecture.md) A08). Если строки нет в `values-XX/` —
-берётся `values/`; если нет и там — ошибка компиляции. **Каждый язык обязан иметь
-ВСЕ ключи из `values/strings.xml`.**
+Android picks the file by language (respecting the per-app locale, see
+[../architecture.md](../architecture.md) A08). If a string is missing in
+`values-XX/` — `values/` is used; if it's missing there too — a compile error.
+**Every language must have ALL keys from `values/strings.xml`.**
 
-## Категории (префиксы ключей)
+## Categories (key prefixes)
 
-| Префикс | Назначение |
-|---------|-----------|
-| `app_*` | имя/заголовок приложения |
-| `action_*` | кнопки и действия |
-| `label_*` | метки полей |
-| `msg_*` | сообщения и подсказки |
-| `status_*` | статусы операций (`status_unpacking`, `status_unpacked`, …) |
-| `error_*` | сообщения об ошибках |
-| `format_*` | строки с параметрами (`%d`, `%1$d`, …) |
-| `settings_*`, `stats_format_*`, `language_*` | экран настроек |
-| `stats_*` | статистика обработки папки |
+| Prefix | Purpose |
+|--------|---------|
+| `app_*` | app name/title |
+| `action_*` | buttons and actions |
+| `label_*` | field labels |
+| `msg_*` | messages and hints |
+| `status_*` | operation statuses (`status_unpacking`, `status_unpacked`, …) |
+| `error_*` | error messages |
+| `format_*` | strings with parameters (`%d`, `%1$d`, …) |
+| `settings_*`, `stats_format_*`, `language_*` | settings screen |
+| `stats_*` | folder-processing statistics |
 | `cd_*` | content descriptions (accessibility) |
 
-Новую строку — в нужную категорию, и сразу во ВСЕ языковые файлы.
+Put a new string in the right category, and immediately in ALL language files.
 
-## Использование в коде
+## Usage in code
 
-- В Composable: `stringResource(R.string.key)` / `stringResource(R.string.key, arg)`.
-- В ViewModel и не-Compose классах: `context.getString(R.string.key, args…)`
-  (ViewModel не имеет прямого доступа к ресурсам, поэтому методы принимают
+- In a Composable: `stringResource(R.string.key)` / `stringResource(R.string.key, arg)`.
+- In the ViewModel and non-Compose classes: `context.getString(R.string.key, args…)`
+  (the ViewModel has no direct resource access, so its methods take a
   `context: Context`).
 
-## Параметры форматирования
+## Format parameters
 
-- `%d` int, `%s` string, `%f` float, `%.1f` — 1 знак после запятой.
-- Позиционные `%1$d`, `%2$d` позволяют менять порядок аргументов в переводах —
-  **сохранять их при переводе**, иначе формат сломается.
-- Многострочные сообщения — через `\n`. Опциональные суффиксы (путь к логу и т.п.)
-  склеиваются в коде.
+- `%d` int, `%s` string, `%f` float, `%.1f` — 1 decimal place.
+- Positional `%1$d`, `%2$d` let translations reorder arguments — **keep them when
+  translating**, otherwise the format breaks.
+- Multi-line messages — via `\n`. Optional suffixes (log path, etc.) are concatenated
+  in code.
 
-## Добавить язык
+## Adding a language
 
-1. `app/src/main/res/values-XX/` (XX — код языка: `uk`, `de`, `fr`, …).
-2. Скопировать `values/strings.xml` туда.
-3. Перевести все строки, **сохраняя параметры** (`%d`, `%1$d`).
-4. Собрать (`:app:assembleDebug`), сменить язык устройства, пройти экраны.
+1. `app/src/main/res/values-XX/` (XX — language code: `uk`, `de`, `fr`, …).
+2. Copy `values/strings.xml` there.
+3. Translate all strings, **keeping the parameters** (`%d`, `%1$d`).
+4. Build (`:app:assembleDebug`), switch the device language, walk the screens.
 
-## Тестирование
+## Testing
 
-- `@Preview(locale = "ru")` в Composable.
-- На устройстве: Settings → System → Languages, затем пройти все экраны.
+- `@Preview(locale = "ru")` in a Composable.
+- On a device: Settings → System → Languages, then walk all screens.
 
-## Где используются строки
+## Where strings are used
 
-`stringResource`: экраны `ui/screen/*` и `ui/conversion/*`, компоненты
-(`StatusLogPanel` и др.). `context.getString`: `MainViewModel` (ошибки, статусы,
-результаты обработки папки).
+`stringResource`: the `ui/screen/*` and `ui/conversion/*` screens, components
+(`StatusLogPanel`, etc.). `context.getString`: `MainViewModel` (errors, statuses,
+folder-processing results).
 
 ## Best practices
 
-✅ Не хардкодить текст; использовать `stringResource`/`getString`; сохранять
-параметры формата; добавлять ключ во все языки.
-❌ `Text("Добавить файлы")`; `"Files: "` вместо `"Files: %d"`; ключ в одном языке;
-`stringResource()` вне Composable.
+✅ Don't hardcode text; use `stringResource`/`getString`; keep format parameters; add
+the key to all languages.
+❌ `Text("Add files")`; `"Files: "` instead of `"Files: %d"`; a key in one language
+only; `stringResource()` outside a Composable.

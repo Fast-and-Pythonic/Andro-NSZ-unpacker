@@ -1,20 +1,22 @@
 # Conventions
 
-## Язык
+## Language
 
-- **Общение с пользователем** (этого проекта) — на **русском**.
-- **Код, комментарии, документация, commit-сообщения** — на **английском**.
-- **Строки UI** — не хардкодить, только через ресурсы (см.
+- **User-facing conversation** (for this project) — **Russian**.
+- **Code, comments, documentation, commit messages** — **English**. This includes
+  the `ai_docs/` files themselves, not only README and code comments (see
+  [_meta.md](_meta.md)).
+- **UI strings** — never hardcode, always via resources (see
   [subsystems/localization.md](subsystems/localization.md)).
 
-## Форматирование (строго обязательно)
+## Formatting (strictly required)
 
-- **Отступ — ровно 3 пробела.** Никаких табов.
-- **Пустые строки внутри блоков сохраняют отступ** текущего уровня вложенности
-  (3 пробела на уровень). НЕ обнулять отступ на пустых строках. Это жёсткое
-  правило — многие автоформаттеры его нарушают, проверяй после них.
+- **Indent — exactly 3 spaces.** No tabs.
+- **Blank lines inside a block keep the indentation** of the current nesting level
+  (3 spaces per level). Do NOT strip indentation on blank lines. This is a hard
+  rule — many auto-formatters break it, so check after running them.
 
-Пример (C; для Kotlin — те же 3 пробела):
+Example (C; for Kotlin — the same 3 spaces):
 
 ```c
 int calculate_sum(int arr[], int size) {
@@ -34,59 +36,58 @@ int calculate_sum(int arr[], int size) {
 }
 ```
 
-## Комментарии
+## Comments
 
-- Только на английском.
-- Документировать **почему**, а не **что**: очевидное из кода не комментировать.
-- Числовые константы в комментариях держать в синхроне с кодом. Пример ловушки:
-  в `Constants.kt` и `FolderProcessor.kt` встречаются устаревшие комментарии
-  «every 250ms», тогда как фактический интервал — 100 мс. При правке рядом —
-  чинить.
+- English only.
+- Document **why**, not **what**: don't comment on what's obvious from the code.
+- Keep numeric constants in comments in sync with the code. Example trap: in
+  `Constants.kt` and `FolderProcessor.kt` there are stale "every 250ms" comments
+  while the actual interval is 100 ms. When editing nearby — fix them.
 
-## Что НЕ трогать без явного запроса
+## What NOT to touch without an explicit request
 
-Эти модули отлажены и совпадают с Python-референсом. Изменение ломает совместимость:
+These modules are debugged and match the Python reference. Changing them breaks
+compatibility:
 
-- Криптография: `aes_ctr.c`, `aes_xts.c`, `sha256.c`.
-- Алгоритм распаковки: `ncz_decompress.c`.
-- Сигнатуры JNI (`jni_bridge.c` ↔ `NszConverter.kt` `native*`-методы).
-- Парсеры контейнеров `pfs0.c` / `hfs0.c` (особенно размеры записей: PFS0 — 24
-  байта, HFS0 — 64 байта; хеш-поля HFS0 обнуляются ради совместимости).
+- Cryptography: `aes_ctr.c`, `aes_xts.c`, `sha256.c`.
+- Decompression algorithm: `ncz_decompress.c`.
+- JNI signatures (`jni_bridge.c` ↔ `NszConverter.kt` `native*` methods).
+- Container parsers `pfs0.c` / `hfs0.c` (especially entry sizes: PFS0 — 24 bytes,
+  HFS0 — 64 bytes; HFS0 hash fields are zeroed for compatibility).
 
-При необходимости менять что-то из списка — сначала спросить пользователя.
+If something on this list must change — ask the user first.
 
-## Сборка и проверки
+## Build and checks
 
-Команды — из корня проекта (PowerShell). Порядок от быстрого к полному:
+Commands — from the project root (PowerShell). Ordered fast to full:
 
 ```powershell
-.\gradlew.bat :app:compileDebugKotlin     # 1. быстрый проход; падает — дальше нет смысла
-.\gradlew.bat :app:assembleDebug          # 2. полная debug-сборка, вкл. нативную
-.\gradlew.bat :app:testDebugUnitTest      # 3. unit-тесты
+.\gradlew.bat :app:compileDebugKotlin     # 1. quick pass; if it fails, no point going further
+.\gradlew.bat :app:assembleDebug          # 2. full debug build, incl. native
+.\gradlew.bat :app:testDebugUnitTest      # 3. unit tests
 .\gradlew.bat :app:lintDebug              # 4. Android lint
 ```
 
-- После правок `*.kt` — минимум шаг 1, затем 2.
-- После правок C/CMake — `:app:assembleDebug` (или `:app:externalNativeBuildDebug`
-  для только нативной части).
-- «Сломано» = не проходит шаг 1 или 2. Lint-warnings блокирующими не считаются,
-  но новые желательно не плодить.
-- Полный прогон одной командой: `.\gradlew.bat :app:build` (дольше, труднее
-  локализовать упавший шаг).
+- After `*.kt` edits — at least step 1, then 2.
+- After C/CMake edits — `:app:assembleDebug` (or `:app:externalNativeBuildDebug`
+  for the native part only).
+- "Broken" = step 1 or 2 fails. Lint warnings are not blocking, but avoid adding
+  new ones.
+- Full run in one command: `.\gradlew.bat :app:build` (slower, harder to localize
+  the failing step).
 
-## Ручная проверка сценариев
+## Manual scenario checks
 
-Сборки мало для логики времени выполнения. Проверять на устройстве/эмуляторе.
-Пример (именование папки вывода):
+A build is not enough for runtime logic. Check on a device/emulator. Example
+(output folder naming):
 
-1. Выбрать исходную папку, запустить распаковку.
-2. Убедиться, что создаётся `Original_unpacked`.
-3. Запустить повторно → должна появиться `Original_unpacked_2` (только если первая
-   уже существует).
+1. Pick a source folder, start unpacking.
+2. Confirm that `Original_unpacked` is created.
+3. Run again → `Original_unpacked_2` should appear (only if the first already exists).
 
-Для проверки изменения работающего приложения — см. навык `/verify` и `/run`.
+To verify a change to the running app — see the `/verify` and `/run` skills.
 
 ## Git
 
-- Рабочая ветка — `stable`. Коммитить/пушить только по просьбе пользователя.
-- Commit-сообщения на английском.
+- Working branch — `stable`. Commit/push only when the user asks.
+- Commit messages in English.

@@ -1,143 +1,144 @@
 # Architecture decisions
 
-Нетривиальные технические решения. Формат: `A##` — стабильный якорь для ссылок.
-Большинство A01–A07 — части одной перф-истории: распаковка 2 ГБ ускорена с ~50 с
-до ~7 с (паритет с десктоп-референсом), на 9 ГБ обгоняет конкурента. Verify при
-этом всегда включён и почти бесплатен.
+Non-trivial technical decisions. Format: `A##` — a stable anchor for links.
+Most of A01–A07 are parts of one performance story: unpacking 2 GB was sped up
+from ~50 s to ~7 s (parity with the desktop reference), and on 9 GB it beats the
+competitor. Verification is essentially free (and now non-fatal — see A12).
 
-## A01: zstd собирается на `-O3` даже в debug
-**Контекст:** zstd-зависимость в debug наследует `CMAKE_BUILD_TYPE=Debug` → `-O0`
-и `-DDEBUGLEVEL=1` (внутренние asserts). Декомпрессия — доминирующая стоимость
-горячего пути, и `-O0` её обваливает.
-**Решение:** в `CMakeLists.txt` для таргета `libzstd_static` принудительно
-`-O3 -DNDEBUG -UDEBUGLEVEL -DDEBUGLEVEL=0`, независимо от типа сборки.
-**Последствия:** debug-APK распаковывает на release-скорости. Это оказалось
-решающим выигрышем (см. также [gotchas.md](gotchas.md) G02).
+## A01: zstd is built with `-O3` even in debug
+**Context:** the zstd dependency in debug inherits `CMAKE_BUILD_TYPE=Debug` → `-O0`
+and `-DDEBUGLEVEL=1` (internal asserts). Decompression is the dominant cost of the
+hot path, and `-O0` tanks it.
+**Decision:** in `CMakeLists.txt`, force `-O3 -DNDEBUG -UDEBUGLEVEL -DDEBUGLEVEL=0`
+for the `libzstd_static` target, regardless of build type.
+**Consequences:** the debug APK unpacks at release speed. This turned out to be the
+decisive win (see also [gotchas.md](gotchas.md) G02).
 
-## A02: Аппаратный AES-CTR (ARMv8 crypto) + software-фоллбэк
-**Контекст:** AES-CTR расшифровывает секции NCA (crypto_type 3/4) на каждом блоке.
-**Альтернативы:** только скалярный FIPS-197 (медленно); только hardware (падает на
-CPU без расширения).
-**Решение:** `aes_ctr.c` содержит путь на интринсиках `vaeseq_u8/vaesmcq_u8`
-(обрабатывает 4 CTR-блока за раз) и портируемый скалярный фоллбэк. ARM64 собирается
-с `-march=armv8-a+crypto`.
-**Последствия:** на современных телефонах крипта почти бесплатна; на старых —
-работает медленнее, но корректно.
+## A02: Hardware AES-CTR (ARMv8 crypto) + software fallback
+**Context:** AES-CTR decrypts NCA sections (crypto_type 3/4) on every block.
+**Alternatives:** scalar FIPS-197 only (slow); hardware only (crashes on CPUs
+without the extension).
+**Decision:** `aes_ctr.c` has an intrinsics path (`vaeseq_u8/vaesmcq_u8`, processing
+4 CTR blocks at a time) and a portable scalar fallback. ARM64 is built with
+`-march=armv8-a+crypto`.
+**Consequences:** on modern phones crypto is nearly free; on old ones it runs slower
+but correctly.
 
-## A03: Аппаратный SHA-256 (ARMv8 crypto)
-**Контекст:** SHA-256 нужен и для verify, и для сверки имён файлов по hex-префиксу;
-считается на лету по выходному потоку.
-**Решение:** `sha256.c` использует интринсики `vsha256hq_u32` и т.п. с software-API
-как фоллбэком.
-**Последствия:** verify готового NSP практически не стоит времени, поэтому включён
-всегда (когда есть header_key).
+## A03: Hardware SHA-256 (ARMv8 crypto)
+**Context:** SHA-256 is needed both for verification and for matching filenames by
+hex prefix; it is computed on the fly over the output stream.
+**Decision:** `sha256.c` uses `vsha256hq_u32` etc. intrinsics with the software API
+as a fallback.
+**Consequences:** verifying a finished NSP costs almost no time, so it runs whenever
+header_key is available.
 
-## A04: Асинхронный writer (фоновый поток записи + хеширования)
-**Контекст:** продюсер (распаковка+расшифровка) и диск конкурируют за время.
-**Решение:** `async_writer.c` — фоновый поток, которому через очередь буферов
-сдаются готовые чанки; он их `fwrite` и кормит SHA-256-контекст, пока продюсер
-готовит следующий чанк. Запись строго в порядке submit → вывод последователен,
-SHA видит байты по порядку. API: `aw_start/aw_get_buffer/aw_submit/aw_finish`.
-**Последствия:** перекрытие CPU-работы и I/O. Цена — двойная буферизация памяти.
+## A04: Async writer (background write + hashing thread)
+**Context:** the producer (decompress+decrypt) and the disk compete for time.
+**Decision:** `async_writer.c` — a background thread that receives ready chunks via a
+buffer queue; it `fwrite`s them and feeds the SHA-256 context while the producer
+prepares the next chunk. Writes are strictly in submit order → output is sequential
+and SHA sees bytes in order. API: `aw_start/aw_get_buffer/aw_submit/aw_finish`.
+**Consequences:** CPU work and I/O overlap. The price is double buffering of memory.
 
-## A05: No-copy чтение входа через `fd:N`, вывод через `/proc/self/fd`
-**Контекст:** SAF/scoped storage даёт `Uri`, а нативу нужен путь/дескриптор.
-Копирование многогигабайтного входа во временный файл — дорого.
-**Решение:** вход — `context.contentResolver.openFileDescriptor(uri,"r")`; если fd
-seekable (`statSize >= 0`), нативу передаётся строка `"fd:N"`, и он делает
-`dup()+fdopen()`. Выход — MediaStore Downloads + `"/proc/self/fd/<fd>"`.
-**Последствия:** нет лишней temp-копии. Но некоторые FUSE-провайдеры отдают
-дескриптор, который натив не может переоткрыть → нужен откат (см. A06 / G03).
+## A05: No-copy input via `fd:N`, output via `/proc/self/fd`
+**Context:** SAF/scoped storage gives a `Uri`, but native needs a path/descriptor.
+Copying a multi-gigabyte input to a temp file is expensive.
+**Decision:** input — `context.contentResolver.openFileDescriptor(uri,"r")`; if the fd
+is seekable (`statSize >= 0`), native gets the string `"fd:N"` and does
+`dup()+fdopen()`. Output — MediaStore Downloads + `"/proc/self/fd/<fd>"`.
+**Consequences:** no extra temp copy. But some FUSE providers hand out a descriptor
+native cannot re-open → a fallback is needed (see A06 / G03).
 
-## A06: Откат на temp-копию при сбое прямого чтения
-**Контекст:** прямое чтение по fd иногда падает на парсинге PFS0 у FUSE-storage.
-**Решение:** если `nativeConvert` вернул `ERR_OPEN_INPUT/INVALID_PFS0/INVALID_NCZ/
-IO` при активном `inputPfd`, `NszConverter` копирует вход в кэш (`resolveToFilePath`)
-и повторяет. Быстрая попытка падает сразу на парсинге, так что ретрай почти даром.
-**Последствия:** надёжность на всех провайдерах ценой редкой повторной попытки.
+## A06: Fallback to a temp copy on direct-read failure
+**Context:** direct fd reading sometimes fails while parsing PFS0 on FUSE storage.
+**Decision:** if `nativeConvert` returned `ERR_OPEN_INPUT/INVALID_PFS0/INVALID_NCZ/
+IO` with an active `inputPfd`, `NszConverter` copies the input to cache
+(`resolveToFilePath`) and retries. The fast attempt fails immediately at parsing, so
+the retry is almost free.
+**Consequences:** reliability across all providers at the cost of a rare retry.
 
-## A07: Core-adaptive batch-параллелизм (режим очереди)
-**Контекст:** в режиме нескольких файлов можно конвертировать их параллельно.
-**Решение:** `BATCH_CONCURRENCY = (availableProcessors()/2 - 1)`, зажато в `1..3`
-(8 ядер → 3, 6 → 2, ≤4 → 1). Файлы запускаются через `Semaphore`, нативная работа
-идёт на `Dispatchers.IO`, состояние пишется на Main.
-**Последствия:** загрузка нескольких ядер. Потолок 3 — упираемся в скорость записи
-накопителя. Прогресс отдельных файлов — в `activeFileProgress` (по индексу).
+## A07: Core-adaptive batch parallelism (queue mode)
+**Context:** in multi-file mode files can be converted in parallel.
+**Decision:** `BATCH_CONCURRENCY = (availableProcessors()/2 - 1)`, clamped to `1..3`
+(8 cores → 3, 6 → 2, ≤4 → 1). Files are launched via a `Semaphore`, native work runs
+on `Dispatchers.IO`, state is written on Main.
+**Consequences:** loads several cores. The cap of 3 — we hit the storage write ceiling.
+Per-file progress is in `activeFileProgress` (keyed by index).
 
-## A08: Per-app язык через `attachBaseContext` + SharedPreferences
-**Контекст:** смена языка внутри приложения без смены системного.
-**Решение:** `MainActivity.attachBaseContext()` синхронно читает язык и оборачивает
-context нужной `Locale` до инфляции UI. Поэтому `language` хранится в
-**SharedPreferences** (синхронно), а не в DataStore — корутины там ещё недоступны.
-Смена языка вызывает `Activity.recreate()`.
-**Последствия:** мгновенное применение языка; одна настройка живёт отдельно от
-остальных (которые в DataStore-флоу).
+## A08: Per-app language via `attachBaseContext` + SharedPreferences
+**Context:** changing the language in-app without changing the system one.
+**Decision:** `MainActivity.attachBaseContext()` synchronously reads the language and
+wraps the context with the right `Locale` before UI inflation. That's why `language`
+is stored in **SharedPreferences** (synchronous), not DataStore — coroutines aren't
+available there yet. Changing the language calls `Activity.recreate()`.
+**Consequences:** instant language application; this one setting lives apart from the
+others (which are in the DataStore flow).
 
-## A09: Потиповый троттлинг прогресса (бар живой, каждая цифра — свой темп)
-**Контекст:** частые обновления нужны бару для плавности, но дёргают числа
-(проценты/скорость/размер), которые трудно читать. Раньше была одна общая
-«числовая» константа, но процент и размер на деле выводились из живых
-`done`/`total` и мигали с частотой бара — реально троттлилась только скорость.
-**Решение:** четыре независимые константы в `Constants.kt` — `PROGRESS_BAR_…`
-(плавная анимация, следует за живым байт-счётчиком), `PROGRESS_PERCENT_…`,
-`PROGRESS_SPEED_…`, `PROGRESS_SIZE_…` (по умолчанию 100 / 250 / 250 / 250 мс).
-Логика вынесена в `util/ProgressThrottler.kt` (один инстанс на поток прогресса):
-`sample(done,total)` возвращает `null`, пока не истёк бар-интервал, иначе —
-`ConversionProgress`, где живые `doneBytes/totalBytes` ведут бар, а `display*`-поля
-(`displayPercent`, `displayDoneBytes/TotalBytes`, `speedMBps`) «заморожены» каждое
-по своему интервалу. `ConversionProgress.display*` имеют дефолты от живых значений,
-так что не-троттлящие вызовы (folder current-file, финальный pin) не ломаются.
-Используется в четырёх местах эмита: `NszConverter` (fd- и temp-пути),
-`MainViewModel` (batch overall), `FolderProcessor`. UI (`SingleFilesUI`,
-`FolderModeUI`) рисует бар по живому `.percent`, а текст — по `display*`.
-**Последствия:** плавный бар + спокойные, потипно настраиваемые цифры. Чтобы
-сменить темп одного показателя — правишь одну константу. Минус прежний: троттлинг
-может оставить overall-бар чуть ниже 100% в конце, поэтому в batch есть финальный
-«добивающий» emit (см. [gotchas.md](gotchas.md) G01).
+## A09: Per-type progress throttling (live bar, each number at its own pace)
+**Context:** frequent updates are needed for a smooth bar, but they jitter the numbers
+(percent/speed/size), which become hard to read. There used to be one shared "number"
+constant, but percent and size were actually derived from live `done`/`total` and
+flickered at the bar's rate — only speed was really throttled.
+**Decision:** four independent constants in `Constants.kt` — `PROGRESS_BAR_…` (smooth
+animation, follows the live byte counter), `PROGRESS_PERCENT_…`, `PROGRESS_SPEED_…`,
+`PROGRESS_SIZE_…` (defaults 100 / 250 / 250 / 250 ms). The logic lives in
+`util/ProgressThrottler.kt` (one instance per progress stream): `sample(done,total)`
+returns `null` until the bar interval elapses, otherwise a `ConversionProgress` where
+the live `doneBytes/totalBytes` drive the bar while the `display*` fields
+(`displayPercent`, `displayDoneBytes/TotalBytes`, `speedMBps`) are each "frozen" at
+their own interval. `ConversionProgress.display*` default from the live values, so
+non-throttling callers (folder current-file, final pin) don't break. Used at four
+emit sites: `NszConverter` (fd and temp paths), `MainViewModel` (batch overall),
+`FolderProcessor`. The UI (`SingleFilesUI`, `FolderModeUI`) draws the bar from the
+live `.percent` and the text from `display*`.
+**Consequences:** a smooth bar + calm, per-type tunable numbers. To change one
+metric's pace — edit one constant. Old downside: throttling can leave the overall bar
+a hair below 100% at the end, so batch has a final "top-up" emit (see
+[gotchas.md](gotchas.md) G01).
 
-## A10: ThinLTO для нативного движка
-**Контекст:** движок разбит на ~11 translation units; без LTO компилятор не
-инлайнит горячие хелперы через границы файлов (AES-шаг в цикл распаковки,
-`sha256_update` в верификатор).
-**Решение:** `-flto=thin` на компиляции и линковке. ThinLTO параллельный/
-инкрементальный, так что цена сборки мала.
-**Последствия:** скромный выигрыш (горячий путь и так в hardware-крипте и zstd),
-риск низкий. LTO обязательно передавать и линкеру, иначе bitcode-объекты не
-кодогенерятся.
+## A10: ThinLTO for the native engine
+**Context:** the engine is split into ~11 translation units; without LTO the compiler
+won't inline hot helpers across file boundaries (the AES step into the decompression
+loop, `sha256_update` into the verifier).
+**Decision:** `-flto=thin` on both compile and link. ThinLTO is parallel/incremental,
+so the build cost is small.
+**Consequences:** a modest win (the hot path is already in hardware crypto and zstd),
+low risk. LTO must be passed to the linker too, or the bitcode objects won't be
+codegen'd.
 
-## A11: XCI-вывод зеркалит `XciStream` (0x8000-выравнивание HFS0, hfs0 на 0xF000)
-**Контекст:** путь XCZ→XCI должен давать байт-в-байт тот же `.xci`, что и эталонный
-nsz (как уже достигнуто для NSP). Раньше мы писали компактные HFS0-заголовки и
-копировали регион `0x200..hfs0_offset`, из-за чего раскладка контейнера отличалась
-от эталона.
-**Решение:** воспроизводим `nsz.Fs.Xci.XciStream` / `Hfs0Stream` точь-в-точь:
-- Каждый HFS0-раздел (корневой и вложенные) резервирует фиксированный заголовок
-  `HFS0_PARTITION_HEADER = 0x8000`; данные первого файла раздела начинаются на этой
-  границе. Зазор кодируется в смещениях записей (`entry.offset = 0x8000 −
-  header_size`) и добивается нулями. Строковая таблица — **raw, без паддинга 0x20**
-  (`string_table_size` = сырой длине). См. [hfs0.c](../app/src/main/cpp/hfs0.c)
+## A11: XCI output mirrors `XciStream` (0x8000 HFS0 alignment, hfs0 at 0xF000)
+**Context:** the XCZ→XCI path must produce the byte-for-byte same `.xci` as reference
+nsz (as already achieved for NSP). We used to write compact HFS0 headers and copy the
+`0x200..hfs0_offset` region, which made the container layout differ from the reference.
+**Decision:** reproduce `nsz.Fs.Xci.XciStream` / `Hfs0Stream` exactly:
+- Each HFS0 partition (root and nested) reserves a fixed header
+  `HFS0_PARTITION_HEADER = 0x8000`; the first file's data starts on that boundary. The
+  gap is encoded in the entry offsets (`entry.offset = 0x8000 − header_size`) and
+  padded with zeros. The string table is **raw, without 0x20 padding**
+  (`string_table_size` = raw length). See [hfs0.c](../app/src/main/cpp/hfs0.c)
   `hfs0_write_header`, `hfs0_computed_header_size` (→ 0x8000).
-- В [ncz_engine.c](../app/src/main/cpp/ncz_engine.c) выход: первые `0x200` входа
-  дословно, затем **нули** до `XCI_ROOT_HFS0_OFFSET = 0xF000`, затем корневой HFS0
-  на 0xF000. Это ровно то, что делает `XciStream` (seek 0xF000, регион — дыра/нули).
-  Нули пишутся явно (а не seek'ом) ради не-seekable выходных fd.
-- SHA256/`hashed_region_size` в записях HFS0 остаются нулями (так и было — совпадает
-  с эталоном).
-**Последствия:** `.xci` совпадает с эталоном для обычных (trimmed) XCI. Регион
-`0x200..0xF000` (gamecard cert) занулён — но в nsz-овском `.xcz` он уже нулевой
-(компрессор использует тот же `XciStream`), так что потери нет. Полный XCI см.
-[gotchas.md](gotchas.md) G06.
+- In [ncz_engine.c](../app/src/main/cpp/ncz_engine.c) the output: the first `0x200` of
+  the input verbatim, then **zeros** up to `XCI_ROOT_HFS0_OFFSET = 0xF000`, then the
+  root HFS0 at 0xF000. That's exactly what `XciStream` does (seek 0xF000, the region is
+  a hole/zeros). Zeros are written explicitly (not via seek) for non-seekable output fds.
+- SHA256/`hashed_region_size` in HFS0 entries stay zero (as before — matches the
+  reference).
+**Consequences:** `.xci` matches the reference for ordinary (trimmed) XCI. The
+`0x200..0xF000` region (gamecard cert) is zeroed — but in an nsz-produced `.xcz` it is
+already zero (the compressor uses the same `XciStream`), so nothing is lost. Full XCI
+see [gotchas.md](gotchas.md) G06.
 
-## A12: Верификация SHA-256 — non-fatal, сверка по имени как приближение
-**Контекст:** движок сверяет первые 16 байт SHA-256 распакованного NCA с content-id в
-имени файла. Но content-id — это лишь **половина** хэша NCA; эталонный nsz сверяет
-**полный** хэш с ожидаемыми из CNMT (`FileExistingChecks.ExtractHashes` →
-`Cnmt.contentEntries[].hash`), а имя использует лишь как fallback для одиночного `.ncz`.
-Значит несовпадение по имени **недостоверно**.
-**Решение:** несовпадение больше не фатально. Вместо `NCZ_ERR_HASH_MISMATCH` (который
-удалял готовый вывод через `remove`) движок эмитит `WARN` «hash mismatch (output kept)»
-и сохраняет файл. `is_content_id_named` теперь проверяет, что 32 символа — hex. См.
-[ncz_engine.c](../app/src/main/cpp/ncz_engine.c) (4 блока верификации).
-**Последствия:** убран footgun (ложный mismatch удалял хороший файл). Настоящая
-CNMT-сверка, опция вкл/выкл и оптимизация по ядрам — отложены ([status.md](status.md)
-Deferred). Пришло с интеграцией PR #6.
+## A12: SHA-256 verification — non-fatal, filename check as an approximation
+**Context:** the engine compares the first 16 bytes of the decompressed NCA's SHA-256
+against the content-id in the filename. But the content-id is only **half** the NCA
+hash; reference nsz compares the **full** hash against the ones expected from the CNMT
+(`FileExistingChecks.ExtractHashes` → `Cnmt.contentEntries[].hash`), and uses the
+filename only as a fallback for a standalone `.ncz`. So a filename mismatch is **not
+authoritative**.
+**Decision:** a mismatch is no longer fatal. Instead of `NCZ_ERR_HASH_MISMATCH` (which
+deleted the finished output via `remove`), the engine emits `WARN` "hash mismatch
+(output kept)" and keeps the file. `is_content_id_named` now checks the 32 chars are
+hex. See [ncz_engine.c](../app/src/main/cpp/ncz_engine.c) (4 verification blocks).
+**Consequences:** the footgun is gone (a false mismatch used to delete a good file).
+Real CNMT-based verification, an enable/disable setting, and per-core optimization are
+deferred ([status.md](status.md) Deferred). Came in with the PR #6 integration.

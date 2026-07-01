@@ -1,108 +1,106 @@
 # Subsystem: Kotlin layer
 
-UI на Jetpack Compose + вся логика конвертации. Единственная Activity
-(`MainActivity`) хостит `AndroNSZApp`. Состояние и оркестрация — в `MainViewModel`.
+Jetpack Compose UI + all conversion logic. A single Activity (`MainActivity`)
+hosts `AndroNSZApp`. State and orchestration — in `MainViewModel`.
 
-## Навигация
+## Navigation
 
-`MainActivity` → `AndroNSZApp` роутит по `vm.currentScreen`. Навигация — это
-**стек экранов** в `MainViewModel`: `_screenStack` (`mutableStateListOf`,
-старт `Screen.ModeSelection`), `navigateTo(screen)` пушит, `navigateBack()` снимает
-(не опускаясь ниже одного). Экраны (`model/Screen.kt`): `ModeSelection`,
-`Conversion`, `About`, `Settings`.
+`MainActivity` → `AndroNSZApp` routes by `vm.currentScreen`. Navigation is a
+**screen stack** in `MainViewModel`: `_screenStack` (`mutableStateListOf`, starting
+at `Screen.ModeSelection`), `navigateTo(screen)` pushes, `navigateBack()` pops (not
+below one). Screens (`model/Screen.kt`): `ModeSelection`, `Conversion`, `About`,
+`Settings`.
 
-`MainActivity.attachBaseContext()` синхронно читает язык и оборачивает context
-нужной `Locale` (per-app язык, см. [../architecture.md](../architecture.md) A08).
-`onCreate()` чистит temp-кэш (`TempFileManager.cleanupManagedCache`).
+`MainActivity.attachBaseContext()` synchronously reads the language and wraps the
+context with the right `Locale` (per-app language, see
+[../architecture.md](../architecture.md) A08). `onCreate()` cleans the temp cache
+(`TempFileManager.cleanupManagedCache`).
 
-## Экраны (`ui/screen/`)
+## Screens (`ui/screen/`)
 
-- **AndroNSZApp.kt** — корень навигации. На старте `vm.checkKeys` + `vm.loadSettings`
-  через `LaunchedEffect`; хостит SAF-лаунчеры (папка вывода, prod.keys).
-- **ModeSelectionScreen.kt** — выбор режима: `SingleFiles` или `FolderMode`
-  (только эти два). Overflow-меню: prod.keys, смена папки вывода, Settings, About.
-- **ConversionScreen.kt** — рендерит по `conversionMode`: `SingleFilesUI`
-  (SingleFiles) или `FolderModeUI` (FolderMode). Ветка `None` недостижима (на этом
-  экране) и пустая — нужна лишь для исчерпывающего `when`.
-- **SettingsScreen.kt** — формат статистики (`StatsFormat`) и язык
-  (System/English/Russian; смена → `recreate()`).
-- **AboutScreen.kt** — информация о приложении.
+- **AndroNSZApp.kt** — the navigation root. On start `vm.checkKeys` + `vm.loadSettings`
+  via `LaunchedEffect`; hosts the SAF launchers (output folder, prod.keys).
+- **ModeSelectionScreen.kt** — mode selection: `SingleFiles` or `FolderMode` (only
+  these two). Overflow menu: prod.keys, change output folder, Settings, About.
+- **ConversionScreen.kt** — renders by `conversionMode`: `SingleFilesUI` (SingleFiles)
+  or `FolderModeUI` (FolderMode). The `None` branch is unreachable (on this screen) and
+  empty — needed only for an exhaustive `when`.
+- **SettingsScreen.kt** — stats format (`StatsFormat`) and language
+  (System/English/Russian; change → `recreate()`).
+- **AboutScreen.kt** — app information.
 
-## Режимы конвертации (`ui/conversion/`)
+## Conversion modes (`ui/conversion/`)
 
-- **SingleFilesUI.kt** — очередь файлов: добавление, список, общий бар + по бару на
-  каждый активно конвертируемый файл (`activeFileProgress`), контекстный статус
-  «Распаковываем…/Распаковано» + таймер.
-- **FolderModeUI.kt** — папка: инфо о структуре, дерево, общий бар + по бару на
-  каждый активно распаковываемый файл (`folderActiveFiles`) + средняя скорость в
-  конце (как `SingleFilesUI`).
+- **SingleFilesUI.kt** — file queue: adding, list, an overall bar + a bar per actively
+  converting file (`activeFileProgress`), the contextual "Unpacking…/Unpacked" status +
+  a timer.
+- **FolderModeUI.kt** — folder: structure info, tree, an overall bar + a bar per actively
+  unpacking file (`folderActiveFiles`) + average speed at the end (like `SingleFilesUI`).
 
 ## MainViewModel
 
-Хаб состояния и логики. Ключевые группы полей:
-- Навигация/режим: `_screenStack`/`currentScreen`, `conversionMode`, `keysInstalled`.
-- Очередь: `fileQueue`, `currentFileIndex`, `batchOverallProgress`,
-  `batchProcessedFiles/TotalFiles`, `activeFileProgress` (по индексу файла).
-- Папка: `folderStructure`, `folderOverallProgress`, `folderActiveFiles`
-  (список активно конвертируемых файлов для пер-файловых баров),
-  `folderProcessedFiles/TotalFiles`, `folderAverageSpeedMBps`, `folderLogPath`.
-- Общее: `isConverting`, `progress`, `elapsedMs` (таймер), `statusMessage`,
-  `statusLog`, `isSuccess`, `compact2Stats`.
-- Настройки: `statsFormat`, `outputFolderUri`, `appLanguage`.
+The hub of state and logic. Key field groups:
+- Navigation/mode: `_screenStack`/`currentScreen`, `conversionMode`, `keysInstalled`.
+- Queue: `fileQueue`, `currentFileIndex`, `batchOverallProgress`,
+  `batchProcessedFiles/TotalFiles`, `activeFileProgress` (by file index).
+- Folder: `folderStructure`, `folderOverallProgress`, `folderActiveFiles` (the list of
+  actively converting files for the per-file bars), `folderProcessedFiles/TotalFiles`,
+  `folderAverageSpeedMBps`, `folderLogPath`.
+- Common: `isConverting`, `progress`, `elapsedMs` (timer), `statusMessage`, `statusLog`,
+  `isSuccess`, `compact2Stats`.
+- Settings: `statsFormat`, `outputFolderUri`, `appLanguage`.
 
-Ключевые методы: `checkKeys/installKeys/deleteKeys`, `loadSettings`, `saveLanguage`,
-`saveOutputFolder` (с persistable SAF-разрешением), `saveStatsFormat`,
-`startBatchConversion` (очередь, параллельно — A07), `startFolderConversion`
-(через `FolderProcessor`), `resetConversionState`.
+Key methods: `checkKeys/installKeys/deleteKeys`, `loadSettings`, `saveLanguage`,
+`saveOutputFolder` (with a persistable SAF permission), `saveStatsFormat`,
+`startBatchConversion` (queue, in parallel — A07), `startFolderConversion` (via
+`FolderProcessor`), `resetConversionState`.
 
-> **Мёртвый legacy-код:** `startConversion()`, `pickFile()`, `selectedUri`,
-> `selectedName` остались после удаления `LegacySingleFileUI` и больше не вызываются
-> (см. [../status.md](../status.md)).
+> **Dead legacy code:** `startConversion()`, `pickFile()`, `selectedUri`, `selectedName`
+> remain after removing `LegacySingleFileUI` and are no longer called (see
+> [../status.md](../status.md)).
 
-## NszConverter (JNI-обёртка)
+## NszConverter (JNI wrapper)
 
-Синглтон над `libAndroNSZ`. `convert()` (NSZ→NSP) и `convertXcz()` (XCZ→XCI):
-1. Резолв входного `Uri` → нативный путь: предпочтительно `"fd:N"` (no-copy), иначе
-   temp-копия (A05/A06).
-2. Создание выходного файла в Downloads (или `outputFolderUri`) через MediaStore,
-   путь `/proc/self/fd/<fd>`.
-3. `nativeConvert`/`nativeConvertXcz`, прогресс стримится через `callbackFlow`
-   (троттлинг — A09).
-4. Verify через `nativeVerifyNsp` (если есть header_key).
-5. Очистка temp; при FUSE-сбое — откат на temp-копию и ретрай (G03).
+A singleton over `libAndroNSZ`. `convert()` (NSZ→NSP) and `convertXcz()` (XCZ→XCI):
+1. Resolve the input `Uri` → a native path: preferably `"fd:N"` (no-copy), otherwise a
+   temp copy (A05/A06).
+2. Create the output file in Downloads (or `outputFolderUri`) via MediaStore, path
+   `/proc/self/fd/<fd>`.
+3. `nativeConvert`/`nativeConvertXcz`, progress is streamed via `callbackFlow`
+   (throttling — A09).
+4. Verify via `nativeVerifyNsp` (if header_key is present).
+5. Temp cleanup; on a FUSE failure — fall back to a temp copy and retry (G03).
 
-## Прочие модули
+## Other modules
 
 - **Constants.kt** — `PROGRESS_BAR_UPDATE_INTERVAL_MS=100`,
   `PROGRESS_NUMERIC_UPDATE_INTERVAL_MS=500` (A09).
-- **data/SettingsRepository.kt** — синглтон. `language` в SharedPreferences
-  (синхронно), `statsFormat`/`outputFolderUri` — в DataStore (Flow).
+- **data/SettingsRepository.kt** — a singleton. `language` in SharedPreferences
+  (synchronous), `statsFormat`/`outputFolderUri` — in DataStore (Flow).
 - **model/** — `ConversionMode` (None/SingleFiles/FolderMode), `StatsFormat`
   (COMPACT/COMPACT2/COMPACT3/DETAILED), `ConversionProgress` (done/total/speed),
-  `FileEntry` (uri/name/size/status), `FolderConversionResult` (типы операций и
+  `FileEntry` (uri/name/size/status), `FolderConversionResult` (operation types and
   summary), `FolderStructure`/`FileNode`, `LogEntry`, `Screen`.
-- **nut/** — `KeysManager` (хранит prod.keys в `filesDir`), `KeysParser`
-  (извлекает `header_key`, 32 байта).
-- **fs/** — `FolderScanner` (рекурсивный обход `DocumentsContract` → дерево +
-  списки NSZ/XCZ), `FolderProcessor` (NSZ→NSP, XCZ→XCI, прочее → копия; сохраняет
-  структуру, продолжает при ошибках). С 2026-06-22 повторяет «новый» пайплайн
-  режима файлов: фаза 1 создаёт дерево выходных папок и плоский список
-  `WorkItem`; фаза 2 гоняет файлы параллельно через `Semaphore(FOLDER_CONCURRENCY)`.
-  Вход читается через `fd:N` (no-copy, FUSE-fallback на temp), результат пишется
-  **сразу** в дескриптор назначения (без temp-output+копии), verify через
-  `nativeVerifyNsp` включён (несовпадение → файл помечается ошибочным). Прогресс:
-  per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
+- **nut/** — `KeysManager` (stores prod.keys in `filesDir`), `KeysParser` (extracts
+  `header_key`, 32 bytes).
+- **fs/** — `FolderScanner` (recursive `DocumentsContract` walk → tree + NSZ/XCZ lists),
+  `FolderProcessor` (NSZ→NSP, XCZ→XCI, everything else → copy; preserves structure,
+  continues on errors). Since 2026-06-22 it mirrors the "new" file-mode pipeline: phase 1
+  builds the output-folder tree and a flat `WorkItem` list; phase 2 runs files in parallel
+  via `Semaphore(FOLDER_CONCURRENCY)`. Input is read via `fd:N` (no-copy, FUSE fallback to
+  temp), the result is written **straight** into the destination descriptor (no
+  temp-output+copy), verify via `nativeVerifyNsp` is enabled (a mismatch → the file is
+  marked failed). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
   `TempFileManager` (`cacheDir`, `andronsz_<UUID>_<name>.<ext>`), `FolderLogWriter`
-  (потокобезопасная запись лога под `Mutex`).
+  (thread-safe log writing under a `Mutex`).
 
-## Data flow (кратко)
+## Data flow (brief)
 
-- **Очередь:** добавление → `startBatchConversion` → до `BATCH_CONCURRENCY` файлов
-  параллельно через `Semaphore`, по расширению `.xcz` → `NszConverter.convertXcz()`,
-  иначе `NszConverter.convert()`; статусы Pending→Converting→Completed/Failed;
-  общий прогресс по сумме `fileTotals`.
-- **Папка:** `FolderScanner.scanFolder` → `FolderStructure` →
-  `startFolderConversion` → `FolderProcessor.processFolder` (фаза 1: дерево папок +
-  план, фаза 2: параллельная распаковка через `Semaphore`) →
-  `FolderConversionSummary` → лог закрывается, temp чистится. Прогресс стримится
-  через `FolderProgressUpdate` (общий бар + `activeFiles`).
+- **Queue:** add → `startBatchConversion` → up to `BATCH_CONCURRENCY` files in parallel
+  via a `Semaphore`, by extension `.xcz` → `NszConverter.convertXcz()`, otherwise
+  `NszConverter.convert()`; statuses Pending→Converting→Completed/Failed; overall progress
+  from the sum of `fileTotals`.
+- **Folder:** `FolderScanner.scanFolder` → `FolderStructure` → `startFolderConversion` →
+  `FolderProcessor.processFolder` (phase 1: folder tree + plan, phase 2: parallel unpacking
+  via a `Semaphore`) → `FolderConversionSummary` → the log is closed, temp is cleaned.
+  Progress is streamed via `FolderProgressUpdate` (overall bar + `activeFiles`).

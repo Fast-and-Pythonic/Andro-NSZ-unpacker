@@ -1,91 +1,93 @@
-# Status (обновлено: 2026-07-01)
+# Status (updated: 2026-07-01)
 
 ## Working
 
-- Конвертация во всех трёх режимах: один файл (legacy, без UI), очередь файлов,
-  папка. NSZ→NSP (отлажено) и XCZ→XCI (**протестировано на устройстве 2026-07-01,
-  оба режима**, после фикса пустого раздела — [gotchas.md](gotchas.md) G07).
-- Режим папки переведён на «новый» пайплайн (как очередь файлов): no-copy `fd:N`
-  вход, запись результата сразу в дескриптор назначения, параллелизм через
-  `FOLDER_CONCURRENCY`, verify NSP, GUI с баром на каждый активный файл.
-- Перф-пайплайн в `stable`: hardware AES-CTR + SHA-256 с software-фоллбэком,
-  no-copy вход через `fd:N`, асинхронный writer, zstd `-O3`, ThinLTO,
-  core-adaptive batch-параллелизм (`BATCH_CONCURRENCY` 1..3). Итог: 2 ГБ ~7 с.
-- Verify NCA по SHA-256 — **non-fatal** (несовпадение → `WARN`, вывод сохраняется, не
-  удаляется). Сверка по имени — приближение, см. [architecture.md](architecture.md) A12.
-- Вывод в выбранную папку (SAF tree / file uri) — во всех режимах, с откатом на
-  Downloads (`NszConverter.createOutputUri`).
-- Кнопка «Сохранить лог с экрана» под окном лога (оба режима) → `nsz_screen_log.txt`,
-  отдельно от движкового и папочного логов.
-- Локализация EN/RU, выбор языка в приложении (`recreate()`), выбор папки вывода
-  (SAF, persistable permission).
-- UI прогресса: общий бар + по бару на каждый активно конвертируемый файл
-  (`activeFileProgress`); раздельный троттлинг бар/цифры (A09); таймер справа от
-  контекстного статуса «Распаковываем…/Распаковано».
+- Conversion in all three modes: single file (legacy, no UI), file queue, folder.
+  NSZ→NSP (debugged) and XCZ→XCI (**tested on a device 2026-07-01, both modes**,
+  after the empty-partition fix — [gotchas.md](gotchas.md) G07).
+- Folder mode moved to the "new" pipeline (like the file queue): no-copy `fd:N`
+  input, writing the result straight into the destination descriptor, parallelism
+  via `FOLDER_CONCURRENCY`, NSP verify, a GUI bar per active file.
+- The perf pipeline in `stable`: hardware AES-CTR + SHA-256 with a software
+  fallback, no-copy input via `fd:N`, async writer, zstd `-O3`, ThinLTO,
+  core-adaptive batch parallelism (`BATCH_CONCURRENCY` 1..3). Result: 2 GB ~7 s.
+- NCA SHA-256 verify — **non-fatal** (mismatch → `WARN`, output kept, not deleted).
+  The filename check is an approximation, see [architecture.md](architecture.md) A12.
+- Output to a chosen folder (SAF tree / file uri) — in all modes, with a fallback
+  to Downloads (`NszConverter.createOutputUri`).
+- "Save on-screen log" button under the log panel (both modes) → `nsz_screen_log.txt`,
+  separate from the engine and folder logs.
+- EN/RU localization, in-app language selection (`recreate()`), output folder
+  selection (SAF, persistable permission).
+- Progress UI: an overall bar + a bar per actively converting file
+  (`activeFileProgress`); separate bar/number throttling (A09); a timer to the right
+  of the contextual "Unpacking…/Unpacked" status.
 
 ## Fragile points
 
-- **Единицы прогресса.** Overall-бар batch смешивал compressed-знаменатель с
-  uncompressed-числителем (исправлено, [gotchas.md](gotchas.md) G01). При правках
-  прогресса держать числитель и знаменатель в одних единицах.
-- **No-copy I/O.** Путь `fd:N` / `/proc/self/fd` зависит от поведения провайдера;
-  держится на откате к temp-копии (G03). Не удалять ретрай.
-- **XCZ→XCI: полный XCI без байт-эталона.** Trimmed XCI протестирован на устройстве
-  (2026-07-01, оба режима, реальные .xcz), раскладка приведена к 0x8000/0xF000 (A11).
-  Остаётся непроверенным **полный** XCI (key area на 0x0, заголовок на 0x1000):
-  эталон его не round-трипит, байт-эталона нет — нужен реальный сэмпл перед
-  обещаниями в релизе (см. [gotchas.md](gotchas.md) G06).
-- **Верификация по имени недостоверна.** Content-id в имени — половина хэша NCA;
-  правильная сверка — по CNMT (A12). Сейчас mismatch не фатален (не удаляет вывод),
-  но и не гарантия. Не возвращать `NCZ_ERR_HASH_MISMATCH` на этот путь.
-- **Запись результата папки прямо в SAF-дескриптор.** Режим папки пишет вывод
-  через `/proc/self/fd` в произвольную папку (не только Downloads). На редких
-  прошивках возможны сбои FUSE — для входа есть откат на temp, для выхода нет.
-- **Паритет с Python-референсом.** `aes_*`, `sha256`, `ncz_decompress`, парсеры
-  контейнеров и сигнатуры JNI отлажены и совпадают с nsz. Менять только по запросу.
-- **Отступы на пустых строках.** Автоформаттеры обнуляют их, нарушая код-стиль
-  (3 пробела с сохранением отступа). Проверять после форматирования.
-- **Мёртвый legacy-код.** `MainViewModel.startConversion()`, `pickFile()`,
-  `selectedUri/selectedName` остались после удаления `LegacySingleFileUI`, но
-  вызовов больше нет. Кандидаты на удаление (отдельной задачей).
+- **Progress units.** The batch overall bar mixed a compressed denominator with an
+  uncompressed numerator (fixed, [gotchas.md](gotchas.md) G01). When editing progress,
+  keep the numerator and denominator in the same units.
+- **No-copy I/O.** The `fd:N` / `/proc/self/fd` path depends on provider behavior; it
+  relies on the temp-copy fallback (G03). Don't remove the retry.
+- **XCZ→XCI: full XCI has no byte reference.** Trimmed XCI is tested on a device
+  (2026-07-01, both modes, real .xcz), the layout is aligned to 0x8000/0xF000 (A11).
+  Still unverified is **full** XCI (key area at 0x0, header at 0x1000): the reference
+  doesn't round-trip it, there's no byte reference — needs a real sample before release
+  promises (see [gotchas.md](gotchas.md) G06).
+- **Filename verification is not authoritative.** The content-id in the name is half the
+  NCA hash; the correct check is against the CNMT (A12). A mismatch is currently
+  non-fatal (doesn't delete the output) but also not a guarantee. Don't return
+  `NCZ_ERR_HASH_MISMATCH` on this path.
+- **Writing folder results straight into a SAF descriptor.** Folder mode writes output
+  via `/proc/self/fd` into an arbitrary folder (not just Downloads). On rare firmwares
+  FUSE failures are possible — input has a temp fallback, output does not.
+- **Parity with the Python reference.** `aes_*`, `sha256`, `ncz_decompress`, the
+  container parsers, and the JNI signatures are debugged and match nsz. Change only on
+  request.
+- **Indentation on blank lines.** Auto-formatters strip it, breaking the code style
+  (3 spaces, keeping indentation). Check after formatting.
+- **Dead legacy code.** `MainViewModel.startConversion()`, `pickFile()`,
+  `selectedUri/selectedName` remain after removing `LegacySingleFileUI`, but nothing
+  calls them anymore. Candidates for removal (as a separate task).
 
 ## Deferred
 
-- **Блочный параллелизм в C** — ветка `block-parallel-wip` (коммит `aa7cf73`).
-  Сейчас СЛОМАН, в `stable` не входит. В `stable` используется file-level
-  batch-параллелизм. Причина откладывания: нестабильность; перф-цель уже
-  достигнута другими способами.
-- **Роадмап верификации** (см. [architecture.md](architecture.md) A12):
-  1. настройка вкл/выкл верификации — вероятно, по-умолчанию **выкл** (низкая
-     вероятность ошибок; другие nsz-разработчики её часто отключают);
-  2. правильная сверка по CNMT (полный хэш NCA vs `Cnmt.contentEntries[].hash`),
-     как в референсе;
-  3. оптимизация раскладки по ядрам: сейчас ядра парятся (1 распаковка + 1
-     верификация); идея — вся SHA-256-верификация на 1–2 ядра, ~6 из 8 на
-     распаковку, 1 на систему/GUI.
+- **Block-level parallelism in C** — branch `block-parallel-wip` (commit `aa7cf73`).
+  Currently BROKEN, not in `stable`. `stable` uses file-level batch parallelism. Reason
+  deferred: instability; the perf target is already met by other means.
+- **Verification roadmap** (see [architecture.md](architecture.md) A12):
+  1. an enable/disable verification setting — probably **off** by default (low error
+     probability; other nsz developers often disable it);
+  2. proper CNMT-based verification (full NCA hash vs `Cnmt.contentEntries[].hash`), as
+     in the reference;
+  3. per-core layout optimization: cores are currently paired (1 decompress + 1 verify);
+     the idea — put all SHA-256 verification on 1–2 cores, ~6 of 8 on decompression, 1
+     for system/GUI.
 
 ## Decision log
 
-- 2026-07-01 — интегрирован PR #6 (manx98, первый сторонний вклад): фикс пустого
-  HFS0-раздела (`file_count == 0`, G07 — причина падения XCZ→XCI); `is_content_id_named`
-  (hex-валидация); вывод в `fd:N`/`/proc/self/fd`; вывод в выбранную папку; host-CLI +
-  host-сборка. Интегрирован вручную (не merge PR) с сохранением авторства; PR закрыт.
-- 2026-07-01 — верификация сделана non-fatal (A12): mismatch → `WARN`, вывод не
-  удаляется. Причина: content-id в имени ≠ полный хэш NCA, сверка недостоверна.
-- 2026-07-01 — фикс статуса ошибки в batch-режиме (G08: `.catch` маскировал сбой) +
-  кнопка «Сохранить лог с экрана».
-- 2026-06-22 — режим папки переписан под «новый» пайплайн (no-copy `fd:N`, запись
-  в дескриптор назначения без temp-output+копии, параллелизм `FOLDER_CONCURRENCY`,
-  verify NSP, per-file бары в UI). `FolderProgressUpdate` теперь несёт
+- 2026-07-01 — integrated PR #6 (manx98, first external contribution): empty
+  HFS0-partition fix (`file_count == 0`, G07 — the cause of the XCZ→XCI failure);
+  `is_content_id_named` (hex validation); output to `fd:N`/`/proc/self/fd`; output to a
+  chosen folder; host CLI + host build. Integrated manually (not a PR merge) with
+  authorship preserved; PR closed.
+- 2026-07-01 — verification made non-fatal (A12): mismatch → `WARN`, output not deleted.
+  Reason: the filename content-id ≠ the full NCA hash, so the check isn't authoritative.
+- 2026-07-01 — batch-mode error-status fix (G08: `.catch` masked a failure) + the "Save
+  on-screen log" button.
+- 2026-06-22 — folder mode rewritten to the "new" pipeline (no-copy `fd:N`, writing into
+  the destination descriptor without a temp-output+copy, `FOLDER_CONCURRENCY`
+  parallelism, NSP verify, per-file bars in the UI). `FolderProgressUpdate` now carries
   `activeFiles: List<ActiveFolderFile>`.
-- 2026-06-22 — XCZ→XCI реализован по-настоящему: `ncz_convert_xcz_to_xci`
-  переписан под вложенный HFS0; добавлены `hfs0_parse_at` / `hfs0_computed_header_size`;
-  диспетчеризация `.xcz`→`convertXcz` в обоих режимах; `convertXcz` переведён на
-  `fd:N`. Не протестировано на реальном файле.
-- 2026-06-22 — общий batch-бар переведён на динамический знаменатель + финальный
-  emit на 100% — фикс преждевременного заполнения (G01).
-- 2026-06-22 — удалён экран `LegacySingleFileUI` и компонент `ElapsedTimeRow`;
-  ветка `None` в `ConversionScreen` недостижима и оставлена пустой для
-  исчерпывающего `when`.
-- Перф-история (hw-крипта, no-copy I/O, async writer, zstd `-O3`, batch-параллелизм,
-  ThinLTO) — см. [architecture.md](architecture.md) A01–A10.
+- 2026-06-22 — XCZ→XCI implemented for real: `ncz_convert_xcz_to_xci` rewritten for a
+  nested HFS0; added `hfs0_parse_at` / `hfs0_computed_header_size`; `.xcz`→`convertXcz`
+  dispatch in both modes; `convertXcz` moved to `fd:N`. Not tested on a real file (at the
+  time).
+- 2026-06-22 — the batch overall bar moved to a dynamic denominator + a final 100% emit —
+  a fix for premature filling (G01).
+- 2026-06-22 — removed the `LegacySingleFileUI` screen and the `ElapsedTimeRow` component;
+  the `None` branch in `ConversionScreen` is unreachable and left empty for an exhaustive
+  `when`.
+- Perf story (hw crypto, no-copy I/O, async writer, zstd `-O3`, batch parallelism,
+  ThinLTO) — see [architecture.md](architecture.md) A01–A10.

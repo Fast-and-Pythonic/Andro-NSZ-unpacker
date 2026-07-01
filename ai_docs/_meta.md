@@ -1,55 +1,63 @@
-# _meta — правила ведения документации
+# _meta — rules for maintaining the docs
 
-Эта папка следует стандарту `ai_docs/` (описание метода:
-`E:\a_My_Programming\ai_docs_method`). Формат записей: `G##` для ловушек,
-`A##` для архитектурных решений.
+This folder follows the `ai_docs/` standard (method description:
+`E:\a_My_Programming\ai_docs_method`). Entry format: `G##` for gotchas, `A##`
+for architecture decisions.
 
-Точка входа — `ai_docs/start.md`, на неё указывает корневой `CLAUDE.md`.
+Entry point is `ai_docs/start.md`, pointed to by the root `CLAUDE.md`.
 
-## Триггеры обновления
+## Language
 
-| Триггер | Файл / действие |
-|---------|-----------------|
-| Отладка > 30 мин с неочевидной причиной | `gotchas.md` — новый `G##` |
-| Принято архитектурное решение | `architecture.md` — новый `A##` |
-| Зафиксирована хрупкая точка | `status.md` — Fragile points |
-| Решено отложить фичу | `status.md` — Deferred + причина |
-| Завершена фича | `status.md` — Working + дата сверху файла |
-| Изменён код-стиль / workflow / команды сборки | `conventions.md` |
-| Переименован модуль / изменена структура | `overview.md` (дерево) и при нужде subsystems |
-| Изменена подсистема | `subsystems/<name>.md` |
-| Появился новый файл документации / подсистема | `start.md` (карта) |
-| Изменилась методология ведения доков | этот файл |
+**All documentation is written in English** — including the `ai_docs/` files
+themselves (this `_meta.md`, gotchas, architecture, status, subsystems, etc.),
+not just README and code comments. User-facing conversation stays in Russian, but
+anything committed to the repository as docs is English. See
+[conventions.md](conventions.md).
 
-## Что НЕ писать в доки
+## Update triggers
 
-- То, что выводится из кода: сигнатуры, имена переменных, импорты, очевидная
-  иерархия типов. Исключение — высокоуровневое дерево в `overview.md`.
-- Историю изменений (это `git log`). Исключение — Decision log в `status.md`
-  («почему решили», не «что изменили»).
-- Текущие TODO/задачи. Исключение — Deferred в `status.md` (сознательно отложено
-  + причина).
-- Длинные туториалы и общую теорию. Только специфика проекта.
-- Точные счётчики, которые быстро устаревают (число строк, размеры). Давать
-  ориентир и ссылку на источник.
+| Trigger | File / action |
+|---------|---------------|
+| Debugging > 30 min with a non-obvious cause | `gotchas.md` — new `G##` |
+| An architecture decision was made | `architecture.md` — new `A##` |
+| A fragile point was identified | `status.md` — Fragile points |
+| A feature was deliberately deferred | `status.md` — Deferred + reason |
+| A feature was finished | `status.md` — Working + date at top of file |
+| Code style / workflow / build commands changed | `conventions.md` |
+| A module was renamed / structure changed | `overview.md` (tree) and subsystems if needed |
+| A subsystem changed | `subsystems/<name>.md` |
+| A new doc file / subsystem appeared | `start.md` (map) |
+| The doc-keeping methodology changed | this file |
 
-## Протокол начала сессии
+## What NOT to write in the docs
 
-1. Всегда: прочитать `start.md`.
-2. По ситуативному гайду из `start.md` — решить, что ещё читать.
-3. Нетривиальная задача → дополнительно `gotchas.md`.
-4. Изменение движка/сборки → `architecture.md` + `status.md` (Fragile).
-5. Ломаешь конвенцию из `conventions.md` → остановиться, спросить пользователя.
+- Things derivable from the code: signatures, variable names, imports, obvious
+  type hierarchies. Exception — the high-level tree in `overview.md`.
+- Change history (that's `git log`). Exception — the Decision log in `status.md`
+  ("why we decided", not "what changed").
+- Current TODOs/tasks. Exception — Deferred in `status.md` (deliberately deferred
+  + reason).
+- Long tutorials and general theory. Project specifics only.
+- Precise counters that go stale fast (line counts, sizes). Give a ballpark and a
+  link to the source.
 
-## Принцип свежести
+## Session start protocol
 
-Документ, который лжёт, хуже отсутствующего: агент поверит и сломает рабочее.
-Устарело — обновить сейчас или удалить раздел. `status.md` всегда несёт дату
-сверху.
+1. Always: read `start.md`.
+2. Per the situational guide in `start.md` — decide what else to read.
+3. Non-trivial task → additionally `gotchas.md`.
+4. Engine/build change → `architecture.md` + `status.md` (Fragile).
+5. Breaking a convention from `conventions.md` → stop and ask the user.
 
-## Tool-specific файлы
+## Freshness principle
 
-В `ai_docs/` не должно быть файлов под конкретный инструмент (`CLAUDE.md`,
-`.cursorrules` и т.п.). Они живут в корне проекта и лишь указывают на
-`ai_docs/start.md`. Сейчас есть корневой `CLAUDE.md` (Claude Code). Личные
-настройки разработчика — в `CLAUDE.local.md` (в `.gitignore`), не в репозитории.
+A document that lies is worse than a missing one: the agent will trust it and
+break something that works. Stale → update now or delete the section. `status.md`
+always carries a date at the top.
+
+## Tool-specific files
+
+`ai_docs/` must not contain tool-specific files (`CLAUDE.md`, `.cursorrules`,
+etc.). Those live at the project root and only point to `ai_docs/start.md`. There
+is currently a root `CLAUDE.md` (Claude Code). Personal developer settings go in
+`CLAUDE.local.md` (in `.gitignore`), not in the repository.
