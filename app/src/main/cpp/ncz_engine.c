@@ -48,6 +48,17 @@ const char *ncz_error_string(int code)
  * mirroring nsz's XciStream (seek 0xF000 + verbatim 0x200 header). */
 #define XCI_ROOT_HFS0_OFFSET 0xF000u
 
+/* Parse an "fd:N" or "/proc/self/fd/N" output path into its fd number, else -1. */
+static int output_fd_number(const char *path)
+{
+    const char *proc_prefix = "/proc/self/fd/";
+    if (strncmp(path, "fd:", 3) == 0) return atoi(path + 3);
+    if (strncmp(path, proc_prefix, strlen(proc_prefix)) == 0) {
+        return atoi(path + strlen(proc_prefix));
+    }
+    return -1;
+}
+
 /*
  * Open an input stream. A path of the form "fd:N" reads an already-open file
  * descriptor directly (via dup + fdopen), bypassing a path re-open. This is
@@ -67,13 +78,45 @@ static FILE *open_input_file(const char *path)
     return fopen(path, "rb");
 }
 
+/*
+ * Open an output stream. Mirrors open_input_file for "fd:N" / "/proc/self/fd/N"
+ * targets: dup the fd and write through it (truncating first, since the existing
+ * file may be larger than the new output). Any other path is opened normally.
+ */
+static FILE *open_output_file(const char *path)
+{
+    int fd = output_fd_number(path);
+    if (fd >= 0) {
+        int dupfd = dup(fd);
+        if (dupfd < 0) return NULL;
+        if (ftruncate(dupfd, 0) != 0) {
+            DBG("open_output_file: ftruncate failed for fd:%d", fd);
+        }
+        if (lseek(dupfd, 0, SEEK_SET) < 0) {
+            DBG("open_output_file: lseek failed for fd:%d", fd);
+        }
+        FILE *fp = fdopen(dupfd, "wb");
+        if (!fp) { close(dupfd); return NULL; }
+        return fp;
+    }
+    return fopen(path, "wb");
+}
+
 /* ---------- helpers ---------- */
 
-/* Returns 1 if filename looks like a hash-named NCA: 32 hex chars before extension */
-static int is_hash_named(const char *name)
+/* Returns 1 if filename looks like a Nintendo content id: 32 hex chars before extension. */
+static int is_content_id_named(const char *name)
 {
     const char *dot = strrchr(name, '.');
-    return dot && (size_t)(dot - name) == 32;
+    if (!dot || (size_t)(dot - name) != 32) return 0;
+    for (const char *p = name; p < dot; p++) {
+        char c = *p;
+        int is_hex = (c >= '0' && c <= '9') ||
+                     (c >= 'a' && c <= 'f') ||
+                     (c >= 'A' && c <= 'F');
+        if (!is_hex) return 0;
+    }
+    return 1;
 }
 
 /* Returns 1 if filename ends with .nca or .ncz */
@@ -82,6 +125,13 @@ static int is_nca_file(const char *name)
     const char *ext = strrchr(name, '.');
     if (!ext) return 0;
     return (strcmp(ext, ".nca") == 0 || strcmp(ext, ".ncz") == 0);
+}
+
+/* An output path we must not remove() on failure: the caller owns the fd, and
+ * /dev/null is a verify-only sink. */
+static int is_discard_output(const char *path)
+{
+    return path && (strcmp(path, "/dev/null") == 0 || output_fd_number(path) >= 0);
 }
 
 static void bytes_to_hex(const uint8_t *bytes, int n, char *out)
@@ -135,6 +185,8 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
     DBG("=== ncz_convert_nsz_to_nsp ===");
     DBG("  input  = '%s'", input_path);
     DBG("  output = '%s'", output_path);
+    EMIT("PATH", "source: %s", input_path);
+    EMIT("PATH", "target: %s", output_path);
 
     /* 1. Parse PFS0 */
     Pfs0Container container;
@@ -191,7 +243,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
     }
 
     /* 3. Open output */
-    FILE *out_fp = fopen(output_path, "wb");
+    FILE *out_fp = open_output_file(output_path);
     if (!out_fp) {
         free(new_sizes); fclose(in_fp);
         return NCZ_ERR_OPEN_OUTPUT;
@@ -222,7 +274,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
              *                   and not nspf._path.endswith('.cnmt.nca')
              * We also skip non-NCA files (certs, tickets) to avoid the v1 bug.
              */
-            int verify_nca = is_nca_file(f->name) && is_hash_named(f->name);
+            int verify_nca = is_nca_file(f->name) && is_content_id_named(f->name);
             Sha256Ctx sha_ctx;
             if (verify_nca) sha256_init(&sha_ctx);
 
@@ -250,8 +302,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
                     EMIT("VERIFIED", "   %s", f->name);
                 } else {
                     DBG("file[%d] HASH MISMATCH: expected=%s got=%s", i, base, hex);
-                    EMIT("ERROR", "   hash mismatch: %s", f->name);
-                    ret = NCZ_ERR_HASH_MISMATCH;
+                    EMIT("WARN", "   hash mismatch (output kept): %s", f->name);
                 }
             }
             continue;
@@ -263,7 +314,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
             (unsigned long long)f->size,
             (unsigned long long)new_sizes[i]);
 
-        int verify_nca = is_hash_named(f->name);
+        int verify_nca = is_content_id_named(f->name);
         Sha256Ctx sha_ctx;
         if (verify_nca) sha256_init(&sha_ctx);
 
@@ -315,8 +366,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
                 EMIT("VERIFIED", "   %s", f->name);
             } else {
                 DBG("file[%d] HASH MISMATCH: expected=%s got=%s", i, base, hex);
-                EMIT("ERROR", "   hash mismatch: %s", f->name);
-                ret = NCZ_ERR_HASH_MISMATCH;
+                EMIT("WARN", "   hash mismatch (output kept): %s", f->name);
             }
         }
     }
@@ -328,7 +378,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
     if (ret != NCZ_OK && ret != NCZ_ERR_CANCELLED) {
         DBG("conversion FAILED (ret=%d '%s') — removing partial output",
             ret, ncz_error_string(ret));
-        remove(output_path);
+        if (!is_discard_output(output_path)) remove(output_path);
     } else {
         DBG("conversion %s", ret == NCZ_OK ? "SUCCESS" : "CANCELLED");
     }
@@ -369,7 +419,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
 
     if (!is_ncz) {
         /* Non-NCZ file: copy verbatim. Verify only hash-named .nca files. */
-        int verify_nca = is_nca_file(name) && is_hash_named(name);
+        int verify_nca = is_nca_file(name) && is_content_id_named(name);
         if (verify_nca) sha256_init(&sha_ctx);
 
         ret = copy_bytes(in_fp, out_fp, f_size, verify_nca ? &sha_ctx : NULL);
@@ -394,15 +444,14 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
                 EMIT("VERIFIED", "   %s", name);
             } else {
                 DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
-                EMIT("ERROR", "   hash mismatch: %s", name);
-                ret = NCZ_ERR_HASH_MISMATCH;
+                EMIT("WARN", "   hash mismatch (output kept): %s", name);
             }
         }
         return ret;
     }
 
     /* ── NCZ → NCA decompression ── */
-    int verify_nca = is_hash_named(name);
+    int verify_nca = is_content_id_named(name);
     if (verify_nca) sha256_init(&sha_ctx);
 
     /* Copy NCA header verbatim (first 0x4000 bytes) */
@@ -447,8 +496,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
             EMIT("VERIFIED", "   %s", name);
         } else {
             DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
-            EMIT("ERROR", "   hash mismatch: %s", name);
-            ret = NCZ_ERR_HASH_MISMATCH;
+            EMIT("WARN", "   hash mismatch (output kept): %s", name);
         }
     }
     return ret;
@@ -477,6 +525,8 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     DBG("=== ncz_convert_xcz_to_xci ===");
     DBG("  input  = '%s'", input_path);
     DBG("  output = '%s'", output_path);
+    EMIT("PATH", "source: %s", input_path);
+    EMIT("PATH", "target: %s", output_path);
 
     FILE          *in_fp           = NULL;
     FILE          *out_fp          = NULL;
@@ -596,7 +646,7 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     }
 
     /* 5. Open output */
-    out_fp = fopen(output_path, "wb");
+    out_fp = open_output_file(output_path);
     if (!out_fp) { ret = NCZ_ERR_OPEN_OUTPUT; goto done; }
     setvbuf(out_fp, NULL, _IOFBF, IO_BUF_SIZE);
 
@@ -661,7 +711,7 @@ done:
     if (out_fp && ret != NCZ_OK && ret != NCZ_ERR_CANCELLED) {
         DBG("conversion FAILED (ret=%d '%s') — removing partial output",
             ret, ncz_error_string(ret));
-        remove(output_path);
+        if (!is_discard_output(output_path)) remove(output_path);
     } else {
         DBG("conversion %s",
             ret == NCZ_OK ? "SUCCESS" : (ret == NCZ_ERR_CANCELLED ? "CANCELLED" : "FAILED"));

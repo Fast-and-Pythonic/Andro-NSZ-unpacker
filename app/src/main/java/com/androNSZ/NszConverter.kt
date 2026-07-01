@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
+import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.androNSZ.fs.TempFileManager
 import com.androNSZ.model.CancelledException
@@ -89,6 +90,7 @@ object NszConverter {
         context: Context,
         inputUri: Uri,
         headerKey: ByteArray?,
+        outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
     ): Flow<ConversionProgress> = callbackFlow {
 
@@ -131,14 +133,7 @@ object NszConverter {
                 }
             }
 
-            val cv = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, outputName)
-                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            val createdOutputUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
-            ) ?: throw NszConversionException(-1, "Cannot create output file in Downloads")
+            val createdOutputUri = createOutputUri(context, outputBaseUri, outputName)
             outputUri = createdOutputUri
 
             val openedPfd = withContext(Dispatchers.IO) {
@@ -188,12 +183,7 @@ object NszConverter {
 
             when (result) {
                 OK -> {
-                    context.contentResolver.update(
-                        createdOutputUri,
-                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                        null,
-                        null
-                    )
+                    finalizeOutputUri(context, createdOutputUri, outputBaseUri)
                     close()
                 }
                 ERR_CANCELLED -> {
@@ -224,6 +214,7 @@ object NszConverter {
         context: Context,
         inputUri: Uri,
         headerKey: ByteArray?,
+        outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
     ): Flow<ConversionProgress> = callbackFlow {
 
@@ -263,14 +254,7 @@ object NszConverter {
                 }
             }
 
-            val cv = ContentValues().apply {
-                put(MediaStore.Downloads.DISPLAY_NAME, outputName)
-                put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
-                put(MediaStore.Downloads.IS_PENDING, 1)
-            }
-            val createdOutputUri = context.contentResolver.insert(
-                MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
-            ) ?: throw NszConversionException(-1, "Cannot create output file in Downloads")
+            val createdOutputUri = createOutputUri(context, outputBaseUri, outputName)
             outputUri = createdOutputUri
 
             val openedPfd = withContext(Dispatchers.IO) {
@@ -310,12 +294,7 @@ object NszConverter {
 
             when (result) {
                 OK -> {
-                    context.contentResolver.update(
-                        createdOutputUri,
-                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
-                        null,
-                        null
-                    )
+                    finalizeOutputUri(context, createdOutputUri, outputBaseUri)
                     close()
                 }
                 ERR_CANCELLED -> {
@@ -343,4 +322,49 @@ object NszConverter {
     }
 
     fun cancel() = nativeCancel()
+
+    private fun createOutputUri(context: Context, outputBaseUri: Uri?, outputName: String): Uri {
+        if (outputBaseUri != null) {
+            if (outputBaseUri.scheme == "file") {
+                val file = File(File(outputBaseUri.path!!), outputName)
+                return Uri.fromFile(file)
+            }
+            if (outputBaseUri.scheme == "content") {
+                val parentUri = if (DocumentsContract.isTreeUri(outputBaseUri)) {
+                    DocumentsContract.buildDocumentUriUsingTree(
+                        outputBaseUri,
+                        DocumentsContract.getTreeDocumentId(outputBaseUri)
+                    )
+                } else {
+                    outputBaseUri
+                }
+                return DocumentsContract.createDocument(
+                    context.contentResolver,
+                    parentUri,
+                    "application/octet-stream",
+                    outputName
+                ) ?: throw NszConversionException(-1, "Cannot create output file in selected folder")
+            }
+        }
+
+        val cv = ContentValues().apply {
+            put(MediaStore.Downloads.DISPLAY_NAME, outputName)
+            put(MediaStore.Downloads.MIME_TYPE, "application/octet-stream")
+            put(MediaStore.Downloads.IS_PENDING, 1)
+        }
+        return context.contentResolver.insert(
+            MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv
+        ) ?: throw NszConversionException(-1, "Cannot create output file in Downloads")
+    }
+
+    private fun finalizeOutputUri(context: Context, outputUri: Uri, outputBaseUri: Uri?) {
+        if (outputBaseUri == null) {
+            context.contentResolver.update(
+                outputUri,
+                ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                null,
+                null
+            )
+        }
+    }
 }

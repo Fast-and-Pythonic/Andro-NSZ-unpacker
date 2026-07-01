@@ -113,6 +113,7 @@ fun StatusLogPanel(statusLog: List<LogEntry>) {
             for (entry in statusLog) {
                val color = when (entry.tag) {
                   "VERIFIED" -> Color(0xFF4CAF50)
+                  "WARN" -> Color(0xFFFF9800)
                   "ERROR" -> MaterialTheme.colorScheme.error
                   else -> MaterialTheme.colorScheme.onSurface
                }
