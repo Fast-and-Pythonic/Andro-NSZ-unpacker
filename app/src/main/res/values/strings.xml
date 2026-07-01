@@ -144,4 +144,8 @@
 
     <string name="about_credits_title">Credits</string>
     <string name="about_credits_content">Based on the original nsz utility by nicoboss.</string>
+
+    <string name="action_save_log">Save on-screen log</string>
+    <string name="msg_screen_log_saved">Log saved: %1$s</string>
+    <string name="msg_screen_log_save_failed">Failed to save log: %1$s</string>
 </resources>

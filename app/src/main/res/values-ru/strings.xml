@@ -144,4 +144,8 @@
 
     <string name="about_credits_title">Авторство</string>
     <string name="about_credits_content">Основано на оригинальной утилите nsz от nicoboss.</string>
+
+    <string name="action_save_log">Сохранить лог с экрана</string>
+    <string name="msg_screen_log_saved">Лог сохранён: %1$s</string>
+    <string name="msg_screen_log_save_failed">Не удалось сохранить лог: %1$s</string>
 </resources>

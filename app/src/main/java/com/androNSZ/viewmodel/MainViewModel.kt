@@ -486,11 +486,12 @@ class MainViewModel : ViewModel() {
                         } else {
                            NszConverter.convert(context, file.uri, headerKey, statusCb)
                         }
+                        // NB: no .catch here — a failure must propagate to the
+                        // surrounding try/catch so the file stays Failed. Swallowing
+                        // it with .catch lets the flow complete "normally", and the
+                        // code below would then overwrite the status with Completed
+                        // (green "Done" for a file that actually failed).
                         flow
-                           .catch { e ->
-                              fileQueue[i] = file.copy(status = FileStatus.Failed)
-                              statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
-                           }
                            .collect { p ->
                               progress = p
                               activeFileProgress[i] = p
@@ -546,8 +547,17 @@ class MainViewModel : ViewModel() {
             null
          }
          val completed = fileQueue.count { it.status == FileStatus.Completed }
-         statusMessage = context.getString(R.string.format_files_completed, completed, fileQueue.size)
-         isSuccess = completed == fileQueue.size
+         val failed = fileQueue.count { it.status == FileStatus.Failed }
+         statusMessage = buildString {
+            append(context.getString(R.string.format_files_completed, completed, fileQueue.size))
+            if (failed > 0) {
+               append("\n")
+               append(context.getString(R.string.format_failed_count, failed))
+               append("\n")
+               append(context.getString(R.string.msg_see_log_details))
+            }
+         }
+         isSuccess = failed == 0 && completed == fileQueue.size
       }
    }
 
