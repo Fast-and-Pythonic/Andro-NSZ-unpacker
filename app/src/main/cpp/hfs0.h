@@ -7,6 +7,12 @@
 #define HFS0_MAGIC       0x30534648u  /* "HFS0" little-endian */
 #define HFS0_MAX_FILES   512
 
+/* Each HFS0 partition (root and nested) reserves a fixed 0x8000-byte header
+ * region; file data starts on this boundary. Matches nsz's Hfs0Stream
+ * (headerSize = 0x8000). The gap between the actual (small) header and 0x8000
+ * is encoded in the entry offsets and filled with zeros. */
+#define HFS0_PARTITION_HEADER  0x8000u
+
 /* HFS0 header (16 bytes) - IDENTICAL to PFS0 header structure */
 typedef struct {
     uint32_t magic;              // "HFS0" (0x30534648)

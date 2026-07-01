@@ -163,19 +163,14 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
 
     memset(strtab + strtab_size_non_padded, 0, strtab_padding);
 
-    /* When cert/tik files lead the container, align first-file data to 0x8000
-       by inserting a zero gap — matching the layout of official Nintendo NSP files. */
-    uint32_t header_size = 0x10u + (uint32_t)fc * (uint32_t)sizeof(Pfs0FileEntry)
-                         + strtab_size;
-    uint32_t data_gap = 0;
-    if (fc > 0 && header_size < 0x8000u) {
-        const char *first = container->files[0].name;
-        size_t flen = strlen(first);
-        int is_meta = (flen >= 5 && strcmp(first + flen - 5, ".cert") == 0) ||
-                      (flen >= 4 && strcmp(first + flen - 4, ".tik")  == 0);
-        if (is_meta)
-            data_gap = 0x8000u - header_size;
-    }
+    /* Reproduce the source container's leading gap so the rebuilt NSP matches
+       byte-for-byte. The input preserves the first file's offset relative to the
+       data area (entries[0].offset); the .ncz->.nca rename keeps name lengths, so
+       header and data-area sizes are identical and the gap transfers directly.
+       Mirrors nsz's default (non-fixPadding) behavior in NszDecompressor.py. */
+    uint64_t data_gap = (fc > 0)
+        ? container->files[0].data_offset - container->data_area_offset
+        : 0;
 
     Pfs0Header hdr;
     hdr.magic             = PFS0_MAGIC;
@@ -208,14 +203,14 @@ int pfs0_write_header(FILE *out_fp, Pfs0Container *container,
         return -3;
     }
 
-    /* Write alignment gap zeros so first file lands at absolute 0x8000 */
+    /* Write the leading gap zeros so the first file lands at its original offset */
     if (data_gap > 0) {
         uint8_t zero_buf[4096];
         memset(zero_buf, 0, sizeof(zero_buf));
-        uint32_t remaining = data_gap;
+        uint64_t remaining = data_gap;
         while (remaining > 0) {
             uint32_t chunk = remaining < sizeof(zero_buf)
-                           ? remaining : (uint32_t)sizeof(zero_buf);
+                           ? (uint32_t)remaining : (uint32_t)sizeof(zero_buf);
             if (fwrite(zero_buf, 1, chunk, out_fp) != chunk) {
                 snprintf(s_err, sizeof(s_err), "pfs0_write_header: write gap failed");
                 return -4;

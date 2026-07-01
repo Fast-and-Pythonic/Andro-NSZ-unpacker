@@ -44,6 +44,10 @@ const char *ncz_error_string(int code)
 /* ---------- I/O buffer size ---------- */
 #define IO_BUF_SIZE (4 * 1024 * 1024)
 
+/* Output XCI always places the root HFS0 at 0xF000, with 0x200..0xF000 zeroed —
+ * mirroring nsz's XciStream (seek 0xF000 + verbatim 0x200 header). */
+#define XCI_ROOT_HFS0_OFFSET 0xF000u
+
 /*
  * Open an input stream. A path of the form "fd:N" reads an already-open file
  * descriptor directly (via dup + fdopen), bypassing a path re-open. This is
@@ -488,32 +492,54 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     if (!in_fp) return NCZ_ERR_OPEN_INPUT;
     setvbuf(in_fp, NULL, _IOFBF, IO_BUF_SIZE);
 
-    /* 2. Read & validate the 0x200 XCI header */
+    /* 2. Read the first 0x200 and locate the XCI header.
+     *    Trimmed XCI: the header (magic "HEAD" at +0x100) is this first block.
+     *    Full XCI: 0x0..0x1000 is a key area; the real header is at 0x1000.
+     *    Mirrors nsz Xci.isFullXci() (headerOffset = 0x1000). The output always
+     *    copies the first 0x200 verbatim (as XciStream does), so we keep it. */
     uint8_t xci_header[0x200];
     if (fread(xci_header, 1, 0x200, in_fp) != 0x200) {
         DBG("Failed to read XCI header");
         ret = NCZ_ERR_IO; goto done;
     }
-    if (memcmp(xci_header + 0x100, "HEAD", 4) != 0) {
-        DBG("Invalid XCI magic at 0x100 (expected 'HEAD')");
-        ret = NCZ_ERR_INVALID_PFS0; goto done;  /* reuse code for invalid container */
+
+    uint64_t header_base;
+    uint8_t  hdr_buf[0x200];
+    const uint8_t *head;
+    if (memcmp(xci_header + 0x100, "HEAD", 4) == 0) {
+        header_base = 0;
+        head = xci_header;
+    } else {
+        header_base = 0x1000;
+        DBG("No 'HEAD' at 0x100 — treating as full XCI, header at 0x1000");
+        if (fseeko(in_fp, (off_t)header_base, SEEK_SET) != 0) { ret = NCZ_ERR_IO; goto done; }
+        if (fread(hdr_buf, 1, 0x200, in_fp) != 0x200) { ret = NCZ_ERR_IO; goto done; }
+        if (memcmp(hdr_buf + 0x100, "HEAD", 4) != 0) {
+            DBG("Invalid XCI: no 'HEAD' magic at 0x100 or 0x1100");
+            ret = NCZ_ERR_INVALID_PFS0; goto done;
+        }
+        head = hdr_buf;
     }
 
-    /* HFS0 (root partition) offset lives at 0x130 in the header */
+    /* HFS0 (root partition) offset lives at +0x130 in the header. The root HFS0
+     * in the INPUT is at header_base + hfs0_offset. */
     uint64_t hfs0_offset;
-    memcpy(&hfs0_offset, xci_header + 0x130, sizeof(hfs0_offset));
-    DBG("XCI hfs0_offset = 0x%llX", (unsigned long long)hfs0_offset);
+    memcpy(&hfs0_offset, head + 0x130, sizeof(hfs0_offset));
     if (hfs0_offset < 0x200 || hfs0_offset > 0x1000000) {
         DBG("Invalid HFS0 offset: 0x%llX", (unsigned long long)hfs0_offset);
         ret = NCZ_ERR_INVALID_PFS0; goto done;
     }
+    uint64_t root_hfs0_abs = header_base + hfs0_offset;
+    DBG("XCI header_base=0x%llX hfs0_offset=0x%llX root_hfs0_abs=0x%llX",
+        (unsigned long long)header_base, (unsigned long long)hfs0_offset,
+        (unsigned long long)root_hfs0_abs);
 
     /* 3. Parse the ROOT HFS0. Its entries are the XCI sub-partitions
      *    (update / normal / secure / logo) — NOT the NCA files. The actual
      *    NCA/NCZ files live one level deeper, inside each sub-partition's own
      *    HFS0. (Reference: nsz NszDecompressor.__decompressXcz, which iterates
      *    container.hfs0 and rebuilds a nested HFS0 per partition.) */
-    if (hfs0_parse_at(in_fp, hfs0_offset, &root) != 0) {
+    if (hfs0_parse_at(in_fp, root_hfs0_abs, &root) != 0) {
         DBG("root hfs0_parse failed: %s", hfs0_last_error());
         EMIT("ERROR", "   Root HFS0 parse failed: %s", hfs0_last_error());
         ret = NCZ_ERR_INVALID_PFS0; goto done;
@@ -577,14 +603,24 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     /* 6. XCI header verbatim (nsz copies the original 0x200 header unchanged) */
     if (fwrite(xci_header, 1, 0x200, out_fp) != 0x200) { ret = NCZ_ERR_IO; goto done; }
 
-    /* 7. Copy XCI metadata (0x200 .. hfs0_offset) verbatim */
-    if (fseeko(in_fp, 0x200, SEEK_SET) != 0) { ret = NCZ_ERR_IO; goto done; }
-    uint64_t metadata_size = hfs0_offset - 0x200;
-    if (metadata_size > 0) {
-        DBG("Copying XCI metadata: 0x200..0x%llX (%llu bytes)",
-            (unsigned long long)hfs0_offset, (unsigned long long)metadata_size);
-        int cr = copy_bytes(in_fp, out_fp, metadata_size, NULL);
-        if (cr != NCZ_OK) { ret = cr; goto done; }
+    /* 7. Zero-fill 0x200 .. 0xF000. nsz's XciStream seeks to 0xF000 and leaves
+     *    this region as a hole (reads back as zeros); for nsz-produced .xcz the
+     *    source bytes here are already zero (the compressor uses the same
+     *    XciStream). Writing zeros explicitly is safe for non-seekable output fds
+     *    and matches the reference byte-for-byte regardless of the input's
+     *    hfs0_offset. The root HFS0 then always starts at 0xF000. */
+    {
+        uint8_t zero_buf[4096];
+        memset(zero_buf, 0, sizeof(zero_buf));
+        uint64_t remaining = (uint64_t)XCI_ROOT_HFS0_OFFSET - 0x200;
+        DBG("Zero-filling 0x200..0x%X (%llu bytes)",
+            XCI_ROOT_HFS0_OFFSET, (unsigned long long)remaining);
+        while (remaining > 0) {
+            uint32_t chunk = remaining < sizeof(zero_buf)
+                           ? (uint32_t)remaining : (uint32_t)sizeof(zero_buf);
+            if (fwrite(zero_buf, 1, chunk, out_fp) != chunk) { ret = NCZ_ERR_IO; goto done; }
+            remaining -= chunk;
+        }
     }
 
     /* 8. Write the rebuilt ROOT HFS0 header (sub-partitions with new sizes) */

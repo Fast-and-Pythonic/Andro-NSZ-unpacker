@@ -6,12 +6,6 @@
 
 static __thread char s_err[512];  /* per-thread: safe under parallel conversions */
 
-static uint32_t hfs0_align_0x20(uint32_t n)
-{
-    uint32_t rem = n % 0x20u;
-    return rem == 0 ? 0x20u : (0x20u - rem);
-}
-
 const char *hfs0_last_error(void) { return s_err; }
 
 /* Core parser: reads an HFS0 partition starting at [base] inside the open stream
@@ -134,16 +128,11 @@ int hfs0_parse_at(FILE *fp, uint64_t hfs0_abs_offset, Hfs0Container *out)
 
 uint64_t hfs0_computed_header_size(const Hfs0Container *container)
 {
-    /* Mirror exactly what hfs0_write_header() emits: 16-byte header + entries +
-     * padded string table (with .ncz → .nca rename, which keeps name length). */
-    uint32_t strtab_non_padded = 0;
-    for (int i = 0; i < container->file_count; i++) {
-        strtab_non_padded += (uint32_t)strlen(container->files[i].name) + 1;
-    }
-    uint32_t header_non_padded = 0x10u
-                               + (uint32_t)container->file_count * (uint32_t)sizeof(Hfs0FileEntry)
-                               + strtab_non_padded;
-    return (uint64_t)header_non_padded + hfs0_align_0x20(header_non_padded);
+    /* Each partition reserves a fixed 0x8000-byte header region (matches nsz's
+     * Hfs0Stream). The actual header is smaller; the remainder is a zero gap.
+     * file_count is unused here but kept in the signature for clarity/callers. */
+    (void)container;
+    return (uint64_t)HFS0_PARTITION_HEADER;
 }
 
 int hfs0_write_header(FILE *out_fp, Hfs0Container *container,
@@ -153,11 +142,11 @@ int hfs0_write_header(FILE *out_fp, Hfs0Container *container,
 
     char strtab[HFS0_MAX_FILES * 256];
     uint32_t str_offsets[HFS0_MAX_FILES];
-    uint32_t strtab_size_non_padded = 0;
+    uint32_t strtab_size = 0;   /* raw, NOT padded to 0x20 (matches nsz Hfs0Stream) */
 
     /* Build string table and rename .ncz → .nca */
     for (int i = 0; i < fc; i++) {
-        str_offsets[i] = strtab_size_non_padded;
+        str_offsets[i] = strtab_size;
         char name[256];
         strncpy(name, container->files[i].name, sizeof(name) - 1);
         name[sizeof(name) - 1] = '\0';
@@ -166,20 +155,25 @@ int hfs0_write_header(FILE *out_fp, Hfs0Container *container,
             name[nlen - 1] = 'a'; /* .ncz -> .nca */
         }
         size_t slen = strlen(name) + 1;
-        memcpy(strtab + strtab_size_non_padded, name, slen);
-        strtab_size_non_padded += (uint32_t)slen;
+        memcpy(strtab + strtab_size, name, slen);
+        strtab_size += (uint32_t)slen;
     }
 
-    /* Calculate header size: 16 + (file_count * 64) + string_table */
-    uint32_t header_size_non_padded = 0x10u
-                                    + (uint32_t)fc * (uint32_t)sizeof(Hfs0FileEntry)
-                                    + strtab_size_non_padded;
-    uint32_t strtab_padding = hfs0_align_0x20(header_size_non_padded);
-    uint32_t strtab_size = strtab_size_non_padded + strtab_padding;
+    /* Actual header size with the raw (unpadded) string table. File data is
+     * aligned to HFS0_PARTITION_HEADER (0x8000) via a leading gap encoded in the
+     * entry offsets — exactly like nsz's Hfs0Stream (headerSize = 0x8000). */
+    uint32_t header_size = 0x10u
+                         + (uint32_t)fc * (uint32_t)sizeof(Hfs0FileEntry)
+                         + strtab_size;
+    if (header_size > HFS0_PARTITION_HEADER) {
+        snprintf(s_err, sizeof(s_err),
+                 "hfs0_write_header: header 0x%X exceeds 0x%X (too many files)",
+                 header_size, HFS0_PARTITION_HEADER);
+        return -1;
+    }
+    uint64_t data_gap = (uint64_t)HFS0_PARTITION_HEADER - header_size;
 
-    memset(strtab + strtab_size_non_padded, 0, strtab_padding);
-
-    /* Write HFS0 header (16 bytes) */
+    /* Write HFS0 header (16 bytes). string_table_size is the RAW length. */
     Hfs0Header hdr;
     hdr.magic             = HFS0_MAGIC;
     hdr.file_count        = (uint32_t)fc;
@@ -191,11 +185,12 @@ int hfs0_write_header(FILE *out_fp, Hfs0Container *container,
         return -1;
     }
 
-    /* Write HFS0 file entries (64 bytes each)
-     * NOTE: hashed_region_size and sha256_hash are set to zero
-     * (matching Python nsz reference implementation behavior)
+    /* Write HFS0 file entries (64 bytes each). Entry offsets are relative to the
+     * data area (end of raw header) and start after the alignment gap, so the
+     * first file lands at absolute 0x8000.
+     * NOTE: hashed_region_size and sha256_hash stay zero (nsz reference behavior).
      */
-    uint64_t cur_offset = 0;
+    uint64_t cur_offset = data_gap;
     for (int i = 0; i < fc; i++) {
         Hfs0FileEntry e;
         memset(&e, 0, sizeof(e));  /* Zero entire structure first */
@@ -214,10 +209,26 @@ int hfs0_write_header(FILE *out_fp, Hfs0Container *container,
         cur_offset += new_file_sizes[i];
     }
 
-    /* Write string table (with padding) */
+    /* Write the raw string table (no padding) */
     if (fwrite(strtab, 1, strtab_size, out_fp) != strtab_size) {
         snprintf(s_err, sizeof(s_err), "hfs0_write_header: write strtab failed");
         return -3;
+    }
+
+    /* Pad with zeros up to 0x8000 so the first file is aligned */
+    if (data_gap > 0) {
+        uint8_t zero_buf[4096];
+        memset(zero_buf, 0, sizeof(zero_buf));
+        uint64_t remaining = data_gap;
+        while (remaining > 0) {
+            uint32_t chunk = remaining < sizeof(zero_buf)
+                           ? (uint32_t)remaining : (uint32_t)sizeof(zero_buf);
+            if (fwrite(zero_buf, 1, chunk, out_fp) != chunk) {
+                snprintf(s_err, sizeof(s_err), "hfs0_write_header: write gap failed");
+                return -4;
+            }
+            remaining -= chunk;
+        }
     }
 
     return 0;
