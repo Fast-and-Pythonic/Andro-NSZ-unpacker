@@ -117,3 +117,81 @@ log looks "empty/old" — look at the on-screen log and logcat, not the file.
 adds a failure line. Folder mode isn't affected — there statuses go through
 `FolderProcessor`.
 **How to spot:** a file in the queue shows "Done" even though the log has an `ERROR` for it.
+
+## G09: Spurious `Unresolved reference` errors from a dropped Kotlin compile daemon
+**Symptom:** `:app:compileDebugKotlin` fails with `Unresolved reference` for
+known-good, **unchanged** imported top-level functions (seen here: `getUriSize`,
+`resolveToFilePath`, `countAllFiles`) — typically only in the file you just edited,
+while class imports from the same packages resolve fine. In the log, next to the
+errors: `e: Daemon compilation failed: Could not connect to Kotlin compile daemon`.
+**Root cause:** the Kotlin compile daemon dropped its connection mid-build, and the
+incremental analyzer emitted a bogus unresolved-reference cascade on package-level
+**function** imports. The symbols exist and compile — this is not a code error.
+**Fix:** clean rebuild to reset incremental state — Android Studio: Build → Clean
+Project, then Rebuild Project; if it persists, File → Invalidate Caches / Restart.
+A fresh CLI build of the same tree compiles successfully (see
+[conventions.md](conventions.md) "Build and checks").
+**How to spot:** the "missing" symbols are used elsewhere without error and you
+didn't touch them; only function imports are flagged, class imports are fine; the
+"Could not connect to Kotlin compile daemon" line is present. Contrast: a *real*
+error names a symbol you actually changed or removed.
+
+## G10: Folder mode — verify falsely fails with "cannot parse NSP container"
+**Symptom:** parallel folder NSZ→NSP marks nearly every file failed with
+`Verification failed: verify: cannot parse NSP container (code: -9)` and deletes the
+output; the same files in single-file mode pass.
+**Root cause:** the post-conversion verify (`nativeVerifyNsp` → `pfs0_parse`)
+reopened the just-written output via a fresh `fopen("/proc/self/fd/N")` **while the
+write descriptor was still open**. Under folder mode's parallel conversions this
+races on FUSE-backed scoped storage — the fresh read handle can observe uncommitted
+data, so the PFS0 header read fails. Sequential single-file mode doesn't hit it. It
+was compounded by folder mode treating a verify failure as fatal (throw + delete).
+**Fix:** [FolderProcessor.kt](../app/src/main/java/com/androNSZ/fs/FolderProcessor.kt)
+`convertDirect` — close the write pfd **first** (forces the provider to flush),
+reopen a fresh read-only descriptor from the output Uri for verify, and make verify
+**non-fatal** (WARN, keep output; mirrors single-file mode). Related input-side trap:
+**G03**. Verification model — [status.md](status.md).
+**How to spot:** the inner NCAs all report `[VERIFIED]`/`[NCA_HASH]` (content is
+fine), yet the final NSP re-parse fails — and only under parallelism.
+
+## G11: CNMT verification config is global — set it before conversions start
+**Symptom:** verification silently uses the wrong mode (falls back to the filename
+check, or hashes when the toggle is off), or a data race if it were changed mid-batch.
+**Root cause:** `nca_verify_config_set` in
+[nca_cnmt.c](../app/src/main/cpp/nca_cnmt.c) stores the enable flag, `header_key` and
+`key_area_key_application_*` in a **process-global** struct, read (never written) by all
+concurrent per-file conversions under `BATCH_CONCURRENCY`. It is populated once from
+`nativeSetVerification`, which the ViewModel calls **before** launching a batch/folder
+job. Calling a conversion without setting it first leaves the native default (enabled,
+no keys → filename fallback) — safe, but not CNMT verification. Changing it mid-batch
+would be an unsynchronised write.
+**Fix / contract:** always call `NszConverter.nativeSetVerification(enabled, headerKey,
+keyAreaKeys)` once per job, before the first `convert`/`convertXcz` (see
+[MainViewModel.kt](../app/src/main/java/com/androNSZ/viewmodel/MainViewModel.kt)
+`startBatchConversion` / `startFolderConversion`). Never re-set it while files are
+converting. The single settings source makes a differing mid-batch value unreachable in
+practice.
+**Edge cases that fall back to the filename check (`VERIFIED … (by name)`), by design:**
+META NCAs with a non-zero rights-ID (title-key crypto — doesn't occur in practice) and
+NCA2 META headers (ancient; the sequential 6-sector XTS decrypt mis-reads their FS
+headers). Both are guarded → fallback, never a crash.
+
+## G12: Gradle test worker can't connect — `BindException` on `:testDebugUnitTest`
+**Symptom:** `:app:testDebugUnitTest` dies with `Test process encountered an unexpected
+problem … finished with non-zero exit value 1`; with `--info`, `ConnectException: Could
+not connect to server … BindException: Cannot assign requested address`. Compile/build
+tasks succeed — only the forked test JVM fails.
+**Root cause:** same localhost IPv4/IPv6 mismatch as the Gradle daemon (G09-adjacent /
+[conventions.md](conventions.md) "Daemon won't connect"), but the **test executor is a
+separate forked JVM** that does **not** inherit `GRADLE_OPTS`, so
+`-Djava.net.preferIPv4Stack=true` set there never reaches it.
+**Fix:** export `_JAVA_OPTIONS="-Djava.net.preferIPv4Stack=true"` (inherited by every
+JVM, including forked workers) alongside the usual `JAVA_HOME`/`GRADLE_OPTS`:
+```powershell
+$env:JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+$env:GRADLE_OPTS="-Djava.net.preferIPv4Stack=true"
+$env:_JAVA_OPTIONS="-Djava.net.preferIPv4Stack=true"
+.\gradlew.bat :app:testDebugUnitTest --offline
+```
+Android Studio's bundled runner handles this itself; the workaround is only for headless
+CLI test runs.

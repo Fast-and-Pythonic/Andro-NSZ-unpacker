@@ -1,7 +1,9 @@
 package com.androNSZ.data
 
+import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
+import androidx.core.net.toUri
 import androidx.datastore.core.DataStore
 import android.content.SharedPreferences
 import androidx.datastore.preferences.core.Preferences
@@ -19,6 +21,9 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 class SettingsRepository private constructor(private val context: Context) {
 
    companion object {
+      // The stored context is always the application context (see getInstance),
+      // so this singleton never leaks an Activity/Service context.
+      @SuppressLint("StaticFieldLeak")
       @Volatile
       private var INSTANCE: SettingsRepository? = null
 
@@ -34,6 +39,7 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val THEME_KEY = "theme_mode"
       private const val ACCENT_MODE_KEY = "accent_mode"
       private const val ACCENT_COLOR_KEY = "accent_color"
+      private const val VERIFICATION_KEY = "verification_enabled"
       // Default custom accent = the app's built-in purple (Purple40).
       const val DEFAULT_ACCENT_COLOR = 0xFF6650A4.toInt()
    }
@@ -81,6 +87,14 @@ class SettingsRepository private constructor(private val context: Context) {
       langPrefs.edit().putInt(ACCENT_COLOR_KEY, color).apply()
    }
 
+   // Output verification defaults to ON: CNMT verification is nearly free
+   // (SHA-256 overlaps decompression) and non-fatal.
+   fun getVerificationEnabled(): Boolean = langPrefs.getBoolean(VERIFICATION_KEY, true)
+
+   fun saveVerificationEnabled(enabled: Boolean) {
+      langPrefs.edit().putBoolean(VERIFICATION_KEY, enabled).apply()
+   }
+
    val statsFormatFlow: Flow<StatsFormat> = context.dataStore.data
       .map { preferences ->
          val formatString = preferences[STATS_FORMAT_KEY] ?: StatsFormat.DETAILED.name
@@ -93,7 +107,7 @@ class SettingsRepository private constructor(private val context: Context) {
 
    val outputFolderUriFlow: Flow<Uri?> = context.dataStore.data
       .map { preferences ->
-         preferences[OUTPUT_FOLDER_KEY]?.let { Uri.parse(it) }
+         preferences[OUTPUT_FOLDER_KEY]?.let { it.toUri() }
       }
 
    suspend fun saveStatsFormat(format: StatsFormat) {

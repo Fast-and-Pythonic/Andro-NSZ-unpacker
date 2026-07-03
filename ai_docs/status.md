@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-01)
+# Status (updated: 2026-07-03)
 
 ## Working
 
@@ -35,10 +35,11 @@
   Still unverified is **full** XCI (key area at 0x0, header at 0x1000): the reference
   doesn't round-trip it, there's no byte reference — needs a real sample before release
   promises (see [gotchas.md](gotchas.md) G06).
-- **Filename verification is not authoritative.** The content-id in the name is half the
-  NCA hash; the correct check is against the CNMT (A12). A mismatch is currently
-  non-fatal (doesn't delete the output) but also not a guarantee. Don't return
-  `NCZ_ERR_HASH_MISMATCH` on this path.
+- **Verification is CNMT-based, with a filename fallback (A12).** The engine reads the
+  full expected NCA hashes from the input's CNMT and checks each unpacked NCA against
+  them. Only when keys are missing / the META NCA can't be parsed does it fall back to
+  the (non-authoritative) filename content-id check, marked `VERIFIED … (by name)`. A
+  mismatch stays non-fatal in both modes — never return `NCZ_ERR_HASH_MISMATCH` here.
 - **Writing folder results straight into a SAF descriptor.** Folder mode writes output
   via `/proc/self/fd` into an arbitrary folder (not just Downloads). On rare firmwares
   FUSE failures are possible — input has a temp fallback, output does not.
@@ -57,16 +58,28 @@
   Currently BROKEN, not in `stable`. `stable` uses file-level batch parallelism. Reason
   deferred: instability; the perf target is already met by other means.
 - **Verification roadmap** (see [architecture.md](architecture.md) A12):
-  1. an enable/disable verification setting — probably **off** by default (low error
-     probability; other nsz developers often disable it);
-  2. proper CNMT-based verification (full NCA hash vs `Cnmt.contentEntries[].hash`), as
-     in the reference;
+  1. ~~enable/disable verification setting~~ — **done** (2026-07-03), default **ON**
+     (CNMT verify is authoritative and nearly free, so the earlier "probably off" no
+     longer applies);
+  2. ~~proper CNMT-based verification (full NCA hash vs `Cnmt.contentEntries[].hash`)~~ —
+     **done** (2026-07-03), [nca_cnmt.c](../app/src/main/cpp/nca_cnmt.c);
   3. per-core layout optimization: cores are currently paired (1 decompress + 1 verify);
      the idea — put all SHA-256 verification on 1–2 cores, ~6 of 8 on decompression, 1
-     for system/GUI.
+     for system/GUI. **Still deferred.**
 
 ## Decision log
 
+- 2026-07-03 — CNMT-based verification + a settings toggle (A12). New native module
+  `nca_cnmt.c` extracts full expected NCA hashes from the input's META NCA (XTS header →
+  ECB key-area unwrap with `key_area_key_application_XX` from prod.keys → CTR PFS0 →
+  CNMT); the 4 engine verify blocks now check set membership, falling back to the
+  filename check (`(by name)`) when keys/META are unavailable. New JNI
+  `nativeSetVerification`; `KeysParser.parseKeyAreaKeys`; a `verification_enabled`
+  setting (default ON) with a `Switch` in Settings. Mismatch stays non-fatal.
+- 2026-07-03 — folder-mode verify made reliable + non-fatal (G10): close the write
+  descriptor before reopening a fresh read-only fd for verify (a FUSE read/write race
+  under parallel conversions caused false `cannot parse NSP container`), and treat a
+  verify failure as a `WARN` that keeps the output, matching single-file mode.
 - 2026-07-01 — integrated PR #6 (manx98, first external contribution): empty
   HFS0-partition fix (`file_count == 0`, G07 — the cause of the XCZ→XCI failure);
   `is_content_id_named` (hex validation); output to `fd:N`/`/proc/self/fd`; output to a

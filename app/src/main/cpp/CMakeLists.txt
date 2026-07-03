@@ -51,6 +51,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     ncz_decompress.c
     ncz_engine.c
     nca_verifier.c
+    nca_cnmt.c
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
@@ -108,6 +109,7 @@ if(NOT CMAKE_SYSTEM_NAME STREQUAL "Android")
         async_writer.c
         ncz_decompress.c
         ncz_engine.c
+        nca_cnmt.c
     )
     target_compile_options(andro_nsz_cli PRIVATE
         -O3

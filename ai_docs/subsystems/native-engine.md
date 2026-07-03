@@ -22,6 +22,7 @@ Python reference nicoboss/nsz.
 | `aes_xts.c` | AES-128-XTS for decrypting the NCA header (0x200 sectors, IEEE 1619) |
 | `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
 | `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS of the header, "NCA3" magic check, SHA-256 of sections |
+| `nca_cnmt.c` | CNMT verification: extract full expected NCA hashes from the input's META NCA (`CnmtHashSet`); global config `nca_verify_config_set`. See [../architecture.md](../architecture.md) A12 |
 | `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps |
 | `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
@@ -42,6 +43,12 @@ nca_verifier.c      (separate entry point via JNI)
  ├─ aes_xts.c
  └─ sha256.c
 
+nca_cnmt.c          (called by ncz_engine.c; config set via JNI)
+ ├─ aes_xts.c        (NCA header)
+ ├─ aes_ctr.c        (PFS0 section)
+ ├─ sha256.c
+ └─ (own AES-128-ECB core for the key-area unwrap)
+
 nsz_debug.c         (used everywhere)
 ```
 
@@ -50,10 +57,14 @@ nsz_debug.c         (used everywhere)
 **`ncz_convert_nsz_to_nsp()`** (NSZ→NSP):
 1. Parse the input PFS0.
 2. Pre-scan NCZ files → decompressed sizes.
+2b. Extract expected NCA hashes from the input's CNMT into a `CnmtHashSet`
+   (`cnmt_extract_hashes_pfs0`), unless verification is off or keys are missing.
 3. Write the new PFS0 header with updated sizes.
 4. Per file: NCZ → decompress, otherwise → copy.
-5. SHA-256 check against the filename (hex prefix). **Non-fatal** — a mismatch warns
-   (`WARN`) and keeps the output; see [../architecture.md](../architecture.md) A12.
+5. SHA-256 check: `should_hash` decides whether to hash; `report_hash_result` checks
+   set membership (CNMT) or, as a fallback, the filename hex prefix (`… (by name)`).
+   **Non-fatal** — a mismatch warns (`WARN`) and keeps the output; see
+   [../architecture.md](../architecture.md) A12.
 6. On a real error — remove the partial output (but not for `/dev/null` / fd sinks).
 
 **`ncz_convert_xcz_to_xci()`** (XCZ→XCI): an XCI is a **nested** HFS0 (root →
@@ -69,7 +80,9 @@ update/normal/secure/logo sub-partitions → NCA/NCZ files), mirroring
    `XCI_ROOT_HFS0_OFFSET=0xF000`, the root HFS0 at 0xF000 (with new partition sizes). The
    layout is an exact copy of `XciStream`.
 5. Per sub-partition: write the nested HFS0 header (aligned to 0x8000), then the files
-   (NCZ → decompress via `ncz_decompress`, otherwise → copy), NCA SHA-256 check (non-fatal, A12).
+   (NCZ → decompress via `ncz_decompress`, otherwise → copy), NCA SHA-256 check against
+   that partition's own `CnmtHashSet` (the secure partition carries the META NCA;
+   others fall back to the filename check) — non-fatal, A12.
 6. On error — remove the partial output. (XCI hashes/`hfs0HeaderHash` are not recomputed —
    as in the reference, which copies the header verbatim. ⚠️ The reference doesn't
    round-trip full XCI — no byte reference, needs a real sample; see [../gotchas.md](../gotchas.md) G06.)
@@ -82,7 +95,8 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 |---------------|-------------|
 | `nativeConvert(input, output, progressCb, statusCb): Int` | NSZ → NSP |
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
-| `nativeVerifyNsp(nspPath, headerKey): String?` | NCA verification in an NSP |
+| `nativeVerifyNsp(nspPath, headerKey): String?` | NCA verification in an NSP (structural: section-header hashes) |
+| `nativeSetVerification(enabled, headerKey, keyAreaKeys)` | Set CNMT verification config once before a batch (global, read-only during conversion — [../gotchas.md](../gotchas.md) G11) |
 | `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log |
 | `nativeCancel()` | Cancellation request |
 | `nativeErrorString(code): String` | Error code → text |
@@ -93,8 +107,10 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 **Callbacks:**
 - `ProgressCallback.onProgress(done, total)` — bytes of decompressed output.
 - `StatusCallback.onStatus(tag, msg)` — structured messages. Tags (native):
-  `OPEN`, `EXISTS`, `HEAD`, `NCA_HASH`, `VERIFIED`, `WARN`, `PATH`, `OK`, `SUCCESS`,
-  `CANCELLED`, `ERROR`. Kotlin additionally uses `FILE_START`, `FOLDER`, `NSZ`, `INFO`.
+  `OPEN`, `EXISTS`, `HEAD`, `VERIFY`, `NCA_HASH`, `VERIFIED`, `WARN`, `PATH`, `OK`,
+  `SUCCESS`, `CANCELLED`, `ERROR`. Kotlin additionally uses `FILE_START`, `FOLDER`,
+  `NSZ`, `INFO`. (`VERIFY` = a verification-mode summary line, e.g. "CNMT verification:
+  N expected hashes".)
 
 ## Error codes (`nsz_types.h`)
 

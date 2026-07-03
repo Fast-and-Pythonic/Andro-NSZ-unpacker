@@ -2,13 +2,8 @@ package com.androNSZ.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-val Purple80 = Color(0xFFD0BCFF)
-val PurpleGrey80 = Color(0xFFCCC2DC)
-val Pink80 = Color(0xFFEFB8C8)
-
+// Default custom-accent seed / brand purple (see SettingsRepository.DEFAULT_ACCENT_COLOR).
 val Purple40 = Color(0xFF6650a4)
-val PurpleGrey40 = Color(0xFF625b71)
-val Pink40 = Color(0xFF7D5260)
 
 // "Done" status accent. A mid green that stays readable on the surfaceVariant
 // card in both light and dark themes.

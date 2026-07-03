@@ -4,17 +4,28 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.input.nestedscroll.NestedScrollConnection
+import androidx.compose.ui.input.nestedscroll.NestedScrollSource
+import androidx.compose.ui.input.nestedscroll.nestedScroll
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -26,6 +37,7 @@ import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
 import com.androNSZ.ui.components.StatusLogPanel
+import com.androNSZ.ui.components.simpleVerticalScrollbar
 import com.androNSZ.ui.theme.SuccessGreen
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.util.fmtBytes
@@ -48,10 +60,19 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
       }
    }
 
+   // Before unpacking starts the queue owns the whole screen: it fills the space
+   // above the (bottom-pinned) unpack button and the page itself does not scroll.
+   // Once conversion begins — and afterwards, while the progress card and log are
+   // shown — the queue shrinks to a bounded box and the whole screen becomes
+   // scrollable so every element stays reachable.
+   val expanded = !vm.isConverting && vm.progress == null
+   val scrollState = rememberScrollState()
+
    Column(
       modifier = Modifier
          .fillMaxSize()
          .padding(padding)
+         .then(if (expanded) Modifier else Modifier.verticalScroll(scrollState))
          .padding(all = 16.dp),
       verticalArrangement = Arrangement.spacedBy(8.dp)
    ) {
@@ -71,8 +92,29 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
             style = MaterialTheme.typography.titleMedium,
          )
 
+         val listState = rememberLazyListState()
+         // Keep list scroll self-contained inside the now-scrollable page: swallow
+         // any residual scroll so a gesture over the queue doesn't bleed into the
+         // outer verticalScroll. Same trick as StatusLogPanel.
+         val consumeResidualScroll = remember {
+            object : NestedScrollConnection {
+               override fun onPostScroll(
+                  consumed: Offset,
+                  available: Offset,
+                  source: NestedScrollSource
+               ): Offset = available
+            }
+         }
+         // Idle: fill all remaining space (weight) so the button sits at the bottom.
+         // Converting/done: bounded box that shares the screen with the other cards.
+         val queueSize = if (expanded) Modifier.weight(1f)
+                         else Modifier.heightIn(min = 160.dp, max = 320.dp)
          LazyColumn(
-            modifier = Modifier.weight(1f),
+            state = listState,
+            modifier = queueSize
+               .nestedScroll(consumeResidualScroll)
+               .simpleVerticalScrollbar(listState),
+            contentPadding = PaddingValues(end = 8.dp),
             verticalArrangement = Arrangement.spacedBy(8.dp)
          ) {
             items(vm.fileQueue.size) { index ->
@@ -86,7 +128,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
       } else {
          Box(
             modifier = Modifier
-               .weight(1f)
+               .then(if (expanded) Modifier.weight(1f) else Modifier.height(160.dp))
                .fillMaxWidth(),
             contentAlignment = Alignment.Center
          ) {
@@ -274,6 +316,9 @@ private fun MetricText(text: String) {
    )
 }
 
+/** Font size of the stats line in every queue card (both completed and pending states). */
+private val QueueStatsFontSize = 12.sp
+
 @Composable
 fun FileQueueItem(
    file: FileEntry,
@@ -328,42 +373,94 @@ fun FileQueueItem(
             // a separator inside a string resource won't match: Android collapses its
             // double spaces to one, making that gap visibly narrower.)
             val sep = "  |  "
-            Text(
-               text = buildAnnotatedString {
-                  if (file.status == FileStatus.Completed && file.unpackDurationMs != null) {
-                     // Готово | Время | Скорость | размер до → размер после
-                     withStyle(SpanStyle(color = SuccessGreen)) { append(statusText) }
-                     append(sep)
-                     append(fmtDuration(file.unpackDurationMs))
-                     append(sep)
-                     append("%.1f MB/s".format(file.unpackSpeedMBps ?: 0.0))
-                     val after = file.unpackedSize
-                     if (after != null && after > 0L) {
-                        append(sep)
-                        if (file.fileSize > 0L) {
-                           append("${fmtBytes(file.fileSize)} → ${fmtBytes(after)}")
-                        } else {
-                           append(fmtBytes(after))
-                        }
-                     }
-                  } else {
-                     // Pending / converting / failed: size | status.
+            val statsColor = MaterialTheme.colorScheme.onSurfaceVariant
+            if (file.status == FileStatus.Completed && file.unpackDurationMs != null) {
+               // Готово | Время | Скорость | размер до → размер после.
+               // The "before → after" size segment is kept whole: if it doesn't
+               // fit, it moves to its own line as a unit (never split mid-value)
+               // and the "|" before it is dropped, so no separator dangles after
+               // the speed. See QueueStatsLine.
+               val head = buildAnnotatedString {
+                  withStyle(SpanStyle(color = SuccessGreen)) { append(statusText) }
+                  append(sep)
+                  append(fmtDuration(file.unpackDurationMs))
+                  append(sep)
+                  append("%.1f MB/s".format(file.unpackSpeedMBps ?: 0.0))
+               }
+               val after = file.unpackedSize
+               val sizes = if (after != null && after > 0L) {
+                  if (file.fileSize > 0L) "${fmtBytes(file.fileSize)} → ${fmtBytes(after)}"
+                  else fmtBytes(after)
+               } else null
+               QueueStatsLine(head = head, sizes = sizes, color = statsColor)
+            } else {
+               // Pending / converting / failed: size | status.
+               Text(
+                  text = buildAnnotatedString {
                      if (sizeText != null) {
                         append(sizeText)
                         append(sep)
                      }
                      append(statusText)
-                  }
-               },
-               style = MaterialTheme.typography.bodyMedium,
-               color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
+                  },
+                  style = MaterialTheme.typography.bodyMedium,
+                  fontSize = QueueStatsFontSize,
+                  color = statsColor
+               )
+            }
          }
 
          if (enabled && file.status == FileStatus.Pending) {
             IconButton(onClick = onRemove) {
                Icon(Icons.Filled.Close, stringResource(R.string.action_delete))
             }
+         }
+      }
+   }
+}
+
+/**
+ * Renders a completed file's stats as "[head] | [sizes]". When the whole line fits
+ * the available width it stays on one line; otherwise [sizes] (e.g. "1.2 GB → 3.4 GB")
+ * moves to its own line as a single unit and the separator before it is dropped —
+ * so the value never splits across lines and no "|" dangles after the speed.
+ *
+ * The decision is measured against a fixed one-line string, so it is stable (no
+ * flicker from the separator changing what fits).
+ */
+@Composable
+private fun QueueStatsLine(
+   head: AnnotatedString,
+   sizes: String?,
+   color: Color,
+   sep: String = "  |  "
+) {
+   val style = MaterialTheme.typography.bodyMedium.copy(
+      fontSize = QueueStatsFontSize,
+      color = color
+   )
+   if (sizes == null) {
+      Text(text = head, style = style)
+      return
+   }
+   val measurer = rememberTextMeasurer()
+   val oneLine = buildAnnotatedString {
+      append(head)
+      append(sep)
+      append(sizes)
+   }
+   BoxWithConstraints {
+      val fitsOneLine = measurer.measure(
+         text = oneLine,
+         style = style,
+         softWrap = false
+      ).size.width <= this@BoxWithConstraints.constraints.maxWidth
+      if (fitsOneLine) {
+         Text(text = oneLine, style = style, maxLines = 1, softWrap = false)
+      } else {
+         Column {
+            Text(text = head, style = style)
+            Text(text = sizes, style = style, maxLines = 1, softWrap = false)
          }
       }
    }

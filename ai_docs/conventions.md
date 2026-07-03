@@ -75,6 +75,42 @@ Commands — from the project root (PowerShell). Ordered fast to full:
 - Full run in one command: `.\gradlew.bat :app:build` (slower, harder to localize
   the failing step).
 
+### CLI prerequisites & troubleshooting
+
+Android Studio's Build menu is the primary path (it uses its bundled JBR 21 and
+handles the daemon). The notes below are for headless / agent CLI builds.
+
+- **JDK 21 toolchain (required).** The build needs a JDK 21 toolchain. Point Gradle
+  at a local JDK 21 (installed here:
+  `C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot`) via `JAVA_HOME` or a project
+  flag:
+  ```powershell
+  $env:JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+  # or, without changing the environment:
+  .\gradlew.bat :app:compileDebugKotlin `
+     "-Porg.gradle.java.installations.paths=C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+  ```
+  Missing 21 (offline) → `Unable to download toolchain … languageVersion=21`.
+- **Offline.** Add `--offline` when there's no network, so Gradle doesn't hang
+  trying to fetch the toolchain (foojay) or dependencies.
+- **Daemon won't connect** — `Could not connect to the Gradle daemon`, even though
+  the daemon log says "Daemon server started": a localhost IPv4/IPv6 mismatch. Force
+  IPv4: `$env:GRADLE_OPTS="-Djava.net.preferIPv4Stack=true"`.
+- **Journal cache lock** — `Timeout waiting to lock journal cache
+  (…\.gradle\caches\journal-1)`: another Gradle instance is running (usually Android
+  Studio). Don't run a CLI build concurrently with AS; stop stray daemons with
+  `.\gradlew.bat --stop`.
+- **Benign:** the `CXX5304 … SDK XML version 4` NDK warning is ignorable.
+- Confusing `Unresolved reference` errors on code you didn't change are usually a
+  dropped Kotlin daemon, not a real error — see [gotchas.md](gotchas.md) **G09**.
+
+Known-good offline CLI invocation (run only when AS isn't building):
+```powershell
+$env:JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+$env:GRADLE_OPTS="-Djava.net.preferIPv4Stack=true"
+.\gradlew.bat :app:compileDebugKotlin --offline
+```
+
 ## Manual scenario checks
 
 A build is not enough for runtime logic. Check on a device/emulator. Example

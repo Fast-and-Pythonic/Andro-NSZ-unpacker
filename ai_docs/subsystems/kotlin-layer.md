@@ -68,21 +68,33 @@ A singleton over `libAndroNSZ`. `convert()` (NSZ→NSP) and `convertXcz()` (XCZ�
    `/proc/self/fd/<fd>`.
 3. `nativeConvert`/`nativeConvertXcz`, progress is streamed via `callbackFlow`
    (throttling — A09).
-4. Verify via `nativeVerifyNsp` (if header_key is present).
+4. Verify via `nativeVerifyNsp` (if header_key is present). CNMT verification proper runs
+   **inside** the native engine and is configured once per job (see MainViewModel below);
+   it isn't a separate Kotlin call.
 5. Temp cleanup; on a FUSE failure — fall back to a temp copy and retry (G03).
+
+`startBatchConversion`/`startFolderConversion` in **MainViewModel** parse the keys
+(`KeysParser.parseHeaderKey` + `parseKeyAreaKeys`) and call
+`NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)` **once**
+before launching the job (global native config, read-only during conversion — G11). When
+the toggle is off, the post-conversion `nativeVerifyNsp` is skipped too (a null
+`verifyKey` is passed into `convert`/`convertXcz`).
 
 ## Other modules
 
 - **Constants.kt** — `PROGRESS_BAR_UPDATE_INTERVAL_MS=100`,
   `PROGRESS_NUMERIC_UPDATE_INTERVAL_MS=500` (A09).
-- **data/SettingsRepository.kt** — a singleton. `language` in SharedPreferences
-  (synchronous), `statsFormat`/`outputFolderUri` — in DataStore (Flow).
+- **data/SettingsRepository.kt** — a singleton. `language`/`theme`/`accent`/
+  `verification_enabled` in SharedPreferences (synchronous — read at startup and at
+  conversion start), `statsFormat`/`outputFolderUri` — in DataStore (Flow).
+  `verification_enabled` defaults to **ON** (A12).
 - **model/** — `ConversionMode` (None/SingleFiles/FolderMode), `StatsFormat`
   (COMPACT/COMPACT2/COMPACT3/DETAILED), `ConversionProgress` (done/total/speed),
   `FileEntry` (uri/name/size/status), `FolderConversionResult` (operation types and
   summary), `FolderStructure`/`FileNode`, `LogEntry`, `Screen`.
 - **nut/** — `KeysManager` (stores prod.keys in `filesDir`), `KeysParser` (extracts
-  `header_key`, 32 bytes).
+  `header_key` (32 bytes) and, for CNMT verification, every `key_area_key_application_XX`
+  via `parseKeyAreaKeys` → 17-byte records `[generation][16-byte key]`).
 - **fs/** — `FolderScanner` (recursive `DocumentsContract` walk → tree + NSZ/XCZ lists),
   `FolderProcessor` (NSZ→NSP, XCZ→XCI, everything else → copy; preserves structure,
   continues on errors). Since 2026-06-22 it mirrors the "new" file-mode pipeline: phase 1
