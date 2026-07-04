@@ -60,6 +60,27 @@ class KeysParserTest {
    }
 
    @Test
+   fun nonHexCharOfCorrectLengthIsRejectedNotThrown() {
+      // 32 chars but with a non-hex 'z': must be skipped, not crash hexToBytes.
+      val f = tempKeys("key_area_key_application_00 = 0123456789abcdef0123456789abcdez\n")
+      assertNull(KeysParser.parseKeyAreaKeys(f))
+   }
+
+   @Test
+   fun oneBadKeyDoesNotDropAValidOne() {
+      val f = tempKeys(
+         """
+         key_area_key_application_00 = 0123456789abcdef0123456789abcdez
+         key_area_key_application_01 = 000102030405060708090a0b0c0d0e0f
+         """.trimIndent()
+      )
+      val out = KeysParser.parseKeyAreaKeys(f)
+      assertNotNull(out)
+      assertEquals(17, out!!.size)            // only the valid record survives
+      assertEquals(0x01.toByte(), out[0])
+   }
+
+   @Test
    fun noApplicationKeysReturnsNull() {
       val f = tempKeys("header_key = 00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff\n")
       assertNull(KeysParser.parseKeyAreaKeys(f))

@@ -13,7 +13,7 @@ object KeysParser {
          val keyName = trimmed.substring(0, eq).trim()
          if (keyName == "header_key") {
             val hex = trimmed.substring(eq + 1).trim()
-            if (hex.length == 64 && hex.all { it.isLetterOrDigit() }) {
+            if (hex.length == 64 && hex.isHex()) {
                return hexToBytes(hex)
             }
          }
@@ -40,7 +40,7 @@ object KeysParser {
          if (genHex.length != 2) return@forEach
          val gen = genHex.toIntOrNull(16) ?: return@forEach
          val hex = trimmed.substring(eq + 1).trim()
-         if (hex.length == 32 && hex.all { it.isLetterOrDigit() }) {
+         if (hex.length == 32 && hex.isHex()) {
             records.add(byteArrayOf(gen.toByte()) + hexToBytes(hex))
          }
       }
@@ -49,6 +49,11 @@ object KeysParser {
       records.forEachIndexed { i, rec -> rec.copyInto(out, i * 17) }
       return out
    }
+
+   // Only 0-9/a-f/A-F: guards hexToBytes' toInt(16) against a NumberFormatException
+   // on a typo'd key (isLetterOrDigit would let g-z through).
+   private fun String.isHex(): Boolean =
+      isNotEmpty() && all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
 
    private fun hexToBytes(hex: String): ByteArray {
       val result = ByteArray(hex.length / 2)

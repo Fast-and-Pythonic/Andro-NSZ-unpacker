@@ -375,7 +375,7 @@ fun FileQueueItem(
             val sep = "  |  "
             val statsColor = MaterialTheme.colorScheme.onSurfaceVariant
             if (file.status == FileStatus.Completed && file.unpackDurationMs != null) {
-               // Готово | Время | Скорость | размер до → размер после.
+               // Completed | time | speed | size before → size after.
                // The "before → after" size segment is kept whole: if it doesn't
                // fit, it moves to its own line as a unit (never split mid-value)
                // and the "|" before it is dropped, so no separator dangles after
