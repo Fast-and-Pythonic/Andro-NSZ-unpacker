@@ -80,7 +80,7 @@ Recursively process entire folders while preserving structure.
 - **NSZ → NSP Conversion**: Decompress compressed packages with full NCA support
 - **XCZ → XCI Conversion**: Decompress compressed cartridge images
 - **Three Conversion Modes**:
-  - **Legacy Single File**: Quick one-file conversion
+  - **Single File**: Quick one-file conversion
   - **Batch Queue**: Add multiple files and convert them sequentially
   - **Folder Mode**: Recursive folder processing with structure preservation
 - **Optional NCA Verification**: Integrity checking after conversion (requires prod.keys)
@@ -88,12 +88,6 @@ Recursively process entire folders while preserving structure.
 - **Real-time Progress**: Live progress bars with speed metrics (MB/s)
 - **Cancellation Support**: Stop conversion at any time
 - **Status Logging**: Detailed operation log with tag-based filtering
-
-### User Interface
-- **Material 3 Design**: Modern Android UI with dynamic colors
-- **Touch-Optimized**: Gesture-friendly interface for mobile devices
-- **Multi-Language**: English and Russian localizations
-- **Dark/Light Theme**: Follows system theme automatically
 
 ### Technical Features
 - **Native C Engine**: High-performance conversion via JNI
@@ -104,6 +98,16 @@ Recursively process entire folders while preserving structure.
 - **Async Processing**: All operations run on background threads
 - **Error Resilience**: Batch operations continue despite individual file failures
 - **Auto-Cleanup**: Temporary files managed automatically
+
+**Typical Performance:**
+- Speed varies by device CPU and file compression ratio
+- Snapdragon 8s gen 4: 200-400 MB/s for single file, ~ 800 MB/s for parallel multiple files
+
+### User Interface
+- **Material 3 Design**: Modern Android UI with dynamic colors
+- **Touch-Optimized**: Gesture-friendly interface for mobile devices
+- **Multi-Language**: English and Russian localizations
+- **Dark/Light Theme**: Follows system theme automatically
 
 ## Requirements
 
@@ -190,11 +194,6 @@ Recursively process entire folders while preserving structure.
 - **Zero-copy I/O**: Direct file descriptor passing to native layer
 - **Streaming Processing**: Memory-efficient chunk-based decompression
 - **Progress Throttling**: UI updates limited to 10 Hz for smooth animation
-
-**Typical Performance:**
-- Speed varies by device CPU and file compression ratio
-- Snapdragon 8s gen 4 - 30-40 MB/s
-- Storage I/O is often the bottleneck, not CPU
 
 ## Building from Source
 
