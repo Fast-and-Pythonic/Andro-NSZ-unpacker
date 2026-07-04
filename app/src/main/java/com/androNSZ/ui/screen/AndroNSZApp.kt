@@ -79,6 +79,8 @@ fun AndroNSZApp(vm: MainViewModel) {
             currentAccentColor = vm.accentColorArgb,
             onAccentModeChange = { vm.saveAccentMode(context, it) },
             onAccentColorChange = { vm.saveAccentColor(context, it) },
+            currentVerification = vm.verificationEnabled,
+            onVerificationChange = { vm.saveVerificationEnabled(context, it) },
             onBack = { vm.navigateBack() }
          )
       }

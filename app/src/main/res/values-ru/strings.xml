@@ -8,8 +8,7 @@
     <string name="action_add_files">Добавить файлы</string>
     <string name="action_select_files">Выбрать файлы</string>
     <string name="action_select_folder">Выбрать папку</string>
-    <string name="action_convert">Конвертировать</string>
-    <string name="action_convert_files">Конвертировать %d файл(ов)</string>
+    <string name="action_convert_files">Распаковать %d файл(ов)</string>
     <string name="action_convert_folder">Конвертировать папку</string>
     <string name="action_delete">Удалить</string>
     <string name="action_show_structure">Показать структуру папки</string>
@@ -23,7 +22,6 @@
     <string name="action_install_prod_keys">Установить prod.keys</string>
     <string name="action_change_prod_keys">Изменить prod.keys</string>
     <string name="action_remove_prod_keys">Удалить prod.keys</string>
-    <string name="action_change_output_folder">Изменить папку назначения</string>
 
     <!-- Labels -->
     <string name="label_current_file">Текущий файл</string>
@@ -59,14 +57,12 @@
 
     <!-- Format strings -->
     <string name="format_files_queued">Файлов в очереди: %d</string>
-    <string name="format_file_n_of_m">Файл %1$d из %2$d</string>
     <string name="format_files_processed">Файлы: %1$d / %2$d</string>
     <string name="format_nsz_files_count">NSZ файлов: %d</string>
     <string name="format_total_files_count">Всего файлов: %d</string>
     <string name="format_size">Размер: %s</string>
     <string name="format_files_completed">Обработано %1$d из %2$d файлов</string>
     <string name="format_average_speed">Средняя суммарная скорость: %1$.1f MB/s</string>
-    <string name="format_success_rate">Успешно: %1$d из %2$d NSZ файлов (%3$s)</string>
     <string name="format_failed_count">Ошибок: %d файл(ов)</string>
     <string name="format_log_path">Лог: %s</string>
     <string name="format_debug_log">Лог отладки: %s</string>
@@ -78,14 +74,6 @@
     <!-- Content descriptions -->
     <string name="cd_back">Назад</string>
     <string name="cd_settings">Настройки</string>
-
-    <!-- XCZ format support -->
-    <string name="converting_xcz">Конвертация XCZ в XCI…</string>
-    <string name="xcz_format">XCZ (Сжатый картридж)</string>
-    <string name="xci_format">XCI (Образ картриджа Nintendo)</string>
-    <string name="invalid_xcz">Неверный формат XCZ файла</string>
-    <string name="format_xcz_files_count">XCZ файлов: %d</string>
-    <string name="error_conversion_verify_failed_xci">Конвертация завершена, но верификация XCI не прошла:\n%s</string>
 
     <!-- Detailed folder statistics -->
     <string name="stats_title">Статистика обработки</string>
@@ -118,6 +106,8 @@
     <string name="accent_system">Системный</string>
     <string name="accent_custom">Вручную</string>
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
+    <string name="settings_verification">Проверка результата</string>
+    <string name="settings_verification_desc">Сверять хеши распакованных NCA с метаданными CNMT. Почти бесплатно; несовпадения выводятся как предупреждения, а результат всегда сохраняется.</string>
 
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>

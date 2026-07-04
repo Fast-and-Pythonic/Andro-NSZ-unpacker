@@ -68,7 +68,6 @@ fun Uri.toDisplayPath(): String {
     val segment = lastPathSegment ?: return toString()
     val colonIdx = segment.indexOf(':')
     return if (colonIdx >= 0) {
-        val path = segment.substring(colonIdx + 1)
-        if (path.isEmpty()) "/" else path
+        segment.substring(colonIdx + 1).ifEmpty { "/" }
     } else segment
 }

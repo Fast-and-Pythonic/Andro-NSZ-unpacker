@@ -8,8 +8,7 @@
     <string name="action_add_files">Add files</string>
     <string name="action_select_files">Select files</string>
     <string name="action_select_folder">Select folder</string>
-    <string name="action_convert">Convert</string>
-    <string name="action_convert_files">Convert %d file(s)</string>
+    <string name="action_convert_files">Unpack %d file(s)</string>
     <string name="action_convert_folder">Convert folder</string>
     <string name="action_delete">Delete</string>
     <string name="action_show_structure">Show folder structure</string>
@@ -23,7 +22,6 @@
     <string name="action_install_prod_keys">Install prod.keys</string>
     <string name="action_change_prod_keys">Change prod.keys</string>
     <string name="action_remove_prod_keys">Remove prod.keys</string>
-    <string name="action_change_output_folder">Change output folder</string>
 
     <!-- Labels -->
     <string name="label_current_file">Current file</string>
@@ -59,14 +57,12 @@
 
     <!-- Format strings -->
     <string name="format_files_queued">Files queued: %d</string>
-    <string name="format_file_n_of_m">File %1$d of %2$d</string>
     <string name="format_files_processed">Files: %1$d / %2$d</string>
     <string name="format_nsz_files_count">NSZ files: %d</string>
     <string name="format_total_files_count">Total files: %d</string>
     <string name="format_size">Size: %s</string>
     <string name="format_files_completed">Processed %1$d of %2$d files</string>
     <string name="format_average_speed">Average total speed: %1$.1f MB/s</string>
-    <string name="format_success_rate">Successful: %1$d of %2$d NSZ files (%3$s)</string>
     <string name="format_failed_count">Failed: %d file(s)</string>
     <string name="format_log_path">Log: %s</string>
     <string name="format_debug_log">Debug log: %s</string>
@@ -78,14 +74,6 @@
     <!-- Content descriptions -->
     <string name="cd_back">Back</string>
     <string name="cd_settings">Settings</string>
-
-    <!-- XCZ format support -->
-    <string name="converting_xcz">Converting XCZ to XCI…</string>
-    <string name="xcz_format">XCZ (Compressed Cartridge)</string>
-    <string name="xci_format">XCI (Nintendo Cartridge Image)</string>
-    <string name="invalid_xcz">Invalid XCZ file format</string>
-    <string name="format_xcz_files_count">XCZ files: %d</string>
-    <string name="error_conversion_verify_failed_xci">Conversion complete, but XCI verification failed:\n%s</string>
 
     <!-- Detailed folder statistics -->
     <string name="stats_title">Processing Statistics</string>
@@ -118,6 +106,8 @@
     <string name="accent_system">System</string>
     <string name="accent_custom">Manual</string>
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
+    <string name="settings_verification">Output verification</string>
+    <string name="settings_verification_desc">Verify unpacked NCA hashes against the CNMT metadata. Nearly free; mismatches are reported as warnings, and the output is always kept.</string>
 
     <!-- About screen -->
     <string name="action_about_app">About the app</string>

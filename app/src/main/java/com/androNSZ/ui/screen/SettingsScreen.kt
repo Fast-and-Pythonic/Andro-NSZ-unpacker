@@ -38,6 +38,8 @@ fun SettingsScreen(
    currentAccentColor: Int,
    onAccentModeChange: (AccentMode) -> Unit,
    onAccentColorChange: (Int) -> Unit,
+   currentVerification: Boolean,
+   onVerificationChange: (Boolean) -> Unit,
    onBack: () -> Unit
 ) {
    BackHandler { onBack() }
@@ -398,6 +400,41 @@ fun SettingsScreen(
                      colors = OutlinedTextFieldDefaults.colors()
                   )
                }
+            }
+         }
+
+         Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+               containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+         ) {
+            Column(
+               modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+               verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = stringResource(R.string.settings_verification),
+                     style = MaterialTheme.typography.titleMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                  Switch(
+                     checked = currentVerification,
+                     onCheckedChange = onVerificationChange
+                  )
+               }
+               Text(
+                  text = stringResource(R.string.settings_verification_desc),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
             }
          }
       }

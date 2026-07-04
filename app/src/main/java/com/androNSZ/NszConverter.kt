@@ -6,7 +6,6 @@ import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.DocumentsContract
 import android.provider.MediaStore
-import com.androNSZ.fs.TempFileManager
 import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
@@ -57,6 +56,19 @@ object NszConverter {
 
     @JvmStatic
     external fun nativeVerifyNsp(nspPath: String, headerKey: ByteArray): String?
+
+    /**
+     * Configure CNMT verification once before a batch/folder job. Read-only in
+     * native code during conversion. [headerKey] is 32 bytes (or null);
+     * [keyAreaKeys] is a flat array of 17-byte records (generation + 16-byte key)
+     * from [com.androNSZ.nut.KeysParser.parseKeyAreaKeys] (or null).
+     */
+    @JvmStatic
+    external fun nativeSetVerification(
+        enabled: Boolean,
+        headerKey: ByteArray?,
+        keyAreaKeys: ByteArray?
+    )
 
     interface ProgressCallback {
         fun onProgress(done: Long, total: Long)
@@ -136,6 +148,8 @@ object NszConverter {
             val createdOutputUri = createOutputUri(context, outputBaseUri, outputName)
             outputUri = createdOutputUri
 
+            // Recycle lint can't see it, but pfd is closed in the finally block below.
+            @Suppress("Recycle")
             val openedPfd = withContext(Dispatchers.IO) {
                 context.contentResolver.openFileDescriptor(createdOutputUri, "rw")
             } ?: throw NszConversionException(-1, "Cannot open output file descriptor")
@@ -257,6 +271,8 @@ object NszConverter {
             val createdOutputUri = createOutputUri(context, outputBaseUri, outputName)
             outputUri = createdOutputUri
 
+            // Recycle lint can't see it, but pfd is closed in the finally block below.
+            @Suppress("Recycle")
             val openedPfd = withContext(Dispatchers.IO) {
                 context.contentResolver.openFileDescriptor(createdOutputUri, "rw")
             } ?: throw NszConversionException(-1, "Cannot open output file descriptor")

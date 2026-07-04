@@ -1,7 +1,7 @@
 package com.androNSZ.ui.screen
 
 import android.content.Intent
-import android.net.Uri
+import androidx.core.net.toUri
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -94,7 +94,7 @@ fun AboutScreen(
                         LinkItem(
                             text = stringResource(R.string.about_link_andro_nsz),
                             onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker"))
+                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker".toUri())
                                 context.startActivity(intent)
                             }
                         )
@@ -105,7 +105,7 @@ fun AboutScreen(
                         LinkItem(
                             text = stringResource(R.string.about_link_nsz),
                             onClick = {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/nicoboss/nsz"))
+                                val intent = Intent(Intent.ACTION_VIEW, "https://github.com/nicoboss/nsz".toUri())
                                 context.startActivity(intent)
                             }
                         )

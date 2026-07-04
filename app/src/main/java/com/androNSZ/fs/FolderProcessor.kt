@@ -377,8 +377,10 @@ object FolderProcessor {
     * descriptor with `fd:N` (no input copy). [isXcz] selects XCZ → XCI
     * (`nativeConvertXcz`) over NSZ → NSP (`nativeConvert`). Mirrors
     * [NszConverter.convert], including the FUSE temp-copy fallback. NSP output is
-    * verified via SHA-256 when [headerKey] is present; XCI verification is not yet
-    * implemented and is skipped. Throws [NszConversionException] on failure.
+    * verified via SHA-256 when [headerKey] is present, but verification is
+    * non-fatal: a failure is logged as a warning and the output is kept (mirrors
+    * single-file mode). XCI verification is not yet implemented and is skipped.
+    * Throws [NszConversionException] only on an actual conversion failure.
     */
    private fun convertDirect(
       context: Context,
@@ -479,16 +481,47 @@ object FolderProcessor {
             throw NszConversionException(result, NszConverter.nativeErrorString(result))
          }
 
-         // Verification is free (hardware SHA-256). A mismatch means a corrupt
-         // output, so treat it as a conversion failure. XCI verification is not
-         // implemented yet, so it is skipped for XCZ.
+         // The output is fully written. Close the write descriptor now so the
+         // file is committed to storage before we reopen it to verify. Reopening
+         // a FUSE-backed scoped-storage file for read while its write handle is
+         // still open can race under parallel conversions — the fresh read handle
+         // may observe uncommitted data, surfacing as a bogus "cannot parse NSP
+         // container". Closing the writer first forces the provider to flush.
+         runCatching { outPfd?.close() }
+         outPfd = null
+
+         // Verification is free (hardware SHA-256) but a weak, non-fatal check: a
+         // failure is reported as a warning and never discards the output (mirrors
+         // single-file mode). It runs against a freshly opened read descriptor so
+         // it always sees committed data. XCI verification is not implemented yet.
          if (!isXcz && headerKey != null) {
-            val verifyError = NszConverter.nativeVerifyNsp(outputPath, headerKey)
-            if (verifyError != null) {
-               statusCallback?.onStatus("ERROR", "Verification failed for $outputName: $verifyError")
-               throw NszConversionException(NszConverter.ERR_HASH_MISMATCH, "Verification failed: $verifyError")
+            var verifyPfd: ParcelFileDescriptor? = null
+            try {
+               val df = destFile
+               val du = destUri
+               val verifyPath: String? = when {
+                  df != null -> df.absolutePath
+                  du != null -> {
+                     verifyPfd = context.contentResolver.openFileDescriptor(du, "r")
+                     verifyPfd?.let { "/proc/self/fd/${it.fd}" }
+                  }
+                  else -> null
+               }
+               if (verifyPath == null) {
+                  statusCallback?.onStatus("WARN", "Verification skipped (cannot reopen output): $outputName")
+               } else {
+                  val verifyError = NszConverter.nativeVerifyNsp(verifyPath, headerKey)
+                  if (verifyError != null) {
+                     statusCallback?.onStatus("WARN", "Verification warning (output kept) for $outputName: $verifyError")
+                  } else {
+                     statusCallback?.onStatus(tag, "Verified: $outputName")
+                  }
+               }
+            } catch (e: Exception) {
+               statusCallback?.onStatus("WARN", "Verification error (output kept) for $outputName: ${e.message}")
+            } finally {
+               runCatching { verifyPfd?.close() }
             }
-            statusCallback?.onStatus(tag, "Verified: $outputName")
          } else if (!isXcz) {
             statusCallback?.onStatus(tag, "Verification skipped (no header key): $outputName")
          }

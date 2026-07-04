@@ -4,6 +4,7 @@
 #include <android/log.h>
 #include "ncz_engine.h"
 #include "nca_verifier.h"
+#include "nca_cnmt.h"
 #include "nsz_debug.h"
 
 #define LOG_TAG "AndroNSZ"
@@ -247,6 +248,46 @@ Java_com_androNSZ_NszConverter_nativeErrorString(
 {
     (void)clazz;
     return (*env)->NewStringUTF(env, ncz_error_string((int)error_code));
+}
+
+/* ---------- JNI: setVerification ----------
+ * Configure CNMT verification once before a batch starts. header_key is 32
+ * bytes (or null); kak_records is N*17 bytes: [generation u8][key 16B] per
+ * key_area_key_application_XX (or null). Read-only during conversion. */
+JNIEXPORT void JNICALL
+Java_com_androNSZ_NszConverter_nativeSetVerification(
+        JNIEnv *env, jclass clazz,
+        jboolean enabled,
+        jbyteArray j_header_key,
+        jbyteArray j_kak_records)
+{
+    (void)clazz;
+
+    uint8_t  header_key[32];
+    uint8_t *header_ptr = NULL;
+    if (j_header_key != NULL && (*env)->GetArrayLength(env, j_header_key) == 32) {
+        (*env)->GetByteArrayRegion(env, j_header_key, 0, 32, (jbyte *)header_key);
+        header_ptr = header_key;
+    }
+
+    uint8_t *kak = NULL;
+    int      kak_count = 0;
+    if (j_kak_records != NULL) {
+        jsize len = (*env)->GetArrayLength(env, j_kak_records);
+        if (len > 0 && len % 17 == 0) {
+            kak = malloc((size_t)len);
+            if (kak) {
+                (*env)->GetByteArrayRegion(env, j_kak_records, 0, len, (jbyte *)kak);
+                kak_count = len / 17;
+            }
+        }
+    }
+
+    nca_verify_config_set(enabled ? 1 : 0, header_ptr, kak, kak_count);
+    LOGI("setVerification: enabled=%d header_key=%d kak_count=%d",
+         (int)enabled, header_ptr ? 1 : 0, kak_count);
+
+    free(kak);
 }
 
 /* ---------- JNI: verifyNsp ---------- */

@@ -3,7 +3,7 @@
 Non-trivial technical decisions. Format: `A##` — a stable anchor for links.
 Most of A01–A07 are parts of one performance story: unpacking 2 GB was sped up
 from ~50 s to ~7 s (parity with the desktop reference), and on 9 GB it beats the
-competitor. Verification is essentially free (and now non-fatal — see A12).
+competitor. Verification is essentially free, CNMT-based and non-fatal — see A12.
 
 ## A01: zstd is built with `-O3` even in debug
 **Context:** the zstd dependency in debug inherits `CMAKE_BUILD_TYPE=Debug` → `-O0`
@@ -128,17 +128,36 @@ nsz (as already achieved for NSP). We used to write compact HFS0 headers and cop
 already zero (the compressor uses the same `XciStream`), so nothing is lost. Full XCI
 see [gotchas.md](gotchas.md) G06.
 
-## A12: SHA-256 verification — non-fatal, filename check as an approximation
-**Context:** the engine compares the first 16 bytes of the decompressed NCA's SHA-256
-against the content-id in the filename. But the content-id is only **half** the NCA
-hash; reference nsz compares the **full** hash against the ones expected from the CNMT
-(`FileExistingChecks.ExtractHashes` → `Cnmt.contentEntries[].hash`), and uses the
-filename only as a fallback for a standalone `.ncz`. So a filename mismatch is **not
-authoritative**.
-**Decision:** a mismatch is no longer fatal. Instead of `NCZ_ERR_HASH_MISMATCH` (which
-deleted the finished output via `remove`), the engine emits `WARN` "hash mismatch
-(output kept)" and keeps the file. `is_content_id_named` now checks the 32 chars are
-hex. See [ncz_engine.c](../app/src/main/cpp/ncz_engine.c) (4 verification blocks).
-**Consequences:** the footgun is gone (a false mismatch used to delete a good file).
-Real CNMT-based verification, an enable/disable setting, and per-core optimization are
-deferred ([status.md](status.md) Deferred). Came in with the PR #6 integration.
+## A12: CNMT-based verification (non-fatal), with a filename fallback and a toggle
+**Context:** the engine used to compare only the first 16 bytes of a decompressed NCA's
+SHA-256 against the content-id in the filename. But the content-id is only **half** the
+NCA hash, so it is **not authoritative**. Reference nsz instead reads the **full** hash
+of every content NCA from the CNMT (`FileExistingChecks.ExtractHashes` →
+`Cnmt.contentEntries[].hash`) and checks each unpacked NCA's full SHA-256 for set
+membership.
+**Decision:** port the CNMT approach. Before per-file processing, the engine scans the
+**input** container for META NCAs (`*.cnmt.nca`, stored uncompressed but encrypted),
+decrypts them and collects the expected hashes into a `CnmtHashSet`
+([nca_cnmt.c](../app/src/main/cpp/nca_cnmt.c)). During conversion each NCA's full
+SHA-256 (already computed streaming, essentially free) is checked against the set. The
+CNMT NCA itself is excluded from the set (it never lists itself). XCZ builds one set
+**per HFS0 partition** (the secure partition carries the META).
+**Reading the CNMT** reuses existing crypto: AES-XTS header decrypt with `header_key`
+(as in `nca_verifier.c`), then AES-128-**ECB** unwrap of the key area with
+`key_area_key_application_XX` read **directly** from prod.keys (XX = key generation =
+`max(cryptoType, cryptoType2) − 1`; no master-key/KEK derivation, unlike the reference),
+then AES-CTR of the PFS0 section (key = key-area entry index 2, counter = section nonce
+reversed). `nca_cnmt.c` carries its own one-block AES-ECB core because the primitives in
+`aes_xts.c` are `static` (and that file must not be edited).
+**Fallback ladder:** CNMT → filename → off. If keys are missing or the META NCA can't be
+parsed, the engine falls back to the legacy content-id check and marks it `VERIFIED …
+(by name)`. A settings toggle (`should_hash`) can disable hashing entirely — the point
+of the toggle, since that is what the SHA cost buys. Default **ON**: CNMT verification is
+now authoritative *and* nearly free, so there's no reason to ship it off (this supersedes
+the roadmap's earlier "probably off").
+**Semantics:** a mismatch stays **non-fatal** — `WARN` "hash mismatch (output kept)", the
+file is never deleted. Config is pushed once per batch via
+`nativeSetVerification(enabled, header_key, key_area_keys)` and is read-only during
+conversion (safe under `BATCH_CONCURRENCY` — see [gotchas.md](gotchas.md)). The
+structural `nca_verify_nsp` post-pass (section-header hashes) is kept, orthogonal.
+**Deferred:** per-core layout optimization (all SHA on 1–2 cores) — [status.md](status.md).

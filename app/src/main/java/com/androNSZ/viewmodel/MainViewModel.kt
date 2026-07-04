@@ -2,6 +2,8 @@ package com.androNSZ.viewmodel
 
 import android.net.Uri
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
@@ -26,6 +28,7 @@ import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -54,21 +57,17 @@ class MainViewModel : ViewModel() {
    val currentScreen: Screen get() = _screenStack.last()
 
    fun navigateTo(screen: Screen) { _screenStack.add(screen) }
-   fun navigateBack() { if (_screenStack.size > 1) _screenStack.removeLast() }
+   fun navigateBack() { if (_screenStack.size > 1) _screenStack.removeAt(_screenStack.lastIndex) }
 
    var conversionMode by mutableStateOf<ConversionMode>(ConversionMode.None)
 
-   // Single file mode (legacy)
-   var selectedUri   by mutableStateOf<Uri?>(null)
-   var selectedName  by mutableStateOf<String?>(null)
-
    // Batch files mode
    val fileQueue = mutableStateListOf<FileEntry>()
-   var currentFileIndex by mutableStateOf(0)
+   var currentFileIndex by mutableIntStateOf(0)
    var batchOverallProgress by mutableStateOf<ConversionProgress?>(null)
    var batchCurrentFileName by mutableStateOf<String?>(null)
-   var batchProcessedFiles by mutableStateOf(0)
-   var batchTotalFiles by mutableStateOf(0)
+   var batchProcessedFiles by mutableIntStateOf(0)
+   var batchTotalFiles by mutableIntStateOf(0)
    // Average unpack speed across all completed files, set once the batch finishes.
    var batchAverageSpeedMBps by mutableStateOf<Double?>(null)
 
@@ -89,8 +88,8 @@ class MainViewModel : ViewModel() {
    // One entry per file currently converting in parallel (drives the per-file
    // bars, mirroring [activeFileProgress] in batch mode).
    var folderActiveFiles by mutableStateOf<List<ActiveFolderFile>>(emptyList())
-   var folderProcessedFiles by mutableStateOf(0)
-   var folderTotalFiles by mutableStateOf(0)
+   var folderProcessedFiles by mutableIntStateOf(0)
+   var folderTotalFiles by mutableIntStateOf(0)
    // Average unpack speed across the whole run, set once the folder finishes.
    var folderAverageSpeedMBps by mutableStateOf<Double?>(null)
 
@@ -99,7 +98,7 @@ class MainViewModel : ViewModel() {
    var progress      by mutableStateOf<ConversionProgress?>(null)
 
    // Elapsed-time tracking (for speed comparison)
-   var elapsedMs by mutableStateOf(0L)
+   var elapsedMs by mutableLongStateOf(0L)
    private var timerJob: Job? = null
    private var timerStartMs = 0L
 
@@ -110,7 +109,7 @@ class MainViewModel : ViewModel() {
       timerJob = viewModelScope.launch {
          while (isActive) {
             elapsedMs = System.currentTimeMillis() - timerStartMs
-            delay(250)
+            delay(250.milliseconds)
          }
       }
    }
@@ -138,7 +137,8 @@ class MainViewModel : ViewModel() {
    var appLanguage by mutableStateOf("system")
    var themeMode by mutableStateOf(ThemeMode.SYSTEM)
    var accentMode by mutableStateOf(AccentMode.SYSTEM)
-   var accentColorArgb by mutableStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
+   var accentColorArgb by mutableIntStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
+   var verificationEnabled by mutableStateOf(true)
 
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
@@ -166,6 +166,7 @@ class MainViewModel : ViewModel() {
       themeMode = SettingsRepository.getInstance(context).getThemeMode()
       accentMode = SettingsRepository.getInstance(context).getAccentMode()
       accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
+      verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
    }
 
    fun saveLanguage(context: android.content.Context, lang: String) {
@@ -181,6 +182,11 @@ class MainViewModel : ViewModel() {
    fun saveAccentMode(context: android.content.Context, mode: AccentMode) {
       accentMode = mode
       SettingsRepository.getInstance(context).saveAccentMode(mode)
+   }
+
+   fun saveVerificationEnabled(context: android.content.Context, enabled: Boolean) {
+      verificationEnabled = enabled
+      SettingsRepository.getInstance(context).saveVerificationEnabled(enabled)
    }
 
    fun saveAccentColor(context: android.content.Context, colorArgb: Int) {
@@ -225,73 +231,6 @@ class MainViewModel : ViewModel() {
             StatsFormat.DETAILED -> buildDetailedStats(context, summary, lastLogPathMsg)
             else -> null
          }
-      }
-   }
-
-   fun pickFile(uri: Uri, displayName: String) {
-      selectedUri   = uri
-      selectedName  = displayName
-      statusMessage = null
-      isSuccess     = false
-      progress      = null
-      statusLog.clear()
-   }
-
-   fun startConversion(context: android.content.Context) {
-      val uri = selectedUri ?: return
-      isConverting  = true
-      isSuccess     = false
-      statusMessage = null
-      progress      = ConversionProgress(0L, 0L, 0.0)
-      statusLog.clear()
-      startTimer()
-
-      val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
-
-      val statusCb = object : NszConverter.StatusCallback {
-         override fun onStatus(tag: String, msg: String) {
-            viewModelScope.launch(Dispatchers.Main.immediate) {
-               statusLog.add(LogEntry(tag, msg.trim()))
-            }
-         }
-      }
-
-      viewModelScope.launch {
-         NszConverter.convert(context, uri, headerKey, outputFolderUri, statusCb)
-            .catch { e ->
-               isConverting = false
-               withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
-               val logPath = NszConverter.lastDebugLogPath
-               val logSuffix = if (logPath != null) "\n${context.getString(R.string.format_debug_log, logPath)}" else ""
-               statusMessage = when (e) {
-                  is CancelledException     -> context.getString(R.string.status_cancelled) + logSuffix
-                  is NszConversionException -> context.getString(R.string.error_general, e.message ?: "") + logSuffix
-                  else                      -> context.getString(R.string.error_unexpected, e.message ?: "") + logSuffix
-               }
-            }
-            .collect { p ->
-               progress = p
-            }
-         if (isConverting) {
-            isConverting = false
-            withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
-            val logPath      = NszConverter.lastDebugLogPath
-            val logSuffix    = if (logPath != null) "\n${context.getString(R.string.format_debug_log, logPath)}" else ""
-            val verifyError   = NszConverter.lastVerifyError
-            val verifySkipped = NszConverter.lastVerifySkipped
-
-            isSuccess     = true
-            statusMessage = when {
-               verifyError != null ->
-                  context.getString(R.string.error_conversion_verify_failed, verifyError) + logSuffix
-                     .also { isSuccess = false }
-               verifySkipped ->
-                  context.getString(R.string.result_done_no_verify) + logSuffix
-               else ->
-                  context.getString(R.string.result_done_verified) + logSuffix
-            }
-         }
-         stopTimer()
       }
    }
 
@@ -376,8 +315,6 @@ class MainViewModel : ViewModel() {
       fileQueue.clear()
       folderStructure = null
       folderFileEntries.clear()
-      selectedUri = null
-      selectedName = null
       isConverting = false
       stopTimer()
       elapsedMs = 0L
@@ -418,6 +355,11 @@ class MainViewModel : ViewModel() {
       startTimer()
 
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
+      val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
+      // Configure CNMT verification once for the whole batch (read-only in native
+      // code while files convert). When disabled, skip the post-conversion check too.
+      NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
+      val verifyKey = if (verificationEnabled) headerKey else null
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -482,9 +424,9 @@ class MainViewModel : ViewModel() {
                      try {
                         // XCZ → XCI, everything else → NSZ → NSP.
                         val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
-                           NszConverter.convertXcz(context, file.uri, headerKey, outputFolderUri, statusCb)
+                           NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb)
                         } else {
-                           NszConverter.convert(context, file.uri, headerKey, outputFolderUri, statusCb)
+                           NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb)
                         }
                         // NB: no .catch here — a failure must propagate to the
                         // surrounding try/catch so the file stays Failed. Swallowing
@@ -583,6 +525,10 @@ class MainViewModel : ViewModel() {
       folderLogPath = folderLogWriter?.logFilePath
 
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
+      val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
+      // Configure CNMT verification once for the whole run (see startBatchConversion).
+      NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
+      val verifyKey = if (verificationEnabled) headerKey else null
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -603,7 +549,7 @@ class MainViewModel : ViewModel() {
             val result = FolderProcessor.processFolder(
                context,
                structure,
-               headerKey,
+               verifyKey,
                outputFolderUri,
                { update ->
                   folderOverallProgress = update.overallProgress
@@ -624,7 +570,7 @@ class MainViewModel : ViewModel() {
 
             val logPathMsg = if (folderLogPath != null) "\n${context.getString(R.string.format_log_path, folderLogPath!!)}" else ""
 
-            result.onSuccess { (outputUri, summary) ->
+            result.onSuccess { (_, summary) ->
                val successRate = if (summary.totalFiles > 0) {
                   (summary.successCount * 100) / summary.totalFiles
                } else 100

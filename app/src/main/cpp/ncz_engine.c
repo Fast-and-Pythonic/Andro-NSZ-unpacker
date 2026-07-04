@@ -8,6 +8,7 @@
 #include "ncz.h"
 #include "ncz_decompress.h"
 #include "sha256.h"
+#include "nca_cnmt.h"
 #include "nsz_debug.h"
 
 #include <stdlib.h>
@@ -144,6 +145,82 @@ static void bytes_to_hex(const uint8_t *bytes, int n, char *out)
     out[n*2] = '\0';
 }
 
+/* Returns 1 if filename ends with .cnmt.nca / .cnmt.ncz (the META NCA). */
+static int is_cnmt_named(const char *name)
+{
+    size_t n = strlen(name);
+    if (n < 9) return 0;
+    return strcasecmp(name + n - 9, ".cnmt.nca") == 0 ||
+           strcasecmp(name + n - 9, ".cnmt.ncz") == 0;
+}
+
+/*
+ * Whether this file's SHA-256 should be computed for verification.
+ * - verification off        → never (this is what makes the toggle free);
+ * - CNMT hash set available  → every NCA except the META NCA itself;
+ * - fallback (no set)        → only content-id-named files (legacy check).
+ */
+static int should_hash(const char *name, const CnmtHashSet *set)
+{
+    if (!nca_verify_enabled()) return 0;
+    if (set && set->count > 0) {
+        return is_nca_file(name) && !is_cnmt_named(name);
+    }
+    return is_content_id_named(name);
+}
+
+/*
+ * Report the result of an NCA hash. With a CNMT set the digest is checked for
+ * membership (authoritative); without one it falls back to comparing against
+ * the filename content-id (partial — marked "(by name)"). A mismatch is
+ * non-fatal in both cases: WARN, output kept.
+ */
+static void report_hash_result(const char *name, const uint8_t digest[32],
+                               const CnmtHashSet *set,
+                               NczStatusCb status_cb, void *status_ctx)
+{
+    char hex[65];
+    bytes_to_hex(digest, 32, hex);
+
+#define EMIT(tag, ...) \
+    do { \
+        if (status_cb) { \
+            char _sb_[512]; \
+            snprintf(_sb_, sizeof(_sb_), __VA_ARGS__); \
+            status_cb(tag, _sb_, status_ctx); \
+        } \
+    } while (0)
+
+    EMIT("NCA_HASH", "   %s", hex);
+
+    if (set && set->count > 0) {
+        if (cnmt_hashset_contains(set, digest)) {
+            EMIT("VERIFIED", "   %s", name);
+        } else {
+            DBG("CNMT HASH MISMATCH '%s': %s not in set", name, hex);
+            EMIT("WARN", "   hash mismatch (output kept): %s", name);
+        }
+        return;
+    }
+
+    /* Fallback: compare against the content-id in the filename. */
+    char base[33] = {0};
+    const char *dot = strrchr(name, '.');
+    if (dot) {
+        size_t blen = (size_t)(dot - name);
+        if (blen > 32) blen = 32;
+        memcpy(base, name, blen);
+    }
+    if (strncasecmp(hex, base, 32) == 0) {
+        EMIT("VERIFIED", "   %s (by name)", name);
+    } else {
+        DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
+        EMIT("WARN", "   hash mismatch (output kept): %s", name);
+    }
+
+#undef EMIT
+}
+
 /* Copy helper with optional SHA-256 feed */
 static int copy_bytes(FILE *in, FILE *out, uint64_t size, Sha256Ctx *sha_ctx)
 {
@@ -242,17 +319,35 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         total_output_bytes += (int64_t)new_sizes[i];
     }
 
+    /* 2b. Extract expected NCA hashes from the CNMT (reference verification).
+     *     On any failure we fall back to the legacy filename check; hooks in
+     *     step 5 read cnmt_set.count to decide the mode. */
+    CnmtHashSet cnmt_set = {0};
+    if (!nca_verify_enabled()) {
+        EMIT("VERIFY", "   verification disabled in settings");
+    } else if (!nca_cnmt_keys_available()) {
+        EMIT("WARN", "   keys for CNMT missing — partial verification by filename");
+    } else {
+        int cnmt_rc = cnmt_extract_hashes_pfs0(in_fp, &container, &cnmt_set);
+        if (cnmt_rc == CNMT_OK) {
+            EMIT("VERIFY", "   CNMT verification: %d expected hashes", cnmt_set.count);
+        } else {
+            EMIT("WARN", "   CNMT unavailable (%s) — partial verification by filename",
+                 cnmt_reason(cnmt_rc));
+        }
+    }
+
     /* 3. Open output */
     FILE *out_fp = open_output_file(output_path);
     if (!out_fp) {
-        free(new_sizes); fclose(in_fp);
+        free(new_sizes); fclose(in_fp); cnmt_hashset_free(&cnmt_set);
         return NCZ_ERR_OPEN_OUTPUT;
     }
     setvbuf(out_fp, NULL, _IOFBF, IO_BUF_SIZE);
 
     /* 4. Write PFS0 header */
     if (pfs0_write_header(out_fp, &container, new_sizes) != 0) {
-        free(new_sizes); fclose(in_fp); fclose(out_fp);
+        free(new_sizes); fclose(in_fp); fclose(out_fp); cnmt_hashset_free(&cnmt_set);
         return NCZ_ERR_IO;
     }
 
@@ -267,43 +362,19 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         EMIT("EXISTS", "     %s", f->name);
 
         if (!f->is_ncz) {
-            /* Non-NCZ file: copy verbatim */
-            /*
-             * Hash verification: only for .nca files that are hash-named.
-             * Python reference: verifyFile = nspf._path.endswith('.nca')
-             *                   and not nspf._path.endswith('.cnmt.nca')
-             * We also skip non-NCA files (certs, tickets) to avoid the v1 bug.
-             */
-            int verify_nca = is_nca_file(f->name) && is_content_id_named(f->name);
+            /* Non-NCZ file: copy verbatim. Verify hashable NCAs (see should_hash). */
+            int hash_it = should_hash(f->name, &cnmt_set);
             Sha256Ctx sha_ctx;
-            if (verify_nca) sha256_init(&sha_ctx);
+            if (hash_it) sha256_init(&sha_ctx);
 
-            ret = copy_bytes(in_fp, out_fp, f->size, verify_nca ? &sha_ctx : NULL);
+            ret = copy_bytes(in_fp, out_fp, f->size, hash_it ? &sha_ctx : NULL);
             done_bytes += (int64_t)f->size;
             if (progress_cb) progress_cb(done_bytes, total_output_bytes, cb_ctx);
 
-            if (ret == NCZ_OK && verify_nca) {
+            if (ret == NCZ_OK && hash_it) {
                 uint8_t digest[32];
-                char hex[65];
                 sha256_final(&sha_ctx, digest);
-                bytes_to_hex(digest, 32, hex);
-
-                EMIT("NCA_HASH", "   %s", hex);
-
-                char base[33] = {0};
-                const char *dot = strrchr(f->name, '.');
-                if (dot) {
-                    size_t blen = (size_t)(dot - f->name);
-                    if (blen > 32) blen = 32;
-                    memcpy(base, f->name, blen);
-                }
-
-                if (strncasecmp(hex, base, 32) == 0) {
-                    EMIT("VERIFIED", "   %s", f->name);
-                } else {
-                    DBG("file[%d] HASH MISMATCH: expected=%s got=%s", i, base, hex);
-                    EMIT("WARN", "   hash mismatch (output kept): %s", f->name);
-                }
+                report_hash_result(f->name, digest, &cnmt_set, status_cb, status_ctx);
             }
             continue;
         }
@@ -314,12 +385,12 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
             (unsigned long long)f->size,
             (unsigned long long)new_sizes[i]);
 
-        int verify_nca = is_content_id_named(f->name);
+        int hash_it = should_hash(f->name, &cnmt_set);
         Sha256Ctx sha_ctx;
-        if (verify_nca) sha256_init(&sha_ctx);
+        if (hash_it) sha256_init(&sha_ctx);
 
         /* Copy NCA header verbatim (first 0x4000 bytes) */
-        ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, verify_nca ? &sha_ctx : NULL);
+        ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL);
         if (ret != NCZ_OK) break;
 
         /* Parse NCZ header at offset 0x4000 */
@@ -337,7 +408,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         /* Decompress using section-sequential algorithm */
         int64_t body_written = 0;
         ret = ncz_decompress(in_fp, out_fp, &hdr,
-                             verify_nca ? &sha_ctx : NULL,
+                             hash_it ? &sha_ctx : NULL,
                              &g_cancel,
                              progress_cb, cb_ctx,
                              total_output_bytes,
@@ -346,34 +417,17 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         ncz_free_header(&hdr);
         done_bytes += (int64_t)new_sizes[i];
 
-        if (ret == NCZ_OK && verify_nca) {
+        if (ret == NCZ_OK && hash_it) {
             uint8_t digest[32];
-            char hex[65];
             sha256_final(&sha_ctx, digest);
-            bytes_to_hex(digest, 32, hex);
-
-            EMIT("NCA_HASH", "   %s", hex);
-
-            char base[33] = {0};
-            const char *dot = strrchr(f->name, '.');
-            if (dot) {
-                size_t blen = (size_t)(dot - f->name);
-                if (blen > 32) blen = 32;
-                memcpy(base, f->name, blen);
-            }
-
-            if (strncasecmp(hex, base, 32) == 0) {
-                EMIT("VERIFIED", "   %s", f->name);
-            } else {
-                DBG("file[%d] HASH MISMATCH: expected=%s got=%s", i, base, hex);
-                EMIT("WARN", "   hash mismatch (output kept): %s", f->name);
-            }
+            report_hash_result(f->name, digest, &cnmt_set, status_cb, status_ctx);
         }
     }
 
     fclose(in_fp);
     fclose(out_fp);
     free(new_sizes);
+    cnmt_hashset_free(&cnmt_set);
 
     if (ret != NCZ_OK && ret != NCZ_ERR_CANCELLED) {
         DBG("conversion FAILED (ret=%d '%s') — removing partial output",
@@ -401,7 +455,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
 static int xcz_process_file(FILE *in_fp, FILE *out_fp,
                             const char *name, uint64_t f_size, int is_ncz,
                             uint64_t new_size, int64_t total_output_bytes,
-                            int64_t *done_bytes,
+                            int64_t *done_bytes, const CnmtHashSet *set,
                             NczProgressCb progress_cb, void *cb_ctx,
                             NczStatusCb status_cb, void *status_ctx)
 {
@@ -418,44 +472,28 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
     Sha256Ctx sha_ctx;
 
     if (!is_ncz) {
-        /* Non-NCZ file: copy verbatim. Verify only hash-named .nca files. */
-        int verify_nca = is_nca_file(name) && is_content_id_named(name);
-        if (verify_nca) sha256_init(&sha_ctx);
+        /* Non-NCZ file: copy verbatim. Verify hashable NCAs (see should_hash). */
+        int hash_it = should_hash(name, set);
+        if (hash_it) sha256_init(&sha_ctx);
 
-        ret = copy_bytes(in_fp, out_fp, f_size, verify_nca ? &sha_ctx : NULL);
+        ret = copy_bytes(in_fp, out_fp, f_size, hash_it ? &sha_ctx : NULL);
         *done_bytes += (int64_t)f_size;
         if (progress_cb) progress_cb(*done_bytes, total_output_bytes, cb_ctx);
 
-        if (ret == NCZ_OK && verify_nca) {
+        if (ret == NCZ_OK && hash_it) {
             uint8_t digest[32];
-            char hex[65];
             sha256_final(&sha_ctx, digest);
-            bytes_to_hex(digest, 32, hex);
-            EMIT("NCA_HASH", "   %s", hex);
-
-            char base[33] = {0};
-            const char *dot = strrchr(name, '.');
-            if (dot) {
-                size_t blen = (size_t)(dot - name);
-                if (blen > 32) blen = 32;
-                memcpy(base, name, blen);
-            }
-            if (strncasecmp(hex, base, 32) == 0) {
-                EMIT("VERIFIED", "   %s", name);
-            } else {
-                DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
-                EMIT("WARN", "   hash mismatch (output kept): %s", name);
-            }
+            report_hash_result(name, digest, set, status_cb, status_ctx);
         }
         return ret;
     }
 
     /* ── NCZ → NCA decompression ── */
-    int verify_nca = is_content_id_named(name);
-    if (verify_nca) sha256_init(&sha_ctx);
+    int hash_it = should_hash(name, set);
+    if (hash_it) sha256_init(&sha_ctx);
 
     /* Copy NCA header verbatim (first 0x4000 bytes) */
-    ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, verify_nca ? &sha_ctx : NULL);
+    ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL);
     if (ret != NCZ_OK) return ret;
 
     /* Parse NCZ header at offset 0x4000 */
@@ -469,7 +507,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
     /* Decompress using section-sequential algorithm */
     int64_t body_written = 0;
     ret = ncz_decompress(in_fp, out_fp, &hdr,
-                         verify_nca ? &sha_ctx : NULL,
+                         hash_it ? &sha_ctx : NULL,
                          &g_cancel,
                          progress_cb, cb_ctx,
                          total_output_bytes,
@@ -478,26 +516,10 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
     ncz_free_header(&hdr);
     *done_bytes += (int64_t)new_size;
 
-    if (ret == NCZ_OK && verify_nca) {
+    if (ret == NCZ_OK && hash_it) {
         uint8_t digest[32];
-        char hex[65];
         sha256_final(&sha_ctx, digest);
-        bytes_to_hex(digest, 32, hex);
-        EMIT("NCA_HASH", "   %s", hex);
-
-        char base[33] = {0};
-        const char *dot = strrchr(name, '.');
-        if (dot) {
-            size_t blen = (size_t)(dot - name);
-            if (blen > 32) blen = 32;
-            memcpy(base, name, blen);
-        }
-        if (strncasecmp(hex, base, 32) == 0) {
-            EMIT("VERIFIED", "   %s", name);
-        } else {
-            DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
-            EMIT("WARN", "   hash mismatch (output kept): %s", name);
-        }
+        report_hash_result(name, digest, set, status_cb, status_ctx);
     }
     return ret;
 
@@ -533,6 +555,7 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     Hfs0Container *inners          = NULL;   /* one inner HFS0 per sub-partition  */
     uint64_t     **inner_new_sizes = NULL;   /* [partition][file] output sizes    */
     uint64_t      *part_new_sizes  = NULL;   /* [partition] total partition size  */
+    CnmtHashSet   *part_sets       = NULL;   /* [partition] expected NCA hashes   */
     int            root_count      = 0;
     int            ret             = NCZ_OK;
     Hfs0Container  root;
@@ -600,7 +623,17 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     inners          = calloc((size_t)root_count, sizeof(Hfs0Container));
     inner_new_sizes = calloc((size_t)root_count, sizeof(uint64_t *));
     part_new_sizes  = calloc((size_t)root_count, sizeof(uint64_t));
-    if (!inners || !inner_new_sizes || !part_new_sizes) { ret = NCZ_ERR_OOM; goto done; }
+    part_sets       = calloc((size_t)root_count, sizeof(CnmtHashSet));
+    if (!inners || !inner_new_sizes || !part_new_sizes || !part_sets) {
+        ret = NCZ_ERR_OOM; goto done;
+    }
+
+    /* One CNMT verification note for the whole XCI (per-partition sets below). */
+    if (!nca_verify_enabled()) {
+        EMIT("VERIFY", "   verification disabled in settings");
+    } else if (!nca_cnmt_keys_available()) {
+        EMIT("WARN", "   keys for CNMT missing — partial verification by filename");
+    }
 
     /* 4. Pre-scan: for each sub-partition, parse its inner HFS0, compute every
      *    file's decompressed size, and the partition's new total size. */
@@ -643,6 +676,16 @@ int ncz_convert_xcz_to_xci(const char *input_path,
         total_output_bytes += (int64_t)part_new_sizes[p];
         DBG("partition[%d] '%s' new_size=%llu (%d files)",
             p, pf->name, (unsigned long long)part_new_sizes[p], inner->file_count);
+
+        /* Extract expected NCA hashes from this partition's CNMT (the secure
+         * partition carries the META NCA; others usually have none → fallback). */
+        if (nca_verify_enabled() && nca_cnmt_keys_available()) {
+            int cnmt_rc = cnmt_extract_hashes_hfs0(in_fp, inner, &part_sets[p]);
+            if (cnmt_rc == CNMT_OK) {
+                EMIT("VERIFY", "   CNMT verification (%s): %d expected hashes",
+                     pf->name, part_sets[p].count);
+            }
+        }
     }
 
     /* 5. Open output */
@@ -694,6 +737,7 @@ int ncz_convert_xcz_to_xci(const char *input_path,
             EMIT("EXISTS", "     %s", f->name);
             ret = xcz_process_file(in_fp, out_fp, f->name, f->size, f->is_ncz,
                                    inner_new_sizes[p][i], total_output_bytes, &done_bytes,
+                                   &part_sets[p],
                                    progress_cb, cb_ctx, status_cb, status_ctx);
         }
     }
@@ -704,6 +748,10 @@ done:
     if (inner_new_sizes) {
         for (int p = 0; p < root_count; p++) free(inner_new_sizes[p]);
         free(inner_new_sizes);
+    }
+    if (part_sets) {
+        for (int p = 0; p < root_count; p++) cnmt_hashset_free(&part_sets[p]);
+        free(part_sets);
     }
     free(inners);
     free(part_new_sizes);

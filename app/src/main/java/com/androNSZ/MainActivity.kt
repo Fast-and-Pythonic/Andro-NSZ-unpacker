@@ -12,7 +12,6 @@ import androidx.lifecycle.lifecycleScope
 import androidx.compose.ui.graphics.Color
 import com.androNSZ.data.SettingsRepository
 import com.androNSZ.fs.TempFileManager
-import com.androNSZ.model.AccentMode
 import com.androNSZ.model.ThemeMode
 import com.androNSZ.ui.screen.AndroNSZApp
 import com.androNSZ.ui.theme.AndroNSZTheme

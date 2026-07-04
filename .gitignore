@@ -20,3 +20,8 @@ nsz_debug.log
 nsz_folder_debug.log
 problems.txt
 .idea/deploymentTargetSelector.xml
+.kotlin/
+build errors.txt
+
+# IDE inspection results dump (not part of the project)
+/Big analysis of errors/
