@@ -69,6 +69,42 @@
 
 ## Decision log
 
+- 2026-07-07 — smart load distribution, step 2: **core-aware scheduler**
+  ([architecture.md](architecture.md) A13). Step 1's plain LPT measured *worse*
+  (~840→~700 MB/s) because order alone doesn't control which core takes which file.
+  New: `CpuTopology` (sysfs speed + cluster masks), `CoreScheduler` (LPT + greedy ECT +
+  makespan local search, static, "protect makespan" — no work-stealing), and native
+  `cpu_affinity.c` + `nativeSetThreadAffinity/Clear` pinning the decompress to a cluster
+  on the IO thread before `nativeConvert`. Engages only when the CPU is heterogeneous
+  and affinity works (EPERM → baseline); homogeneous/no-affinity → natural-order
+  semaphore. `convert*`/`convertDirect` gained `affinityMask`; `processFolder` gained
+  `smartDistribution` (replaces `largestFirst`). Unit tests: `CoreSchedulerTest`,
+  `CpuTopologyTest`. **Deferred:** speed calibration by measurement + guarded
+  work-stealing (hybrid); then SHA-256 per-core layout (A12 §3). New JNI methods are
+  additive; crypto/decompress untouched.
+- 2026-07-07 — smart load distribution, step 1: **LPT (largest-first)**
+  ([architecture.md](architecture.md) A07). Measurement confirmed decompression is
+  CPU-bound (1 worker ~250–360 MB/s → ~800 MB/s aggregate at ~6 cores), so the old
+  "write ceiling" assumption is wrong for ≤6 cores. Both batch and folder now create
+  their conversion coroutines in descending-size order; the fair `Semaphore` hands
+  permits to the largest files first, so a heavy file never trails on a slow core.
+  Gated by a **separate Settings toggle** `smart_distribution` (default ON; kept
+  toggleable for A/B measurement). `FolderProcessor.processFolder` gained a
+  `largestFirst` param. Kotlin-only — no native changes. **Next steps** (deferred):
+  (a) explicit big/little core affinity — new native `cpu_affinity.c` +
+  `nativeSetThreadAffinity` (`sched_setaffinity` on the IO thread before
+  `nativeConvert`) + a Kotlin `CpuTopology` reader (sysfs `cpu_capacity` /
+  `cpuinfo_max_freq`), largest files → big cluster, EPERM → silent fallback to plain
+  LPT, under the same toggle; (b) smart SHA-256 core layout (A12 §3).
+- 2026-07-07 — configurable decompression parallelism (measurement experiment,
+  [architecture.md](architecture.md) A07). `BATCH_CONCURRENCY`/`FOLDER_CONCURRENCY`
+  replaced by `MainViewModel.resolveConcurrency(verificationEnabled, override)`; a
+  Settings slider (`decompression_threads`, 0 = auto) can raise the worker count up to
+  the core count, **only when verification is off**. `FolderProcessor.processFolder`
+  now takes a `concurrency` param. Goal: test the A12 §3 premise (bottleneck = storage
+  write, not cores) before investing in `block-parallel-wip` or the "SHA on dedicated
+  cores" layout. Native code, crypto and `nativeSetVerification` untouched. Parallelism
+  is per-file — the slider only scales a queue/folder of several files.
 - 2026-07-03 — CNMT-based verification + a settings toggle (A12). New native module
   `nca_cnmt.c` extracts full expected NCA hashes from the input's META NCA (XTS header →
   ECB key-area unwrap with `key_area_key_application_XX` from prod.keys → CTR PFS0 →

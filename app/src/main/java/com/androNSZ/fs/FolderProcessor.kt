@@ -8,6 +8,7 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.androNSZ.NszConverter
 import com.androNSZ.model.*
+import com.androNSZ.util.CpuTopology
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.getUriSize
@@ -21,15 +22,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
-
-/**
- * How many files to convert in parallel in folder mode. Same rationale and
- * formula as batch mode (see MainViewModel.BATCH_CONCURRENCY): each file is a
- * single-core zstd+AES producer, so a few at once fill idle cores and disk
- * bandwidth, scaled down on low-end phones, capped at 3 (storage write ceiling).
- */
-private val FOLDER_CONCURRENCY: Int =
-   (Runtime.getRuntime().availableProcessors() / 2 - 1).coerceIn(1, 3)
 
 object FolderProcessor {
 
@@ -53,6 +45,14 @@ object FolderProcessor {
       structure: FolderStructure,
       headerKey: ByteArray?,
       outputBaseUri: Uri?,
+      // How many files to convert in parallel. Resolved by the caller
+      // (MainViewModel.resolveConcurrency): core-adaptive 1..3 by default, or an
+      // experimental override when verification is off.
+      concurrency: Int,
+      // Enable the core-aware scheduler (heavy files → fast cores, pinned) when the
+      // CPU is heterogeneous and affinity works; else a natural-order baseline. See
+      // MainViewModel.smartDistribution and CoreScheduler.
+      smartDistribution: Boolean,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
       // Per-file lifecycle updates for the "files to unpack" list (NSZ/XCZ only).
@@ -64,7 +64,7 @@ object FolderProcessor {
       statusCallback?.onStatus("INFO", "Total files in folder: ${structure.allFiles.size}")
       statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
       statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
-      statusCallback?.onStatus("INFO", "Parallelism: $FOLDER_CONCURRENCY")
+      statusCallback?.onStatus("INFO", "Parallelism: $concurrency")
 
       val outputFolderName = generateOutputFolderName(context, structure.rootUri, outputBaseUri)
       statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
@@ -118,125 +118,148 @@ object FolderProcessor {
             )
          }
 
-         // Phase 2: process the work items in parallel, bounded by a semaphore.
-         val sem = Semaphore(FOLDER_CONCURRENCY)
-         coroutineScope {
-            plan.indices.map { i ->
-               async {
-                  sem.withPermit {
-                     val item = plan[i]
-                     val fileSizeMB = item.size / 1024.0 / 1024.0
-                     val startTime = System.currentTimeMillis()
-                     val opType = when {
-                        item.isNsz -> FileOperationType.NSZ_CONVERSION
-                        item.isXcz -> FileOperationType.XCZ_CONVERSION
-                        else       -> FileOperationType.FILE_COPY
-                     }
-                     try {
-                        if (item.isNsz || item.isXcz) {
-                           // NSZ → NSP, XCZ → XCI. Both decompress straight into the
-                           // destination descriptor (no temp output + copy).
-                           val outputName = item.name.substringBeforeLast('.') +
-                              if (item.isXcz) ".xci" else ".nsp"
-                           val tag = if (item.isXcz) "XCZ" else "NSZ"
-                           statusCallback?.onStatus(tag, "Starting conversion: ${item.name} (%.2f MB)".format(fileSizeMB))
-                           fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Converting))
-                           val fileThrottler = ProgressThrottler()
+         // Phase 2: process the work items. One WorkItem's processing, shared by the
+         // core-aware scheduler and the baseline path. [affinityMask] pins the native
+         // decompress to a CPU cluster (null = no pinning).
+         suspend fun processOne(i: Int, affinityMask: Long?) {
+            val item = plan[i]
+            val fileSizeMB = item.size / 1024.0 / 1024.0
+            val startTime = System.currentTimeMillis()
+            val opType = when {
+               item.isNsz -> FileOperationType.NSZ_CONVERSION
+               item.isXcz -> FileOperationType.XCZ_CONVERSION
+               else       -> FileOperationType.FILE_COPY
+            }
+            try {
+               if (item.isNsz || item.isXcz) {
+                  // NSZ → NSP, XCZ → XCI. Both decompress straight into the
+                  // destination descriptor (no temp output + copy).
+                  val outputName = item.name.substringBeforeLast('.') +
+                     if (item.isXcz) ".xci" else ".nsp"
+                  val tag = if (item.isXcz) "XCZ" else "NSZ"
+                  statusCallback?.onStatus(tag, "Starting conversion: ${item.name} (%.2f MB)".format(fileSizeMB))
+                  fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Converting))
+                  val fileThrottler = ProgressThrottler()
 
-                           convertDirect(
-                              context, item.sourceUri, item.destParentUri, item.destRelativePath,
-                              outputName, item.isXcz, headerKey,
-                              { done, total ->
-                                 fileThrottler.sample(done, total)?.let { p ->
-                                    synchronized(lock) {
-                                       if (p.totalBytes > 0L) fileTotals[i] = p.totalBytes
-                                       perFileDone[i] = p.doneBytes.coerceIn(0L, fileTotals[i])
-                                       active[i] = ActiveFolderFile(item.name, p)
-                                       emit()
-                                    }
-                                 }
-                              },
-                              statusCallback
-                           )
-
-                           val elapsedMs = System.currentTimeMillis() - startTime
-                           // Uncompressed output size, as tracked from progress totals.
-                           val unpackedBytes = synchronized(lock) { fileTotals[i] }.coerceAtLeast(item.size)
-                           // Per-file speed over the uncompressed size, matching the
-                           // single-files list (bytes produced ÷ time).
-                           val unpackedMB = unpackedBytes / 1024.0 / 1024.0
-                           val speedMBps = if (elapsedMs > 0) unpackedMB / (elapsedMs / 1000.0) else 0.0
-                           statusCallback?.onStatus(tag, "Conversion completed: ${item.name} in ${elapsedMs / 1000}s (%.2f MB/s)".format(speedMBps))
-                           fileEventCallback?.invoke(FolderFileEvent(
-                              item.sourceUri, FileStatus.Completed, elapsedMs, speedMBps, unpackedBytes
-                           ))
-
-                           synchronized(results) {
-                              results.add(FileConversionResult.Success(
-                                 fileName = item.name,
-                                 outputName = outputName,
-                                 sizeBytes = item.size,
-                                 unpackedSizeBytes = unpackedBytes,
-                                 durationMs = elapsedMs,
-                                 operationType = opType
-                              ))
-                           }
-                        } else {
-                           statusCallback?.onStatus("COPY", "Copying: ${item.name} (%.2f MB)".format(fileSizeMB))
-                           copyFile(context, item.sourceUri, item.destParentUri, item.destRelativePath, item.name, statusCallback)
-                           val elapsedMs = System.currentTimeMillis() - startTime
-                           statusCallback?.onStatus("COPY", "Copy completed: ${item.name} in ${elapsedMs}ms")
-
-                           synchronized(results) {
-                              results.add(FileConversionResult.Success(
-                                 fileName = item.name,
-                                 outputName = item.name,
-                                 sizeBytes = item.size,
-                                 unpackedSizeBytes = item.size,
-                                 durationMs = elapsedMs,
-                                 operationType = opType
-                              ))
+                  convertDirect(
+                     context, item.sourceUri, item.destParentUri, item.destRelativePath,
+                     outputName, item.isXcz, headerKey, affinityMask,
+                     { done, total ->
+                        fileThrottler.sample(done, total)?.let { p ->
+                           synchronized(lock) {
+                              if (p.totalBytes > 0L) fileTotals[i] = p.totalBytes
+                              perFileDone[i] = p.doneBytes.coerceIn(0L, fileTotals[i])
+                              active[i] = ActiveFolderFile(item.name, p)
+                              emit()
                            }
                         }
-                     } catch (e: NszConversionException) {
-                        statusCallback?.onStatus("ERROR", "Conversion failed: ${item.name} - ${e.message} (code: ${e.code})")
-                        if (item.isNsz || item.isXcz) {
-                           fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Failed))
-                        }
-                        synchronized(results) {
-                           results.add(FileConversionResult.Failed(
-                              fileName = item.name,
-                              errorCode = e.code,
-                              errorMessage = e.message ?: "Unknown error",
-                              sizeBytes = item.size,
-                              operationType = opType
-                           ))
-                        }
-                     } catch (e: Exception) {
-                        statusCallback?.onStatus("ERROR", "Processing error: ${item.name} - ${e.message}")
-                        if (item.isNsz || item.isXcz) {
-                           fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Failed))
-                        }
-                        synchronized(results) {
-                           results.add(FileConversionResult.Failed(
-                              fileName = item.name,
-                              errorCode = -999,
-                              errorMessage = e.message ?: "Unknown error",
-                              sizeBytes = item.size,
-                              operationType = opType
-                           ))
-                        }
-                     } finally {
-                        synchronized(lock) {
-                           perFileDone[i] = fileTotals[i]
-                           active.remove(i)
-                           processed.incrementAndGet()
-                           emit()
-                        }
-                     }
+                     },
+                     statusCallback
+                  )
+
+                  val elapsedMs = System.currentTimeMillis() - startTime
+                  // Uncompressed output size, as tracked from progress totals.
+                  val unpackedBytes = synchronized(lock) { fileTotals[i] }.coerceAtLeast(item.size)
+                  // Per-file speed over the uncompressed size, matching the
+                  // single-files list (bytes produced ÷ time).
+                  val unpackedMB = unpackedBytes / 1024.0 / 1024.0
+                  val speedMBps = if (elapsedMs > 0) unpackedMB / (elapsedMs / 1000.0) else 0.0
+                  statusCallback?.onStatus(tag, "Conversion completed: ${item.name} in ${elapsedMs / 1000}s (%.2f MB/s)".format(speedMBps))
+                  fileEventCallback?.invoke(FolderFileEvent(
+                     item.sourceUri, FileStatus.Completed, elapsedMs, speedMBps, unpackedBytes
+                  ))
+
+                  synchronized(results) {
+                     results.add(FileConversionResult.Success(
+                        fileName = item.name,
+                        outputName = outputName,
+                        sizeBytes = item.size,
+                        unpackedSizeBytes = unpackedBytes,
+                        durationMs = elapsedMs,
+                        operationType = opType
+                     ))
+                  }
+               } else {
+                  statusCallback?.onStatus("COPY", "Copying: ${item.name} (%.2f MB)".format(fileSizeMB))
+                  copyFile(context, item.sourceUri, item.destParentUri, item.destRelativePath, item.name, statusCallback)
+                  val elapsedMs = System.currentTimeMillis() - startTime
+                  statusCallback?.onStatus("COPY", "Copy completed: ${item.name} in ${elapsedMs}ms")
+
+                  synchronized(results) {
+                     results.add(FileConversionResult.Success(
+                        fileName = item.name,
+                        outputName = item.name,
+                        sizeBytes = item.size,
+                        unpackedSizeBytes = item.size,
+                        durationMs = elapsedMs,
+                        operationType = opType
+                     ))
                   }
                }
-            }.awaitAll()
+            } catch (e: NszConversionException) {
+               statusCallback?.onStatus("ERROR", "Conversion failed: ${item.name} - ${e.message} (code: ${e.code})")
+               if (item.isNsz || item.isXcz) {
+                  fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Failed))
+               }
+               synchronized(results) {
+                  results.add(FileConversionResult.Failed(
+                     fileName = item.name,
+                     errorCode = e.code,
+                     errorMessage = e.message ?: "Unknown error",
+                     sizeBytes = item.size,
+                     operationType = opType
+                  ))
+               }
+            } catch (e: Exception) {
+               statusCallback?.onStatus("ERROR", "Processing error: ${item.name} - ${e.message}")
+               if (item.isNsz || item.isXcz) {
+                  fileEventCallback?.invoke(FolderFileEvent(item.sourceUri, FileStatus.Failed))
+               }
+               synchronized(results) {
+                  results.add(FileConversionResult.Failed(
+                     fileName = item.name,
+                     errorCode = -999,
+                     errorMessage = e.message ?: "Unknown error",
+                     sizeBytes = item.size,
+                     operationType = opType
+                  ))
+               }
+            } finally {
+               synchronized(lock) {
+                  perFileDone[i] = fileTotals[i]
+                  active.remove(i)
+                  processed.incrementAndGet()
+                  emit()
+               }
+            }
+         }
+
+         // Core-aware scheduling only helps on a heterogeneous CPU with working
+         // affinity; otherwise it degrades to order-only, which measured *worse* than
+         // the baseline — so fall back to a natural-order semaphore in that case.
+         val topology = CpuTopology.detect()
+         val coreAware = smartDistribution && topology.isHeterogeneous &&
+            NszConverter.affinitySupported()
+         if (coreAware) {
+            val coreSpecs = topology.cores.sortedByDescending { it.capacity }
+               .take(concurrency)
+               .map { CoreScheduler.CoreSpec(it.id, topology.speedOf(it.id), topology.clusterMask(it.id)) }
+            statusCallback?.onStatus("INFO", "Load distribution: core-aware (affinity on)")
+            coroutineScope {
+               CoreScheduler.run(plan.indices.toList(), { plan[it].size }, coreSpecs) { i, mask ->
+                  processOne(i, mask)
+               }
+            }
+         } else {
+            if (smartDistribution) {
+               statusCallback?.onStatus("INFO", "Load distribution: baseline (no heterogeneity/affinity)")
+            }
+            val sem = Semaphore(concurrency)
+            coroutineScope {
+               plan.indices.map { i ->
+                  async { sem.withPermit { processOne(i, null) } }
+               }.awaitAll()
+            }
          }
 
          val totalTimeMs = System.currentTimeMillis() - processingStartTime
@@ -390,6 +413,7 @@ object FolderProcessor {
       outputName: String,
       isXcz: Boolean,
       headerKey: ByteArray?,
+      affinityMask: Long?,
       onProgress: (Long, Long) -> Unit,
       statusCallback: NszConverter.StatusCallback?
    ) {
@@ -462,19 +486,28 @@ object FolderProcessor {
             if (isXcz) NszConverter.nativeConvertXcz(input, outputPath, cb, statusCallback)
             else       NszConverter.nativeConvert(input, outputPath, cb, statusCallback)
 
-         var result = runNative(inputPath)
+         // Pin the decompression to the assigned CPU cluster (the async_writer
+         // thread spawned by native inherits it); null = no pinning. Reset in the
+         // finally so the pooled IO thread isn't left pinned.
+         if (affinityMask != null) NszConverter.nativeSetThreadAffinity(affinityMask)
+         var result: Int
+         try {
+            result = runNative(inputPath)
 
-         // FUSE fallback: a descriptor whose /proc/self/fd path can't be re-opened
-         // by native code surfaces as an input/parse error. Retry with a temp copy.
-         if (result != NszConverter.OK && inputPfd != null &&
-            (result == NszConverter.ERR_OPEN_INPUT || result == NszConverter.ERR_INVALID_PFS0 ||
-               result == NszConverter.ERR_INVALID_NCZ || result == NszConverter.ERR_IO)) {
-            statusCallback?.onStatus(tag, "Direct read failed (code $result), copying to cache and retrying: $outputName")
-            runCatching { inputPfd?.close() }
-            inputPfd = null
-            val r = resolveToFilePath(context, sourceUri, statusCallback)
-            resolvedInput = r
-            result = runNative(r.file.absolutePath)
+            // FUSE fallback: a descriptor whose /proc/self/fd path can't be re-opened
+            // by native code surfaces as an input/parse error. Retry with a temp copy.
+            if (result != NszConverter.OK && inputPfd != null &&
+               (result == NszConverter.ERR_OPEN_INPUT || result == NszConverter.ERR_INVALID_PFS0 ||
+                  result == NszConverter.ERR_INVALID_NCZ || result == NszConverter.ERR_IO)) {
+               statusCallback?.onStatus(tag, "Direct read failed (code $result), copying to cache and retrying: $outputName")
+               runCatching { inputPfd?.close() }
+               inputPfd = null
+               val r = resolveToFilePath(context, sourceUri, statusCallback)
+               resolvedInput = r
+               result = runNative(r.file.absolutePath)
+            }
+         } finally {
+            if (affinityMask != null) NszConverter.nativeClearThreadAffinity()
          }
 
          if (result != NszConverter.OK) {

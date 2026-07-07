@@ -108,6 +108,11 @@
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
     <string name="settings_verification">Output verification</string>
     <string name="settings_verification_desc">Verify unpacked NCA hashes against the CNMT metadata. Nearly free; mismatches are reported as warnings, and the output is always kept.</string>
+    <string name="settings_decompression_threads">Decompression workers</string>
+    <string name="settings_threads_auto">Auto</string>
+    <string name="settings_decompression_threads_desc">Experimental: how many files to unpack in parallel (available only while verification is off). Auto adapts to the core count. This speeds up a queue or folder of several files, not a single large file.</string>
+    <string name="settings_smart_distribution">Smart core distribution</string>
+    <string name="settings_smart_distribution_desc">On big.LITTLE phones, put the largest files on the fast cores and small ones on the slow cores (pinned via CPU affinity), instead of letting a heavy file stall on a slow core. Speeds up a queue or folder of several files; falls back to standard scheduling when the CPU is uniform or affinity is unavailable.</string>
 
     <!-- About screen -->
     <string name="action_about_app">About the app</string>

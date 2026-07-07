@@ -13,10 +13,12 @@ import androidx.lifecycle.viewModelScope
 import com.androNSZ.R
 import com.androNSZ.NszConverter
 import com.androNSZ.data.SettingsRepository
+import com.androNSZ.fs.CoreScheduler
 import com.androNSZ.fs.FolderLogWriter
 import com.androNSZ.fs.FolderScanner
 import com.androNSZ.fs.FolderProcessor
 import com.androNSZ.fs.TempFileManager
+import com.androNSZ.util.CpuTopology
 import com.androNSZ.model.*
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.nut.KeysParser
@@ -47,8 +49,21 @@ import java.util.concurrent.atomic.AtomicInteger
  *   8 cores -> 3,  6 -> 2,  <=4 -> 1.
  * Capped at 3 because beyond that we hit the storage write ceiling.
  */
-private val BATCH_CONCURRENCY: Int =
+private val AUTO_CONCURRENCY: Int =
    (Runtime.getRuntime().availableProcessors() / 2 - 1).coerceIn(1, 3)
+
+/**
+ * Resolve how many files to convert in parallel for a job. Defaults to the
+ * core-adaptive [AUTO_CONCURRENCY]. An experimental override (Settings) can raise
+ * it up to the full core count, but only when verification is OFF — that gate keeps
+ * the safe 1..3 default whenever CNMT verification runs, and scopes the "use all
+ * cores" experiment to the case it was meant for. `override == 0` means auto.
+ */
+fun resolveConcurrency(verificationEnabled: Boolean, override: Int): Int {
+   if (verificationEnabled) return AUTO_CONCURRENCY
+   val maxCores = Runtime.getRuntime().availableProcessors()
+   return if (override in 1..maxCores) override else AUTO_CONCURRENCY
+}
 
 class MainViewModel : ViewModel() {
 
@@ -139,6 +154,11 @@ class MainViewModel : ViewModel() {
    var accentMode by mutableStateOf(AccentMode.SYSTEM)
    var accentColorArgb by mutableIntStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
    var verificationEnabled by mutableStateOf(true)
+   // Experimental: 0 = auto (core-adaptive), else the number of parallel decompression
+   // workers to use (honored only when verification is off). See resolveConcurrency.
+   var decompressionThreads by mutableIntStateOf(0)
+   // Smart load distribution: dispatch the largest files first (LPT). See loadSettings.
+   var smartDistribution by mutableStateOf(true)
 
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
@@ -167,6 +187,8 @@ class MainViewModel : ViewModel() {
       accentMode = SettingsRepository.getInstance(context).getAccentMode()
       accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
       verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
+      decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
+      smartDistribution = SettingsRepository.getInstance(context).getSmartDistribution()
    }
 
    fun saveLanguage(context: android.content.Context, lang: String) {
@@ -187,6 +209,16 @@ class MainViewModel : ViewModel() {
    fun saveVerificationEnabled(context: android.content.Context, enabled: Boolean) {
       verificationEnabled = enabled
       SettingsRepository.getInstance(context).saveVerificationEnabled(enabled)
+   }
+
+   fun saveDecompressionThreads(context: android.content.Context, count: Int) {
+      decompressionThreads = count
+      SettingsRepository.getInstance(context).saveDecompressionThreads(count)
+   }
+
+   fun saveSmartDistribution(context: android.content.Context, enabled: Boolean) {
+      smartDistribution = enabled
+      SettingsRepository.getInstance(context).saveSmartDistribution(enabled)
    }
 
    fun saveAccentColor(context: android.content.Context, colorArgb: Int) {
@@ -389,12 +421,15 @@ class MainViewModel : ViewModel() {
             null
          }
 
-         // EXPERIMENT: process up to BATCH_CONCURRENCY files at once. The native
-         // work inside convert() runs on Dispatchers.IO, so concurrent flows run
-         // on separate threads; we collect on Main to keep state writes safe.
+         // The native work inside convert() runs on Dispatchers.IO, so concurrent
+         // flows run on separate threads; we collect on Main to keep state writes safe.
+         val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
+         statusCb.onStatus(
+            "INFO",
+            "Parallelism: $concurrency (verification ${if (verificationEnabled) "on" else "off"})"
+         )
          val perFileDone = LongArray(fileQueue.size)
          val processed = AtomicInteger(0)
-         val sem = Semaphore(BATCH_CONCURRENCY)
          val overallThrottler = ProgressThrottler()
 
          fun emitOverall() {
@@ -408,60 +443,86 @@ class MainViewModel : ViewModel() {
             overallThrottler.sample(done, total)?.let { batchOverallProgress = it }
          }
 
-         coroutineScope {
-            fileQueue.indices.map { i ->
-               async {
-                  sem.withPermit {
-                     val file = fileQueue[i]
-                     batchCurrentFileName = file.displayName
-                     fileQueue[i] = file.copy(
-                        status = FileStatus.Converting,
-                        unpackDurationMs = null,
-                        unpackSpeedMBps = null,
-                        unpackedSize = null
-                     )
-                     val fileStartMs = System.currentTimeMillis()
-                     try {
-                        // XCZ → XCI, everything else → NSZ → NSP.
-                        val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
-                           NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb)
-                        } else {
-                           NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb)
-                        }
-                        // NB: no .catch here — a failure must propagate to the
-                        // surrounding try/catch so the file stays Failed. Swallowing
-                        // it with .catch lets the flow complete "normally", and the
-                        // code below would then overwrite the status with Completed
-                        // (green "Done" for a file that actually failed).
-                        flow
-                           .collect { p ->
-                              progress = p
-                              activeFileProgress[i] = p
-                              val t = p.totalBytes.coerceAtLeast(0L)
-                              if (t > 0L) fileTotals[i] = t
-                              perFileDone[i] = p.doneBytes.coerceAtLeast(0L).coerceAtMost(fileTotals[i])
-                              emitOverall()
-                           }
-                        val fileDurationMs = (System.currentTimeMillis() - fileStartMs).coerceAtLeast(1L)
-                        val unpackedBytes = fileTotals[i].coerceAtLeast(0L)
-                        val fileSpeedMBps = unpackedBytes / 1024.0 / 1024.0 / (fileDurationMs / 1000.0)
-                        fileQueue[i] = file.copy(
-                           status = FileStatus.Completed,
-                           unpackDurationMs = fileDurationMs,
-                           unpackSpeedMBps = fileSpeedMBps,
-                           unpackedSize = unpackedBytes
-                        )
-                     } catch (e: Exception) {
-                        fileQueue[i] = file.copy(status = FileStatus.Failed)
-                        statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
-                     } finally {
-                        activeFileProgress.remove(i)
-                        perFileDone[i] = fileTotals[i]
-                        batchProcessedFiles = processed.incrementAndGet()
-                     }
-                  }
+         // One file's conversion, shared by the core-aware scheduler and the
+         // baseline path. [mask] pins the native decompress to a CPU cluster
+         // (null = no pinning).
+         suspend fun convertOne(i: Int, mask: Long?) {
+            val file = fileQueue[i]
+            batchCurrentFileName = file.displayName
+            fileQueue[i] = file.copy(
+               status = FileStatus.Converting,
+               unpackDurationMs = null,
+               unpackSpeedMBps = null,
+               unpackedSize = null
+            )
+            val fileStartMs = System.currentTimeMillis()
+            try {
+               // XCZ → XCI, everything else → NSZ → NSP.
+               val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
+                  NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
+               } else {
+                  NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
                }
-            }.awaitAll()
+               // NB: no .catch here — a failure must propagate to the surrounding
+               // try/catch so the file stays Failed. Swallowing it with .catch lets
+               // the flow complete "normally", and the code below would then
+               // overwrite the status with Completed (green "Done" for a failure).
+               flow
+                  .collect { p ->
+                     progress = p
+                     activeFileProgress[i] = p
+                     val t = p.totalBytes.coerceAtLeast(0L)
+                     if (t > 0L) fileTotals[i] = t
+                     perFileDone[i] = p.doneBytes.coerceAtLeast(0L).coerceAtMost(fileTotals[i])
+                     emitOverall()
+                  }
+               val fileDurationMs = (System.currentTimeMillis() - fileStartMs).coerceAtLeast(1L)
+               val unpackedBytes = fileTotals[i].coerceAtLeast(0L)
+               val fileSpeedMBps = unpackedBytes / 1024.0 / 1024.0 / (fileDurationMs / 1000.0)
+               fileQueue[i] = file.copy(
+                  status = FileStatus.Completed,
+                  unpackDurationMs = fileDurationMs,
+                  unpackSpeedMBps = fileSpeedMBps,
+                  unpackedSize = unpackedBytes
+               )
+            } catch (e: Exception) {
+               fileQueue[i] = file.copy(status = FileStatus.Failed)
+               statusLog.add(LogEntry("ERROR", "${file.displayName}: ${e.message}"))
+            } finally {
+               activeFileProgress.remove(i)
+               perFileDone[i] = fileTotals[i]
+               batchProcessedFiles = processed.incrementAndGet()
+            }
+         }
+
+         // Core-aware scheduling only helps on a heterogeneous CPU with working
+         // affinity; otherwise it degrades to order-only, which measured *worse*
+         // than the baseline — so fall back to natural order in that case.
+         val topology = CpuTopology.detect()
+         val coreAware = smartDistribution && topology.isHeterogeneous &&
+            NszConverter.affinitySupported()
+         if (coreAware) {
+            val coreSpecs = topology.cores.sortedByDescending { it.capacity }
+               .take(concurrency)
+               .map { CoreScheduler.CoreSpec(it.id, topology.speedOf(it.id), topology.clusterMask(it.id)) }
+            statusCb.onStatus("INFO", "Load distribution: core-aware (affinity on)")
+            statusCb.onStatus("INFO", "Cores: " +
+               coreSpecs.joinToString { "cpu${it.coreId}×%.2f".format(it.speed) })
+            coroutineScope {
+               CoreScheduler.run(fileQueue.indices.toList(), { fileSizes[it] }, coreSpecs) { i, mask ->
+                  convertOne(i, mask)
+               }
+            }
+         } else {
+            if (smartDistribution) {
+               statusCb.onStatus("INFO", "Load distribution: baseline (no heterogeneity/affinity)")
+            }
+            val sem = Semaphore(concurrency)
+            coroutineScope {
+               fileQueue.indices.map { i ->
+                  async { sem.withPermit { convertOne(i, null) } }
+               }.awaitAll()
+            }
          }
 
          // All files are unpacked: pin the overall bar to 100% (throttling can
@@ -544,6 +605,8 @@ class MainViewModel : ViewModel() {
          }
       }
 
+      val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
+
       viewModelScope.launch {
          try {
             val result = FolderProcessor.processFolder(
@@ -551,6 +614,8 @@ class MainViewModel : ViewModel() {
                structure,
                verifyKey,
                outputFolderUri,
+               concurrency,
+               smartDistribution,
                { update ->
                   folderOverallProgress = update.overallProgress
                   folderActiveFiles = update.activeFiles

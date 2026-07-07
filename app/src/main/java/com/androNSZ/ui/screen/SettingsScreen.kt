@@ -24,6 +24,7 @@ import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
 import com.androNSZ.ui.components.ColorWheelPicker
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -40,6 +41,11 @@ fun SettingsScreen(
    onAccentColorChange: (Int) -> Unit,
    currentVerification: Boolean,
    onVerificationChange: (Boolean) -> Unit,
+   currentDecompressionThreads: Int,
+   maxThreads: Int,
+   onDecompressionThreadsChange: (Int) -> Unit,
+   currentSmartDistribution: Boolean,
+   onSmartDistributionChange: (Boolean) -> Unit,
    onBack: () -> Unit
 ) {
    BackHandler { onBack() }
@@ -432,6 +438,78 @@ fun SettingsScreen(
                }
                Text(
                   text = stringResource(R.string.settings_verification_desc),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
+
+               // Experimental decompression-parallelism control, only meaningful
+               // (and thus only shown) while verification is off.
+               if (!currentVerification) {
+                  Spacer(modifier = Modifier.height(4.dp))
+                  Row(
+                     modifier = Modifier.fillMaxWidth(),
+                     horizontalArrangement = Arrangement.SpaceBetween,
+                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+                  ) {
+                     Text(
+                        text = stringResource(R.string.settings_decompression_threads),
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                     )
+                     Text(
+                        text = if (currentDecompressionThreads <= 0) {
+                           stringResource(R.string.settings_threads_auto)
+                        } else {
+                           currentDecompressionThreads.toString()
+                        },
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                     )
+                  }
+                  Slider(
+                     value = currentDecompressionThreads.coerceIn(0, maxThreads).toFloat(),
+                     onValueChange = { onDecompressionThreadsChange(it.roundToInt()) },
+                     valueRange = 0f..maxThreads.toFloat(),
+                     steps = (maxThreads - 1).coerceAtLeast(0)
+                  )
+                  Text(
+                     text = stringResource(R.string.settings_decompression_threads_desc),
+                     style = MaterialTheme.typography.bodySmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+               }
+            }
+         }
+
+         Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+               containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+         ) {
+            Column(
+               modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+               verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = stringResource(R.string.settings_smart_distribution),
+                     style = MaterialTheme.typography.titleMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                  Switch(
+                     checked = currentSmartDistribution,
+                     onCheckedChange = onSmartDistributionChange
+                  )
+               }
+               Text(
+                  text = stringResource(R.string.settings_smart_distribution_desc),
                   style = MaterialTheme.typography.bodySmall,
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                )

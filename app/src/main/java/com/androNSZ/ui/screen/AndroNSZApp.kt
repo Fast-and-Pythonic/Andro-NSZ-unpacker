@@ -81,6 +81,11 @@ fun AndroNSZApp(vm: MainViewModel) {
             onAccentColorChange = { vm.saveAccentColor(context, it) },
             currentVerification = vm.verificationEnabled,
             onVerificationChange = { vm.saveVerificationEnabled(context, it) },
+            currentDecompressionThreads = vm.decompressionThreads,
+            maxThreads = Runtime.getRuntime().availableProcessors(),
+            onDecompressionThreadsChange = { vm.saveDecompressionThreads(context, it) },
+            currentSmartDistribution = vm.smartDistribution,
+            onSmartDistributionChange = { vm.saveSmartDistribution(context, it) },
             onBack = { vm.navigateBack() }
          )
       }

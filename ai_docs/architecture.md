@@ -64,6 +64,27 @@ the retry is almost free.
 on `Dispatchers.IO`, state is written on Main.
 **Consequences:** loads several cores. The cap of 3 — we hit the storage write ceiling.
 Per-file progress is in `activeFileProgress` (keyed by index).
+**Override (experiment):** `MainViewModel.resolveConcurrency(verificationEnabled, override)`
+keeps this auto value as the default, but when verification is **off** an optional
+Settings slider (`decompression_threads`, 0 = auto) raises the worker count up to the
+full core count. The gate to verify-off scopes the "use all cores" experiment and keeps
+the safe 1..3 whenever CNMT verification runs. Purpose: measure whether decompression
+actually scales past 3 workers or plateaus at the write ceiling — this decides the next
+step (intra-file `block-parallel-wip` vs. the A12 §3 "SHA on dedicated cores" layout).
+NB: parallelism is per-file, so the slider only helps a queue/folder of ≥ N files, not a
+single large file.
+**Measured (2026-07-07):** decompression is **CPU-bound**, not write-bound as this note
+originally assumed — 1 worker ~250–360 MB/s, scaling to ~800 MB/s aggregate at ~6 cores
+(past 6 is uncertain). So the old "storage write ceiling" only bounds the *auto* value,
+not the achievable throughput; the override exists to exploit that.
+**Load distribution (LPT):** when smart distribution is on (`smart_distribution`,
+default ON), both batch and folder dispatch the **largest files first**. The existing
+`Semaphore` is fair (FIFO), so creating the coroutines in descending-size order makes
+permits fall to the largest files first — a heavy file never trails the batch on a slow
+core, and small files fill the tail. Ordered by *input* (compressed) size (a proxy for
+the unpacked size, unknown until parsing). `FolderProcessor.processFolder` takes a
+`largestFirst` flag. Explicit big/little core affinity (`sched_setaffinity` + sysfs
+topology) is the planned next layer under the same toggle — [status.md](status.md).
 
 ## A08: Per-app language via `attachBaseContext` + SharedPreferences
 **Context:** changing the language in-app without changing the system one.
@@ -161,3 +182,34 @@ file is never deleted. Config is pushed once per batch via
 conversion (safe under `BATCH_CONCURRENCY` — see [gotchas.md](gotchas.md)). The
 structural `nca_verify_nsp` post-pass (section-header hashes) is kept, orthogonal.
 **Deferred:** per-core layout optimization (all SHA on 1–2 cores) — [status.md](status.md).
+
+## A13: Core-aware scheduler for heterogeneous CPUs (big.LITTLE)
+**Context:** measurement (2026-07-07) showed decompression is CPU-bound and scales to
+~6 cores (A07). But plain largest-first ordering over a work-conserving `Semaphore`
+(step 1) actually **regressed** (~840→~700 MB/s): order alone doesn't control *which*
+core takes *which* file, so a heavy file can land on a slow core and become the tail.
+Assigning files to cores of different speeds to minimize the finish time of the last
+one is the **Q||Cmax** problem.
+**Decision:** a core-aware scheduler ([CoreScheduler.kt](../app/src/main/java/com/androNSZ/fs/CoreScheduler.kt)),
+gated by the `smart_distribution` toggle.
+- **Topology** ([CpuTopology.kt](../app/src/main/java/com/androNSZ/util/CpuTopology.kt)):
+  per-core speed from sysfs `cpu_capacity` (→ `cpufreq/cpuinfo_max_freq` → homogeneous),
+  and a per-tier **cluster** affinity mask.
+- **Assignment** = LPT (largest file first) + greedy earliest-completion-time
+  (`load[c] + size/speed[c]`), then a **makespan-minimizing local search** (move a job
+  off the max-load core while it strictly lowers the global max). Work proxy = input
+  (compressed) size; speed proxy = capacity. Static (no work-stealing): a slow core may
+  idle rather than take a heavy file — protects makespan.
+- **Execution:** one coroutine per used core, each processing its assigned files
+  sequentially and **pinning** the native decompress to its cluster via
+  `nativeSetThreadAffinity` (new `cpu_affinity.c`, `sched_setaffinity` on the IO thread
+  before `nativeConvert`; the `async_writer` pthread inherits the mask). Reset after.
+- **Fallback:** only engages when the CPU is heterogeneous *and* affinity works
+  (probed once; EPERM on some OEM kernels). Otherwise → the natural-order `Semaphore`
+  baseline (order-only would just re-introduce the regression). Homogeneous CPU → baseline.
+**Consequences:** heavy files run on fast cores, pinned, without stranding on slow cores.
+`FolderProcessor.processFolder` gained a `smartDistribution` param; batch/folder share a
+per-file `body(index, mask)`. **Caveats:** static proxies don't see thermal throttling
+(pinning heavy work to big cores can throttle them) and compressed size is a proxy for
+unpacked size — calibration + guarded work-stealing (hybrid) is the deferred next step
+([status.md](status.md)). Then the SHA-256 per-core layout (A12 §3).
