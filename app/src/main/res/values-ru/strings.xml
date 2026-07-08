@@ -103,6 +103,7 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
     <string name="settings_accent">Акцентный цвет</string>
+    <string name="accent_default">Дефолтный</string>
     <string name="accent_system">Системный</string>
     <string name="accent_custom">Вручную</string>
     <string name="accent_hex_label">Hex (#RRGGBB)</string>

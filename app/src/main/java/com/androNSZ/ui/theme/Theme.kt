@@ -13,11 +13,17 @@ import com.materialkolor.rememberDynamicColorScheme
 @Composable
 fun AndroNSZTheme(
    darkTheme: Boolean = isSystemInDarkTheme(),
-   accentMode: AccentMode = AccentMode.SYSTEM,
+   accentMode: AccentMode = AccentMode.DEFAULT,
    accentColor: Color = Purple40,
    content: @Composable () -> Unit
 ) {
    val colorScheme = when (accentMode) {
+      // Fixed brand accent — a full M3 tonal palette derived from DefaultAccent.
+      AccentMode.DEFAULT -> rememberDynamicColorScheme(
+         seedColor = DefaultAccent,
+         isDark = darkTheme,
+         isAmoled = false
+      )
       // Generate a full M3 tonal palette from the picked seed: every role
       // (primary/secondary/tertiary + their containers, surfaces, etc.) is
       // derived harmoniously, not just the primary family.

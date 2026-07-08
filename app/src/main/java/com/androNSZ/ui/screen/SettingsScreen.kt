@@ -44,8 +44,6 @@ fun SettingsScreen(
    currentDecompressionThreads: Int,
    maxThreads: Int,
    onDecompressionThreadsChange: (Int) -> Unit,
-   currentSmartDistribution: Boolean,
-   onSmartDistributionChange: (Boolean) -> Unit,
    onBack: () -> Unit
 ) {
    BackHandler { onBack() }
@@ -310,6 +308,7 @@ fun SettingsScreen(
                var accentExpanded by remember { mutableStateOf(false) }
 
                val accentModes = listOf(
+                  AccentMode.DEFAULT to stringResource(R.string.accent_default),
                   AccentMode.SYSTEM to stringResource(R.string.accent_system),
                   AccentMode.CUSTOM to stringResource(R.string.accent_custom),
                )
@@ -320,7 +319,7 @@ fun SettingsScreen(
                ) {
                   OutlinedTextField(
                      value = accentModes.firstOrNull { it.first == currentAccentMode }?.second
-                        ?: stringResource(R.string.accent_system),
+                        ?: stringResource(R.string.accent_default),
                      onValueChange = {},
                      readOnly = true,
                      trailingIcon = {
@@ -478,41 +477,6 @@ fun SettingsScreen(
                      color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
                }
-            }
-         }
-
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-               Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-               ) {
-                  Text(
-                     text = stringResource(R.string.settings_smart_distribution),
-                     style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                  Switch(
-                     checked = currentSmartDistribution,
-                     onCheckedChange = onSmartDistributionChange
-                  )
-               }
-               Text(
-                  text = stringResource(R.string.settings_smart_distribution_desc),
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
             }
          }
       }

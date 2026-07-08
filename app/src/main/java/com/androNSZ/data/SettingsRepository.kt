@@ -71,11 +71,11 @@ class SettingsRepository private constructor(private val context: Context) {
    }
 
    fun getAccentMode(): AccentMode {
-      val stored = langPrefs.getString(ACCENT_MODE_KEY, AccentMode.SYSTEM.name) ?: AccentMode.SYSTEM.name
+      val stored = langPrefs.getString(ACCENT_MODE_KEY, AccentMode.DEFAULT.name) ?: AccentMode.DEFAULT.name
       return try {
          AccentMode.valueOf(stored)
       } catch (e: IllegalArgumentException) {
-         AccentMode.SYSTEM
+         AccentMode.DEFAULT
       }
    }
 

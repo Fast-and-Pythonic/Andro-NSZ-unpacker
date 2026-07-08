@@ -42,22 +42,21 @@ import java.util.concurrent.atomic.AtomicInteger
 /**
  * How many files to convert in parallel in batch mode.
  *
- * Each file is bound by a single-core producer (zstd + AES), so running several
- * at once fills idle cores and disk bandwidth — measured ~2x throughput on an
- * 8-core/UFS device. Scaled to the core count so low-end phones (few cores /
- * slow eMMC, where concurrent streams hurt) fall back toward sequential:
- *   8 cores -> 3,  6 -> 2,  <=4 -> 1.
- * Capped at 3 because beyond that we hit the storage write ceiling.
+ * Each file occupies two CPU threads — the producer (zstd + AES decompress) and
+ * the async writer (fwrite + SHA-256) — so `cores / 2` parallel files saturate
+ * every core. We deliberately keep no cores reserved for system/GUI: measurement
+ * showed the extra cores help throughput more than the reservation protects UI.
+ *   8 cores -> 4,  6 -> 3,  <=2 -> 1.
  */
 private val AUTO_CONCURRENCY: Int =
-   (Runtime.getRuntime().availableProcessors() / 2 - 1).coerceIn(1, 3)
+   (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
 
 /**
  * Resolve how many files to convert in parallel for a job. Defaults to the
  * core-adaptive [AUTO_CONCURRENCY]. An experimental override (Settings) can raise
- * it up to the full core count, but only when verification is OFF — that gate keeps
- * the safe 1..3 default whenever CNMT verification runs, and scopes the "use all
- * cores" experiment to the case it was meant for. `override == 0` means auto.
+ * it up to the full core count (one file per core), but only when verification is
+ * OFF — that gate keeps the core-adaptive default whenever CNMT verification runs.
+ * `override == 0` means auto.
  */
 fun resolveConcurrency(verificationEnabled: Boolean, override: Int): Int {
    if (verificationEnabled) return AUTO_CONCURRENCY
@@ -151,14 +150,16 @@ class MainViewModel : ViewModel() {
    var outputFolderUri by mutableStateOf<Uri?>(null)
    var appLanguage by mutableStateOf("system")
    var themeMode by mutableStateOf(ThemeMode.SYSTEM)
-   var accentMode by mutableStateOf(AccentMode.SYSTEM)
+   var accentMode by mutableStateOf(AccentMode.DEFAULT)
    var accentColorArgb by mutableIntStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
    var verificationEnabled by mutableStateOf(true)
    // Experimental: 0 = auto (core-adaptive), else the number of parallel decompression
    // workers to use (honored only when verification is off). See resolveConcurrency.
    var decompressionThreads by mutableIntStateOf(0)
-   // Smart load distribution: dispatch the largest files first (LPT). See loadSettings.
-   var smartDistribution by mutableStateOf(true)
+   // Smart core distribution (core-aware scheduler + CPU affinity, A13) — a deferred
+   // experiment, disabled for release. Kept false so the conversion path always takes
+   // the plain Semaphore baseline; the setting is hidden from the UI.
+   var smartDistribution by mutableStateOf(false)
 
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
@@ -188,7 +189,7 @@ class MainViewModel : ViewModel() {
       accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
       verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
       decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
-      smartDistribution = SettingsRepository.getInstance(context).getSmartDistribution()
+      // smartDistribution stays off (disabled for release) — not loaded from prefs.
    }
 
    fun saveLanguage(context: android.content.Context, lang: String) {

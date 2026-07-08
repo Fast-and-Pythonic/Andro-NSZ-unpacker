@@ -103,6 +103,7 @@
     <string name="theme_light">Light</string>
     <string name="theme_dark">Dark</string>
     <string name="settings_accent">Accent color</string>
+    <string name="accent_default">Default</string>
     <string name="accent_system">System</string>
     <string name="accent_custom">Manual</string>
     <string name="accent_hex_label">Hex (#RRGGBB)</string>

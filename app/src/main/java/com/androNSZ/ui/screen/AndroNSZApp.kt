@@ -84,8 +84,6 @@ fun AndroNSZApp(vm: MainViewModel) {
             currentDecompressionThreads = vm.decompressionThreads,
             maxThreads = Runtime.getRuntime().availableProcessors(),
             onDecompressionThreadsChange = { vm.saveDecompressionThreads(context, it) },
-            currentSmartDistribution = vm.smartDistribution,
-            onSmartDistributionChange = { vm.saveSmartDistribution(context, it) },
             onBack = { vm.navigateBack() }
          )
       }

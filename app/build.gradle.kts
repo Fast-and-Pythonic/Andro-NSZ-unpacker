@@ -15,8 +15,8 @@ android {
       applicationId = "com.androNSZ"
       minSdk = 31
       targetSdk = 36
-      versionCode = 1
-      versionName = "1.0"
+      versionCode = 2
+      versionName = "1.1"
 
       testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
       ndk {
@@ -31,7 +31,11 @@ android {
 
    buildTypes {
       release {
-         isMinifyEnabled = false
+         // R8: strip unused code (Compose + material-icons-extended's thousands
+         // of unused icons dominate the DEX) and shrink unused resources.
+         // JNI keep rules live in proguard-rules.pro.
+         isMinifyEnabled = true
+         isShrinkResources = true
          proguardFiles(
             getDefaultProguardFile("proguard-android-optimize.txt"),
             "proguard-rules.pro"

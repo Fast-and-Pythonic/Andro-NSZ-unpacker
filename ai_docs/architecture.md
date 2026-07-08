@@ -59,11 +59,18 @@ the retry is almost free.
 
 ## A07: Core-adaptive batch parallelism (queue mode)
 **Context:** in multi-file mode files can be converted in parallel.
-**Decision:** `BATCH_CONCURRENCY = (availableProcessors()/2 - 1)`, clamped to `1..3`
-(8 cores → 3, 6 → 2, ≤4 → 1). Files are launched via a `Semaphore`, native work runs
-on `Dispatchers.IO`, state is written on Main.
-**Consequences:** loads several cores. The cap of 3 — we hit the storage write ceiling.
-Per-file progress is in `activeFileProgress` (keyed by index).
+**Decision:** `AUTO_CONCURRENCY = (availableProcessors()/2).coerceAtLeast(1)`
+(8 cores → 4, 6 → 3, ≤2 → 1). Each file occupies two CPU threads — the producer
+(zstd + AES) and the async writer (fwrite + SHA-256) — so `cores/2` parallel files
+saturate every core. Files are launched via a `Semaphore`, native work runs on
+`Dispatchers.IO`, state is written on Main.
+**Consequences:** loads all cores; no cores are reserved for system/GUI (measurement
+favored the extra throughput over the reservation). Per-file progress is in
+`activeFileProgress` (keyed by index).
+**History:** the earlier formula was `(availableProcessors()/2 − 1).coerceIn(1, 3)`
+(8 cores → 3, using ~6 cores), which deliberately left 1–2 cores free and capped at 3
+on an assumed storage write ceiling. Dropped 2026-07-08 — the ceiling only bounded the
+auto value, not the achievable throughput (see the "Measured" note below).
 **Override (experiment):** `MainViewModel.resolveConcurrency(verificationEnabled, override)`
 keeps this auto value as the default, but when verification is **off** an optional
 Settings slider (`decompression_threads`, 0 = auto) raises the worker count up to the
@@ -184,6 +191,11 @@ structural `nca_verify_nsp` post-pass (section-header hashes) is kept, orthogona
 **Deferred:** per-core layout optimization (all SHA on 1–2 cores) — [status.md](status.md).
 
 ## A13: Core-aware scheduler for heterogeneous CPUs (big.LITTLE)
+**Status:** DISABLED for release (2026-07-08). `MainViewModel.smartDistribution` is
+forced `false` and the Settings toggle is hidden, so the `coreAware` guard is never
+true and the plain `Semaphore` baseline always runs (no affinity JNI calls). The code
+below (`CoreScheduler`, `CpuTopology`, `cpu_affinity.c`, unit tests) stays in the tree
+as a deferred experiment; re-enabling means restoring the toggle + the prefs load.
 **Context:** measurement (2026-07-07) showed decompression is CPU-bound and scales to
 ~6 cores (A07). But plain largest-first ordering over a work-conserving `Semaphore`
 (step 1) actually **regressed** (~840→~700 MB/s): order alone doesn't control *which*

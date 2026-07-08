@@ -69,6 +69,18 @@
 
 ## Decision log
 
+- 2026-07-08 — **release prep on `dev`** (three changes):
+  1. **Accent color:** new `AccentMode.DEFAULT` (fixed brand accent `#a6c8ff`,
+     `Color.kt` `DefaultAccent`), listed **first** and now the out-of-box default
+     (was `SYSTEM`/Material You) in `SettingsRepository.getAccentMode`, the ViewModel
+     initial state, and the `AndroNSZTheme` param. Users can still pick System/Manual;
+     `DEFAULT` shows no manual controls (gated on `== CUSTOM`).
+  2. **Smart core distribution disabled + hidden** (A13): `smartDistribution` forced
+     `false` and not loaded from prefs; the Settings `Card` and its wiring removed.
+     Scheduler code kept (deferred experiment).
+  3. **Use all cores:** `AUTO_CONCURRENCY` = `(availableProcessors()/2).coerceAtLeast(1)`
+     (was `(…/2 − 1).coerceIn(1,3)`). 8 cores → 4 parallel files → all 8 cores busy
+     (2 threads/file). No cores reserved for system/GUI. See [architecture.md](architecture.md) A07.
 - 2026-07-07 — smart load distribution, step 2: **core-aware scheduler**
   ([architecture.md](architecture.md) A13). Step 1's plain LPT measured *worse*
   (~840→~700 MB/s) because order alone doesn't control which core takes which file.
