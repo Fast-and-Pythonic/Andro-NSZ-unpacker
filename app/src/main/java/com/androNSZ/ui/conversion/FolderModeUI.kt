@@ -1,7 +1,5 @@
 package com.androNSZ.ui.conversion
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -9,6 +7,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -34,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -45,6 +45,9 @@ import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
 import com.androNSZ.model.FileNode
+import com.androNSZ.model.FileStatus
+import com.androNSZ.model.PickerMode
+import com.androNSZ.model.Screen
 import com.androNSZ.model.countAllFiles
 import com.androNSZ.ui.components.CompactToggleButton
 import com.androNSZ.ui.components.StatusLogPanel
@@ -60,14 +63,6 @@ import com.androNSZ.viewmodel.MainViewModel
 fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: PaddingValues) {
    val context = LocalContext.current
 
-   val folderPicker = rememberLauncherForActivityResult(
-      ActivityResultContracts.OpenDocumentTree()
-   ) { uri ->
-      if (uri != null) {
-         vm.selectFolder(context, uri)
-      }
-   }
-
    Column(
       modifier = Modifier
          .fillMaxSize()
@@ -77,7 +72,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
       verticalArrangement = Arrangement.spacedBy(12.dp)
    ) {
       Button(
-         onClick = { folderPicker.launch(null) },
+         onClick = { vm.navigateTo(Screen.FilePicker(PickerMode.FoldersOnly)) },
          enabled = !vm.isConverting,
          modifier = Modifier.fillMaxWidth()
       ) {
@@ -88,10 +83,14 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
 
       val structure = vm.folderStructure
       if (structure != null) {
+         // Blue once every NSZ/XCZ file in the folder is unpacked (like file cards).
+         val allDone = vm.folderFileEntries.isNotEmpty() &&
+            vm.folderFileEntries.all { it.status == FileStatus.Completed }
          Card(
             modifier = Modifier.fillMaxWidth(),
             colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
+               containerColor = if (allDone) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
+                                else MaterialTheme.colorScheme.surfaceVariant
             )
          ) {
             Column(
@@ -151,7 +150,7 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
             // not editable.
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                vm.folderFileEntries.forEach { entry ->
-                  FileQueueItem(file = entry, onRemove = {}, enabled = false)
+                  FileQueueItem(file = entry, onRemove = {}, enabled = false, compactNames = vm.compactCardNames)
                }
             }
          }
@@ -165,119 +164,135 @@ fun FolderModeUI(vm: MainViewModel, mode: ConversionMode.FolderMode, padding: Pa
          }
       }
 
+      FolderStyleProgressAndStats(vm)
+
+      // Extra scroll room below the log so the dynamically added/removed per-file
+      // rows never butt against the bottom edge — keeps the viewport from jumping.
       if (vm.isConverting || vm.folderOverallProgress != null) {
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
+         Spacer(Modifier.height((LocalConfiguration.current.screenHeightDp / 2).dp))
+      }
+   }
+}
+
+/**
+ * The overall/per-file progress card, the final stats card and the status log,
+ * shared by [FolderModeUI] and the combined-mode screen (both drive the same
+ * folder-* state). Emits its children straight into the caller's Column.
+ */
+@Composable
+internal fun FolderStyleProgressAndStats(vm: MainViewModel) {
+   if (vm.isConverting || vm.folderOverallProgress != null) {
+      Card(
+         modifier = Modifier.fillMaxWidth(),
+         colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceVariant
+         )
+      ) {
+         Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
          ) {
-            Column(
-               modifier = Modifier.padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(8.dp)
+            Row(
+               modifier = Modifier.fillMaxWidth(),
+               horizontalArrangement = Arrangement.SpaceBetween,
+               verticalAlignment = Alignment.CenterVertically
             ) {
-               Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-               ) {
+               Text(
+                  text = if (vm.isConverting)
+                     stringResource(R.string.status_unpacking)
+                  else
+                     stringResource(R.string.status_unpacked),
+                  style = MaterialTheme.typography.titleMedium
+               )
+               Text(
+                  text = fmtDuration(vm.elapsedMs),
+                  style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                  fontSize = 14.sp,
+                  color = MaterialTheme.colorScheme.onSurface
+               )
+            }
+
+            // Final summary: average speed across the whole run.
+            vm.folderAverageSpeedMBps?.let { avg ->
+               if (!vm.isConverting) {
                   Text(
-                     text = if (vm.isConverting)
-                        stringResource(R.string.status_unpacking)
-                     else
-                        stringResource(R.string.status_unpacked),
-                     style = MaterialTheme.typography.titleMedium
-                  )
-                  Text(
-                     text = fmtDuration(vm.elapsedMs),
-                     style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
-                     fontSize = 14.sp,
+                     text = stringResource(R.string.format_average_speed, avg),
+                     style = MaterialTheme.typography.bodyMedium,
                      color = MaterialTheme.colorScheme.onSurface
                   )
                }
+            }
 
-               // Final summary: average speed across the whole run.
-               vm.folderAverageSpeedMBps?.let { avg ->
-                  if (!vm.isConverting) {
-                     Text(
-                        text = stringResource(R.string.format_average_speed, avg),
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface
-                     )
-                  }
-               }
-
-               val overall = vm.folderOverallProgress
-               if (overall != null) {
-                  LinearProgressIndicator(
-                     progress = { overall.percent },
-                     modifier = Modifier.fillMaxWidth()
+            val overall = vm.folderOverallProgress
+            if (overall != null) {
+               LinearProgressIndicator(
+                  progress = { overall.percent },
+                  modifier = Modifier.fillMaxWidth()
+               )
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween
+               ) {
+                  FolderMetricText(
+                     text = stringResource(R.string.format_files_processed, vm.folderProcessedFiles, vm.folderTotalFiles)
                   )
-                  Row(
-                     modifier = Modifier.fillMaxWidth(),
-                     horizontalArrangement = Arrangement.SpaceBetween
-                  ) {
-                     FolderMetricText(
-                        text = stringResource(R.string.format_files_processed, vm.folderProcessedFiles, vm.folderTotalFiles)
-                     )
-                     FolderMetricText(text = "%.1f%%".format(overall.displayPercent * 100f))
-                     FolderMetricText(text = "%.1f MB/s".format(overall.speedMBps))
-                  }
-                  if (overall.totalBytes > 0) {
-                     Text(
-                        text = "${fmtBytes(overall.displayDoneBytes)} / ${fmtBytes(overall.displayTotalBytes)}",
-                        style = MaterialTheme.typography.bodySmall
-                     )
-                  }
+                  FolderMetricText(text = "%.1f%%".format(overall.displayPercent * 100f))
+                  FolderMetricText(text = "%.1f MB/s".format(overall.speedMBps))
                }
-
-               // One progress bar per file currently converting in parallel.
-               vm.folderActiveFiles.forEach { activeFile ->
-                  val p = activeFile.progress
-                  // Span the full card width, escaping the Column's 16dp side padding.
-                  HorizontalDivider(
-                     modifier = Modifier.fullBleedWidth(16.dp),
-                     thickness = 1.dp,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
-                  )
+               if (overall.totalBytes > 0) {
                   Text(
-                     text = activeFile.name,
-                     style = MaterialTheme.typography.bodyMedium,
-                     maxLines = 1,
-                     overflow = TextOverflow.Ellipsis
+                     text = "${fmtBytes(overall.displayDoneBytes)} / ${fmtBytes(overall.displayTotalBytes)}",
+                     style = MaterialTheme.typography.bodySmall
                   )
-                  LinearProgressIndicator(
-                     progress = { p.percent },
-                     modifier = Modifier.fillMaxWidth()
-                  )
-                  Row(
-                     modifier = Modifier.fillMaxWidth(),
-                     horizontalArrangement = Arrangement.SpaceBetween
-                  ) {
-                     FolderMetricText(text = "%.1f MB/s".format(p.speedMBps))
-                     FolderMetricText(text = "%.1f%%".format(p.displayPercent * 100f))
-                     if (p.totalBytes > 0) {
-                        FolderMetricText(
-                           text = "${fmtBytes(p.displayDoneBytes)} / ${fmtBytes(p.displayTotalBytes)}"
-                        )
-                     }
+               }
+            }
+
+            // One progress bar per file currently converting in parallel.
+            vm.folderActiveFiles.forEach { activeFile ->
+               val p = activeFile.progress
+               // Span the full card width, escaping the Column's 16dp side padding.
+               HorizontalDivider(
+                  modifier = Modifier.fullBleedWidth(16.dp),
+                  thickness = 1.dp,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f)
+               )
+               Text(
+                  text = activeFile.name,
+                  style = MaterialTheme.typography.bodyMedium,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
+               )
+               LinearProgressIndicator(
+                  progress = { p.percent },
+                  modifier = Modifier.fillMaxWidth()
+               )
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween
+               ) {
+                  FolderMetricText(text = "%.1f MB/s".format(p.speedMBps))
+                  FolderMetricText(text = "%.1f%%".format(p.displayPercent * 100f))
+                  if (p.totalBytes > 0) {
+                     FolderMetricText(
+                        text = "${fmtBytes(p.displayDoneBytes)} / ${fmtBytes(p.displayTotalBytes)}"
+                     )
                   }
                }
             }
          }
       }
-
-      val c2 = vm.compact2Stats
-      if (c2 != null) {
-         when (vm.statsFormat) {
-            StatsFormat.COMPACT3 -> StatsCompact3Card(c2, vm.isSuccess)
-            else                 -> StatsCompact2Card(c2, vm.isSuccess)
-         }
-      } else {
-         StatusMessageCard(vm.statusMessage, vm.isSuccess)
-      }
-      StatusLogPanel(vm.statusLog)
    }
+
+   val c2 = vm.compact2Stats
+   if (c2 != null) {
+      when (vm.statsFormat) {
+         StatsFormat.COMPACT3 -> StatsCompact3Card(c2, vm.isSuccess)
+         else                 -> StatsCompact2Card(c2, vm.isSuccess)
+      }
+   } else {
+      StatusMessageCard(vm.statusMessage, vm.isSuccess)
+   }
+   StatusLogPanel(vm.statusLog)
 }
 
 /**

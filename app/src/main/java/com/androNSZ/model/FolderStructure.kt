@@ -43,3 +43,18 @@ fun collectCompressedFiles(nodes: List<FileNode>): List<FileNode.File> {
    }
    return result
 }
+
+/**
+ * Flattens the folder tree into every file — NSZ/XCZ (unpacked) and everything
+ * else (copied). Drives the per-file cards so copied files are tracked too.
+ */
+fun collectAllFiles(nodes: List<FileNode>): List<FileNode.File> {
+   val result = mutableListOf<FileNode.File>()
+   for (node in nodes) {
+      when (node) {
+         is FileNode.File -> result.add(node)
+         is FileNode.Directory -> result.addAll(collectAllFiles(node.children))
+      }
+   }
+   return result
+}

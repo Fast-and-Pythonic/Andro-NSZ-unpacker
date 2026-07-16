@@ -195,3 +195,77 @@ $env:_JAVA_OPTIONS="-Djava.net.preferIPv4Stack=true"
 ```
 Android Studio's bundled runner handles this itself; the workaround is only for headless
 CLI test runs.
+
+## G13: `file://` inputs silently mis-name the output / zero the progress bar
+**Symptom:** files chosen through the in-app picker (raw `file://` uris, A14) unpack to
+an output called `input.nsp`, and in a multi-file queue the overall progress bar denominator
+is 0 (bar shows "0/0" / never fills).
+**Root cause:** the name/size helpers query `ContentResolver`, which returns **nothing** for
+a `file://` uri. `queryFileName` ([FileUtils.kt](../app/src/main/java/com/androNSZ/util/FileUtils.kt))
+then falls through to its `"input.nsz"` default (→ output `input.nsp`), and `getUriSize`
+([FormatUtils.kt](../app/src/main/java/com/androNSZ/util/FormatUtils.kt)) returns `0`, so
+`startBatchConversion`'s `fileTotals.sum()` denominator is 0.
+**Fix:** both helpers short-circuit `scheme == "file"` — `queryFileName` → `File(uri.path).name`,
+`getUriSize` → `File(uri.path).length()`. (`resolveDisplayName` already returned
+`lastPathSegment` = the file name for `file://`, so it needed no change.)
+**How to spot:** the output NSP is named `input.nsp` regardless of the source, or the batch
+overall bar reads "0/0" while single-file conversions still work.
+
+## G14: Judge Compose scroll smoothness only on a non-debuggable build
+**Symptom:** a Compose list (seen here: the file picker's `LazyColumn`,
+[FilePickerScreen.kt](../app/src/main/java/com/androNSZ/ui/screen/FilePickerScreen.kt))
+scrolls janky / low fps even after the per-row work is already cheap. Optimizing the
+code further barely moves the needle.
+**Root cause:** the `debug` build is `debuggable=true` and has no baseline profile, so ART
+runs Compose's hot paths in a slow, non-AOT mode — scrolling looks far worse than it ever
+does in an optimized build. This is a build-type artifact, not a code bug (same spirit as
+**G02**, where debug decompression is many times slower). It's easy to chase phantom
+code fixes for jank that simply isn't there in release.
+**Fix / how to measure:** there's a dedicated `benchmark` build type in
+[app/build.gradle.kts](../app/build.gradle.kts) — release-optimized (R8 + shrink) but
+debug-signed and `isDebuggable=false`, so it installs straight onto a device. Judge scroll
+performance there: `.\gradlew.bat :app:installBenchmark`. Do **not** conclude a Compose UI
+is slow from `assembleDebug` alone. (Genuine per-frame code costs still matter and were
+fixed here too — the picker pre-resolves each row's `java.io.File` metadata off the main
+thread instead of calling `isDirectory`/`length()` during composition; those are blocking
+stat syscalls. But that fix was only visible once tested on `benchmark`.)
+**How to spot:** the same revision scrolls smoothly on `benchmark` and janky on `debug`;
+no state read changes during the fling (existing rows aren't recomposing), yet debug still
+stutters.
+
+## G15: GitHub API returns HTTP 403 without a `User-Agent` header
+**Symptom:** the in-app update check always lands in the "check failed" branch; the
+request to `api.github.com/repos/.../releases/latest` comes back `403` even though the
+same URL opens fine in a browser and the repo/releases are public.
+**Root cause:** GitHub's REST API **rejects any request without a `User-Agent`**. A raw
+`HttpURLConnection` sends none by default, so every call 403s regardless of network or
+auth. (Unauthenticated calls are also rate-limited to 60/hour per IP — fine for an
+occasional, once-a-day-throttled check, but not for polling.)
+**Fix:** [UpdateChecker.kt](../app/src/main/java/com/androNSZ/util/UpdateChecker.kt) sets
+`User-Agent` (and `Accept: application/vnd.github+json`) on both the release query and
+the APK download. Don't remove them. The update feature deliberately uses the JDK's
+`HttpURLConnection` + `org.json` (no OkHttp/Ktor dependency).
+**How to spot:** the failure dialog shows "HTTP 403"; adding the `User-Agent` header
+makes the exact same request succeed.
+
+## G16: Sideloaded APK install needs the permission + FileProvider + a per-app grant
+**Symptom:** tapping "Update" downloads the APK but the system installer never opens, or
+throws (`SecurityException` / "parse error" / nothing happens).
+**Root cause:** three separate requirements for launching the package installer from a
+sideloaded update, any one of which silently breaks it:
+1. `REQUEST_INSTALL_PACKAGES` must be declared in the manifest.
+2. Modern Android rejects a raw `file://` uri handed to the installer — it must be a
+   `content://` uri from a `FileProvider` (declared in the manifest, backed by
+   `res/xml/file_paths.xml`), launched with `FLAG_GRANT_READ_URI_PERMISSION`.
+3. Even with both, on API 26+ the user must have granted **this app** the "install
+   unknown apps" permission (`canRequestPackageInstalls()`), which isn't a runtime
+   dialog — you have to send them to `Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES`.
+**Fix:** [ApkInstaller.kt](../app/src/main/java/com/androNSZ/util/ApkInstaller.kt) checks
+`canRequestPackageInstalls()` first (routing to settings if needed), then serves the APK
+via `FileProvider.getUriForFile(...,"${'$'}{packageName}.fileprovider", apk)` with the
+read-grant flag. Provider + permission live in
+[AndroidManifest.xml](../app/src/main/AndroidManifest.xml); the shared cache path is in
+`res/xml/file_paths.xml`.
+**How to spot:** the download completes (the cached `AndroNSZ_<v>.apk` exists) but the
+installer doesn't appear — check, in order, the manifest permission, the FileProvider
+authority match, and the "install unknown apps" toggle for the app.

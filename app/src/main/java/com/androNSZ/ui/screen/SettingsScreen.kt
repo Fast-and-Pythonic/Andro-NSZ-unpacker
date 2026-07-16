@@ -44,6 +44,8 @@ fun SettingsScreen(
    currentDecompressionThreads: Int,
    maxThreads: Int,
    onDecompressionThreadsChange: (Int) -> Unit,
+   currentShowUpdateBanner: Boolean,
+   onShowUpdateBannerChange: (Boolean) -> Unit,
    onBack: () -> Unit
 ) {
    BackHandler { onBack() }
@@ -477,6 +479,41 @@ fun SettingsScreen(
                      color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
                }
+            }
+         }
+
+         Card(
+            modifier = Modifier.fillMaxWidth(),
+            colors = CardDefaults.cardColors(
+               containerColor = MaterialTheme.colorScheme.surfaceVariant
+            )
+         ) {
+            Column(
+               modifier = Modifier
+                  .fillMaxWidth()
+                  .padding(16.dp),
+               verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = stringResource(R.string.settings_show_update_banner),
+                     style = MaterialTheme.typography.titleMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                  Switch(
+                     checked = currentShowUpdateBanner,
+                     onCheckedChange = onShowUpdateBannerChange
+                  )
+               }
+               Text(
+                  text = stringResource(R.string.settings_show_update_banner_desc),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
             }
          }
       }

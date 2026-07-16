@@ -12,6 +12,9 @@ val DefaultAccent = Color(0xFFA6C8FF)
 // card in both light and dark themes.
 val SuccessGreen = Color(0xFF43A047)
 
+// "Not checked" (verification didn't run) accent — amber, matching the log's WARN.
+val WarningOrange = Color(0xFFFF9800)
+
 // Destructive (delete) accent. In the dark theme the Material error color is a
 // pale, washed-out red; we use this stronger red instead so the "Delete" item
 // matches the saturated red of the light theme. Adjust the hex here to taste.

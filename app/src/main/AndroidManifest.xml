@@ -2,11 +2,25 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!-- Update checker: fetch the latest release from the GitHub API and download
+         its APK asset. -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Launch the system package installer for the downloaded update APK. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
         android:maxSdkVersion="28"
         tools:ignore="ScopedStorage" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
         android:maxSdkVersion="32"
+        tools:ignore="ScopedStorage" />
+
+    <!-- The in-app file picker browses the real filesystem via java.io.File, so it
+         needs broad storage access. This is the "All files access" special
+         permission, granted from system settings (not a runtime dialog). Acceptable
+         for a sideloaded homebrew; it also lets the native engine read inputs by
+         file:// path directly (no fd/temp-copy). -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
         tools:ignore="ScopedStorage" />
 
     <application
@@ -26,6 +40,19 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Serves the downloaded update APK to the system installer via a
+             content:// uri (required on modern Android — a raw file:// uri is
+             rejected). See util/ApkInstaller.kt. -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.fileprovider"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
     </application>
 
 </manifest>

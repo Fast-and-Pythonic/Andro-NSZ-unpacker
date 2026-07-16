@@ -1,7 +1,5 @@
 package com.androNSZ.ui.conversion
 
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -19,6 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.graphics.Color
@@ -36,29 +35,21 @@ import androidx.compose.ui.res.stringResource
 import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.FileStatus
+import com.androNSZ.model.PickerMode
+import com.androNSZ.model.Screen
+import com.androNSZ.model.VerifyStatus
 import com.androNSZ.ui.components.StatusLogPanel
 import com.androNSZ.ui.components.simpleVerticalScrollbar
 import com.androNSZ.ui.theme.SuccessGreen
+import com.androNSZ.ui.theme.WarningOrange
 import com.androNSZ.ui.components.StatusMessageCard
 import com.androNSZ.util.fmtBytes
 import com.androNSZ.util.fmtDuration
-import com.androNSZ.util.getUriSize
-import com.androNSZ.util.resolveDisplayName
 import com.androNSZ.viewmodel.MainViewModel
 
 @Composable
 fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
    val context = LocalContext.current
-
-   val filePicker = rememberLauncherForActivityResult(
-      ActivityResultContracts.OpenDocument()
-   ) { uri ->
-      if (uri != null) {
-         val name = resolveDisplayName(context, uri)
-         val size = getUriSize(context, uri)
-         vm.addFilesToQueue(listOf(FileEntry(uri, name, size)))
-      }
-   }
 
    // Before unpacking starts the queue owns the whole screen: it fills the space
    // above the (bottom-pinned) unpack button and the page itself does not scroll.
@@ -77,7 +68,7 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
       verticalArrangement = Arrangement.spacedBy(8.dp)
    ) {
       Button(
-         onClick = { filePicker.launch(arrayOf("*/*")) },
+         onClick = { vm.navigateTo(Screen.FilePicker(PickerMode.FilesOnly)) },
          enabled = !vm.isConverting,
          modifier = Modifier.fillMaxWidth()
       ) {
@@ -121,7 +112,8 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
                FileQueueItem(
                   file = vm.fileQueue[index],
                   onRemove = { vm.removeFileFromQueue(index) },
-                  enabled = !vm.isConverting
+                  enabled = !vm.isConverting,
+                  compactNames = vm.compactCardNames
                )
             }
          }
@@ -278,6 +270,13 @@ fun SingleFilesUI(vm: MainViewModel, padding: PaddingValues) {
 
       StatusLogPanel(vm.statusLog)
       StatusMessageCard(vm.statusMessage, vm.isSuccess)
+
+      // While the screen is scrollable (converting/done), leave extra room below
+      // so the dynamically added/removed per-file rows never butt against the
+      // bottom edge — keeps the viewport from jumping.
+      if (!expanded) {
+         Spacer(Modifier.height((LocalConfiguration.current.screenHeightDp / 2).dp))
+      }
    }
 }
 
@@ -323,11 +322,16 @@ private val QueueStatsFontSize = 12.sp
 fun FileQueueItem(
    file: FileEntry,
    onRemove: () -> Unit,
-   enabled: Boolean
+   enabled: Boolean,
+   compactNames: Boolean = false
 ) {
    val isNsz = file.displayName.endsWith(".nsz", ignoreCase = true)
    val isXcz = file.displayName.endsWith(".xcz", ignoreCase = true)
    val isCompressed = isNsz || isXcz
+   // A non-NSZ/XCZ file is never unpacked — it's copied verbatim.
+   val isCopy = !isCompressed
+   // Uppercased file type, always shown in the stats row right after the status.
+   val ext = file.displayName.substringAfterLast('.', "").uppercase()
 
    Card(
       modifier = Modifier.fillMaxWidth(),
@@ -346,62 +350,87 @@ fun FileQueueItem(
             .padding(12.dp),
          verticalAlignment = Alignment.Top
       ) {
-         Icon(
-            imageVector = if (isCompressed) Icons.Filled.Description else Icons.Filled.InsertDriveFile,
-            contentDescription = null,
-            modifier = Modifier
-               .padding(top = 2.dp)
-               .size(20.dp),
-            tint = if (isCompressed) MaterialTheme.colorScheme.primary
-                   else MaterialTheme.colorScheme.onSurfaceVariant
-         )
-         Spacer(Modifier.width(8.dp))
          Column(modifier = Modifier.weight(1f)) {
             Text(
                text = file.displayName,
                style = MaterialTheme.typography.bodyMedium,
-               fontWeight = if (isCompressed) FontWeight.Bold else FontWeight.Normal
+               fontWeight = if (isCompressed) FontWeight.Bold else FontWeight.Normal,
+               maxLines = if (compactNames) 1 else Int.MAX_VALUE,
+               overflow = TextOverflow.Ellipsis
             )
-            val statusText = when (file.status) {
-               FileStatus.Pending -> stringResource(R.string.status_waiting)
-               FileStatus.Converting -> stringResource(R.string.status_converting)
-               FileStatus.Completed -> stringResource(R.string.status_done)
-               FileStatus.Failed -> stringResource(R.string.status_error)
-            }
-            val sizeText = if (file.fileSize > 0) fmtBytes(file.fileSize) else null
-            // All segments are joined here with the same "  |  " separator. (Keeping
-            // a separator inside a string resource won't match: Android collapses its
-            // double spaces to one, making that gap visibly narrower.)
-            val sep = "  |  "
             val statsColor = MaterialTheme.colorScheme.onSurfaceVariant
+            val errColor = MaterialTheme.colorScheme.error
+            val typeColor = if (isCompressed) SuccessGreen else statsColor
+
+            // Card statuses are always in English, for every app language. Two words
+            // for unpacked files (unpacked-or-not · check state), one for copies
+            // (copied-or-not), then the file type — always shown.
+            val statusAnnotated = buildAnnotatedString {
+               when (file.status) {
+                  FileStatus.Pending -> append("Waiting")
+                  FileStatus.Converting -> append(if (isCopy) "Copying…" else "Unpacking…")
+                  FileStatus.Completed -> {
+                     if (isCopy) {
+                        withStyle(SpanStyle(color = SuccessGreen)) { append("Copied") }
+                     } else {
+                        withStyle(SpanStyle(color = SuccessGreen)) { append("Unpacked") }
+                        append("  ·  ")
+                        appendCheckWord(file.verify, errColor)
+                     }
+                  }
+                  FileStatus.Failed -> {
+                     if (isCopy) {
+                        withStyle(SpanStyle(color = errColor)) { append("Not copied") }
+                     } else {
+                        withStyle(SpanStyle(color = errColor)) { append("Not unpacked") }
+                        append("  ·  ")
+                        appendCheckWord(file.verify, errColor)
+                     }
+                  }
+               }
+               if (ext.isNotEmpty()) {
+                  append("  ·  ")
+                  withStyle(SpanStyle(color = typeColor)) { append(ext) }
+               }
+            }
+
+            // Segments after the status use the "  |  " separator. (A separator kept
+            // inside a string resource won't match: Android collapses its double
+            // spaces to one, making that gap visibly narrower.)
+            val sep = "  |  "
             if (file.status == FileStatus.Completed && file.unpackDurationMs != null) {
-               // Completed | time | speed | size before → size after.
-               // The "before → after" size segment is kept whole: if it doesn't
-               // fit, it moves to its own line as a unit (never split mid-value)
-               // and the "|" before it is dropped, so no separator dangles after
-               // the speed. See QueueStatsLine.
+               // [status · type] | time | speed | sizes.
+               // The size segment is kept whole (see QueueStatsLine): if it doesn't
+               // fit, it moves to its own line as a unit and the "|" before it drops.
                val head = buildAnnotatedString {
-                  withStyle(SpanStyle(color = SuccessGreen)) { append(statusText) }
+                  append(statusAnnotated)
                   append(sep)
-                  append(fmtDuration(file.unpackDurationMs))
+                  // Non-breaking spaces keep each value atomic, so a value that
+                  // doesn't fit wraps as a whole unit (like the size segment) instead
+                  // of splitting "45.0" from "MB/s".
+                  append(fmtDuration(file.unpackDurationMs).replace(' ', ' '))
                   append(sep)
-                  append("%.1f MB/s".format(file.unpackSpeedMBps ?: 0.0))
+                  append("%.1f MB/s".format(file.unpackSpeedMBps ?: 0.0))
                }
                val after = file.unpackedSize
-               val sizes = if (after != null && after > 0L) {
+               val sizes = if (isCopy) {
+                  // Copies aren't recompressed, so one size is enough.
+                  if (file.fileSize > 0L) fmtBytes(file.fileSize) else null
+               } else if (after != null && after > 0L) {
                   if (file.fileSize > 0L) "${fmtBytes(file.fileSize)} → ${fmtBytes(after)}"
                   else fmtBytes(after)
                } else null
                QueueStatsLine(head = head, sizes = sizes, color = statsColor)
             } else {
-               // Pending / converting / failed: size | status.
+               // Pending / converting / failed: size | status · type.
+               val sizeText = if (file.fileSize > 0) fmtBytes(file.fileSize) else null
                Text(
                   text = buildAnnotatedString {
                      if (sizeText != null) {
                         append(sizeText)
                         append(sep)
                      }
-                     append(statusText)
+                     append(statusAnnotated)
                   },
                   style = MaterialTheme.typography.bodyMedium,
                   fontSize = QueueStatsFontSize,
@@ -411,11 +440,35 @@ fun FileQueueItem(
          }
 
          if (enabled && file.status == FileStatus.Pending) {
-            IconButton(onClick = onRemove) {
-               Icon(Icons.Filled.Close, stringResource(R.string.action_delete))
+            Spacer(Modifier.width(4.dp))
+            // Pin the ✕ to a 24dp layout slot so its 48dp IconButton touch target
+            // doesn't inflate the row height or push the glyph far from the right
+            // edge; the target still overflows the box for comfortable tapping. The
+            // glyph then sits ~12dp from the card edge, mirroring the left padding.
+            Box(modifier = Modifier.requiredSize(24.dp), contentAlignment = Alignment.Center) {
+               IconButton(onClick = onRemove) {
+                  Icon(
+                     Icons.Filled.Close,
+                     stringResource(R.string.action_delete),
+                     modifier = Modifier.size(20.dp)
+                  )
+               }
             }
          }
       }
+   }
+}
+
+/**
+ * Appends the verification status word with its colour: green "Checked" when the
+ * hash check passed, amber "Not checked" when it didn't run (disabled / no key /
+ * XCZ), red "Check failed" on a mismatch. Always English, for every app language.
+ */
+private fun AnnotatedString.Builder.appendCheckWord(verify: VerifyStatus, errColor: Color) {
+   when (verify) {
+      VerifyStatus.CHECKED -> withStyle(SpanStyle(color = SuccessGreen)) { append("Checked") }
+      VerifyStatus.NOT_CHECKED -> withStyle(SpanStyle(color = WarningOrange)) { append("Not checked") }
+      VerifyStatus.FAILED -> withStyle(SpanStyle(color = errColor)) { append("Check failed") }
    }
 }
 

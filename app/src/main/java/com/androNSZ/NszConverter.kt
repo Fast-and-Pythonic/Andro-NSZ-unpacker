@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
+import com.androNSZ.model.VerifyStatus
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.queryFileName
@@ -119,6 +120,10 @@ object NszConverter {
         outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
         affinityMask: Long? = null,
+        // Invoked once with the verification outcome. Captured per-call so the
+        // queue can label the card without racing on the shared lastVerify* fields
+        // under parallel conversions.
+        onVerified: (VerifyStatus) -> Unit = {},
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
@@ -202,13 +207,17 @@ object NszConverter {
                 }
             }
 
+            var verify = VerifyStatus.NOT_CHECKED
             if (result == 0 && headerKey != null) {
-                lastVerifyError = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
+                val err = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
+                lastVerifyError = err
                 lastVerifySkipped = false
+                verify = if (err == null) VerifyStatus.CHECKED else VerifyStatus.FAILED
             } else if (result == 0) {
                 lastVerifyError = null
                 lastVerifySkipped = true
             }
+            if (result == 0) onVerified(verify)
 
             when (result) {
                 OK -> {

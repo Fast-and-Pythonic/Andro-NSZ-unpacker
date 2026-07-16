@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Paths exposed by the FileProvider declared in AndroidManifest.xml. Only the
+     internal cache dir is shared, where the update checker writes the downloaded
+     APK before handing it to the system installer. -->
+<paths>
+   <cache-path name="apk_cache" path="." />
+</paths>

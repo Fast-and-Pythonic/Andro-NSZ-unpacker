@@ -225,3 +225,27 @@ per-file `body(index, mask)`. **Caveats:** static proxies don't see thermal thro
 (pinning heavy work to big cores can throttle them) and compressed size is a proxy for
 unpacked size — calibration + guarded work-stealing (hybrid) is the deferred next step
 ([status.md](status.md)). Then the SHA-256 per-core layout (A12 §3).
+
+## A14: In-app file picker over the raw filesystem (`MANAGE_EXTERNAL_STORAGE`)
+**Context:** input selection used SAF only (`OpenDocument`/`OpenDocumentTree`,
+`content://`), which adds files one at a time and can't freely roam storage. The user
+wanted a custom split-screen picker (marked items on top, browser below) that walks the
+whole device.
+**Decision:** browse the real filesystem with `java.io.File`, gated by the "All files
+access" special permission (`MANAGE_EXTERNAL_STORAGE`, granted from a system settings
+page — [StoragePermission.kt](../app/src/main/java/com/androNSZ/util/StoragePermission.kt)).
+Acceptable because this is a sideloaded homebrew, not a Play-Store app. The reusable
+picker ([FilePickerScreen.kt](../app/src/main/java/com/androNSZ/ui/screen/FilePickerScreen.kt))
+hands the engine `Uri.fromFile(...)` (`file://`) values.
+**Why it's cheap downstream:** the engine already reads `file://` inputs directly
+(`NszConverter.convert`: `scheme == "file"` → `uri.path`, the fast path, no fd/temp copy),
+and `FolderProcessor` already handles `file://` on both input and output. The only SAF-only
+piece was the folder scanner, so a parallel [RawFolderScanner.kt](../app/src/main/java/com/androNSZ/fs/RawFolderScanner.kt)
+walks a `File` tree into the same `FolderStructure` shape (`file://` uris) — the rest of
+the folder pipeline is untouched.
+**Scope (v1):** files-mode marks files only (multi-select), folder-mode marks one folder
+only (the pipeline is single-root). A combined files+folders mode, and later dropping the
+two old modes, are deferred. Output-folder and prod.keys pickers stay on SAF (write/keys).
+**Consequences:** free navigation + multi-select; `file://` inputs skip the fd/temp path.
+Trap: `file://` needs explicit handling in the name/size helpers (see
+[gotchas.md](gotchas.md) G13).

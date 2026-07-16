@@ -1,21 +1,36 @@
 package com.androNSZ.ui.screen
 
 import android.app.Activity
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import com.androNSZ.model.FileEntry
+import com.androNSZ.model.PickerMode
 import com.androNSZ.model.Screen
+import com.androNSZ.ui.components.UpdateDialog
 import com.androNSZ.viewmodel.MainViewModel
 
 @Composable
 fun AndroNSZApp(vm: MainViewModel) {
    val context = LocalContext.current
-   
+
    LaunchedEffect(Unit) {
       vm.checkKeys(context)
       vm.loadSettings(context)
+      vm.checkForUpdates(context, manual = false)
+   }
+
+   if (vm.showUpdateDialog) {
+      UpdateDialog(
+         state = vm.updateState,
+         onUpdate = { vm.downloadAndInstall(context) },
+         onHide = { vm.hideUpdate(context) },
+         onRetry = { vm.checkForUpdates(context, manual = true) },
+         onDismiss = { vm.dismissUpdateDialog() }
+      )
    }
    
    val keysPicker = rememberLauncherForActivityResult(
@@ -30,7 +45,8 @@ fun AndroNSZApp(vm: MainViewModel) {
       if (uri != null) vm.saveOutputFolder(context, uri)
    }
    
-   when (vm.currentScreen) {
+   val screen = vm.currentScreen
+   when (screen) {
       Screen.ModeSelection -> {
          ModeSelectionScreen(
             onModeSelected = { mode ->
@@ -43,7 +59,11 @@ fun AndroNSZApp(vm: MainViewModel) {
             onNavigateToSettings = { vm.navigateTo(Screen.Settings) },
             onCheckKeys = { vm.checkKeys(context) },
             onChangeOutputFolder = { outputFolderPicker.launch(null) },
-            outputFolderUri = vm.outputFolderUri
+            outputFolderUri = vm.outputFolderUri,
+            updateState = vm.updateState,
+            updateBannerVisible = vm.updateBannerVisible,
+            onCheckForUpdates = { vm.checkForUpdates(context, manual = true) },
+            onShowUpdateDialog = { vm.showUpdateDialog = true }
          )
       }
       Screen.Conversion -> {
@@ -57,6 +77,23 @@ fun AndroNSZApp(vm: MainViewModel) {
             onNavigateToAbout = { vm.navigateTo(Screen.About) },
             onNavigateToSettings = { vm.navigateTo(Screen.Settings) },
             onChangeOutputFolder = { outputFolderPicker.launch(null) }
+         )
+      }
+      is Screen.FilePicker -> {
+         FilePickerScreen(
+            mode = screen.mode,
+            onConfirm = { files ->
+               when (screen.mode) {
+                  PickerMode.FilesOnly ->
+                     vm.addFilesToQueue(files.map { FileEntry(Uri.fromFile(it), it.name, it.length()) })
+                  PickerMode.FoldersOnly ->
+                     files.firstOrNull()?.let { vm.selectFolderFromFile(context, it) }
+                  PickerMode.FilesAndFolders ->
+                     vm.setCombinedSelection(context, files)
+               }
+               vm.navigateBack()
+            },
+            onBack = { vm.navigateBack() }
          )
       }
       Screen.About -> {
@@ -84,6 +121,8 @@ fun AndroNSZApp(vm: MainViewModel) {
             currentDecompressionThreads = vm.decompressionThreads,
             maxThreads = Runtime.getRuntime().availableProcessors(),
             onDecompressionThreadsChange = { vm.saveDecompressionThreads(context, it) },
+            currentShowUpdateBanner = vm.showUpdateBanner,
+            onShowUpdateBannerChange = { vm.saveShowUpdateBanner(context, it) },
             onBack = { vm.navigateBack() }
          )
       }

@@ -18,6 +18,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.androNSZ.BuildConfig
 import com.androNSZ.R
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
 
@@ -70,7 +71,7 @@ fun AboutScreen(
                             fontWeight = FontWeight.Bold
                         )
                         Text(
-                            text = "v1.0.0",
+                            text = "v${BuildConfig.VERSION_NAME}",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )

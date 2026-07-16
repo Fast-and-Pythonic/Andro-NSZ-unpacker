@@ -10,6 +10,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.androNSZ.BuildConfig
 import com.androNSZ.R
 import com.androNSZ.NszConverter
 import com.androNSZ.data.SettingsRepository
@@ -22,8 +23,11 @@ import com.androNSZ.util.CpuTopology
 import com.androNSZ.model.*
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.nut.KeysParser
+import com.androNSZ.util.ApkInstaller
 import com.androNSZ.util.ProgressThrottler
+import com.androNSZ.util.UpdateChecker
 import com.androNSZ.util.getUriSize
+import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.async
@@ -107,6 +111,14 @@ class MainViewModel : ViewModel() {
    // Average unpack speed across the whole run, set once the folder finishes.
    var folderAverageSpeedMBps by mutableStateOf<Double?>(null)
 
+   // Combined mode (files + folders together). The editable selection is the
+   // source of truth for the combined UI list; it is merged into the folder-mode
+   // fields above (folderStructure, folderFileEntries, folder* progress/stats)
+   // since combined runs through FolderProcessor just like folder mode.
+   val combinedItems = mutableStateListOf<CombinedItem>()
+   // True while folders in a just-added selection are still being scanned.
+   var combinedScanning by mutableStateOf(false)
+
    // Conversion state
    var isConverting  by mutableStateOf(false)
    var progress      by mutableStateOf<ConversionProgress?>(null)
@@ -153,6 +165,8 @@ class MainViewModel : ViewModel() {
    var accentMode by mutableStateOf(AccentMode.DEFAULT)
    var accentColorArgb by mutableIntStateOf(SettingsRepository.DEFAULT_ACCENT_COLOR)
    var verificationEnabled by mutableStateOf(true)
+   // GUI: compact (single-line) file card names + extension in the stats row.
+   var compactCardNames by mutableStateOf(false)
    // Experimental: 0 = auto (core-adaptive), else the number of parallel decompression
    // workers to use (honored only when verification is off). See resolveConcurrency.
    var decompressionThreads by mutableIntStateOf(0)
@@ -160,6 +174,29 @@ class MainViewModel : ViewModel() {
    // experiment, disabled for release. Kept false so the conversion path always takes
    // the plain Semaphore baseline; the setting is hidden from the UI.
    var smartDistribution by mutableStateOf(false)
+   // Whether the main-screen "update available" banner is shown. The update check
+   // itself always runs regardless (so the overflow-menu notification stays
+   // accurate) — only the banner is user-disableable.
+   var showUpdateBanner by mutableStateOf(true)
+   // Version the user tapped "Hide" on: its banner stays hidden (a newer version
+   // un-hides it). Only affects the banner, never the menu notification.
+   var hiddenBannerVersion by mutableStateOf("")
+
+   // Update check state (see model/UpdateState.kt). The dialog is gated by
+   // showUpdateDialog; the menu notification keys off updateState (always), the
+   // main-screen banner off updateBannerVisible.
+   var updateState by mutableStateOf<UpdateState>(UpdateState.Idle)
+   var showUpdateDialog by mutableStateOf(false)
+   // How long to suppress the automatic check after a successful one.
+   private val UPDATE_CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
+
+   /** True when the banner should be visible: an update exists, banner is enabled,
+    *  and the user hasn't hidden this specific version. */
+   val updateBannerVisible: Boolean
+      get() {
+         val rel = (updateState as? UpdateState.Available)?.release ?: return false
+         return showUpdateBanner && rel.versionName != hiddenBannerVersion
+      }
 
    fun checkKeys(context: android.content.Context) {
       keysInstalled = KeysManager.isInstalled(context)
@@ -188,8 +225,23 @@ class MainViewModel : ViewModel() {
       accentMode = SettingsRepository.getInstance(context).getAccentMode()
       accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
       verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
+      compactCardNames = SettingsRepository.getInstance(context).getCompactCardNames()
       decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
       // smartDistribution stays off (disabled for release) — not loaded from prefs.
+
+      val repo = SettingsRepository.getInstance(context)
+      showUpdateBanner = repo.getShowUpdateBanner()
+      hiddenBannerVersion = repo.getHiddenBannerVersion()
+
+      // Restore a previously discovered release so both the menu notification and
+      // (subject to updateBannerVisible) the banner survive restarts and the
+      // once-a-day check throttle. No hide filter here — the menu must always know.
+      val cached = repo.getAvailableRelease()
+      if (cached != null &&
+         UpdateChecker.isNewer(cached.versionName, BuildConfig.VERSION_NAME)
+      ) {
+         updateState = UpdateState.Available(cached)
+      }
    }
 
    fun saveLanguage(context: android.content.Context, lang: String) {
@@ -212,6 +264,11 @@ class MainViewModel : ViewModel() {
       SettingsRepository.getInstance(context).saveVerificationEnabled(enabled)
    }
 
+   fun saveCompactCardNames(context: android.content.Context, enabled: Boolean) {
+      compactCardNames = enabled
+      SettingsRepository.getInstance(context).saveCompactCardNames(enabled)
+   }
+
    fun saveDecompressionThreads(context: android.content.Context, count: Int) {
       decompressionThreads = count
       SettingsRepository.getInstance(context).saveDecompressionThreads(count)
@@ -220,6 +277,96 @@ class MainViewModel : ViewModel() {
    fun saveSmartDistribution(context: android.content.Context, enabled: Boolean) {
       smartDistribution = enabled
       SettingsRepository.getInstance(context).saveSmartDistribution(enabled)
+   }
+
+   fun saveShowUpdateBanner(context: android.content.Context, enabled: Boolean) {
+      showUpdateBanner = enabled
+      SettingsRepository.getInstance(context).saveShowUpdateBanner(enabled)
+   }
+
+   /**
+    * Query GitHub Releases and compare against [BuildConfig.VERSION_NAME].
+    *
+    * The check always runs (an automatic one only skips within
+    * [UPDATE_CHECK_INTERVAL_MS] of the last), so the menu notification stays
+    * accurate. A [manual] check (menu item) reports its outcome via a dialog; an
+    * automatic one stays silent on "up to date"/errors and only auto-opens the
+    * dialog when the banner would be visible.
+    */
+   fun checkForUpdates(context: android.content.Context, manual: Boolean) {
+      val repo = SettingsRepository.getInstance(context)
+      if (!manual) {
+         val since = System.currentTimeMillis() - repo.getLastUpdateCheckMillis()
+         if (since < UPDATE_CHECK_INTERVAL_MS) return
+      }
+      // Don't stack checks.
+      if (updateState is UpdateState.Checking || updateState is UpdateState.Downloading) return
+
+      updateState = UpdateState.Checking
+      if (manual) showUpdateDialog = true
+
+      viewModelScope.launch {
+         try {
+            val release = UpdateChecker.fetchLatest()
+            repo.saveLastUpdateCheckMillis(System.currentTimeMillis())
+            if (UpdateChecker.isNewer(release.versionName, BuildConfig.VERSION_NAME)) {
+               // Cache it so the banner/menu persist across restarts.
+               repo.saveAvailableRelease(release)
+               updateState = UpdateState.Available(release)
+               // Auto-open the dialog only when the banner would actually show.
+               if (manual || updateBannerVisible) showUpdateDialog = true
+            } else {
+               // Up to date — drop any stale cached release so the banner/menu clear.
+               repo.saveAvailableRelease(null)
+               updateState = UpdateState.UpToDate
+               if (!manual) showUpdateDialog = false
+            }
+         } catch (e: Exception) {
+            updateState = UpdateState.Failed(e.message ?: "Unknown error")
+            if (!manual) showUpdateDialog = false
+         }
+      }
+   }
+
+   /** Download the available update's APK and launch the system installer. */
+   fun downloadAndInstall(context: android.content.Context) {
+      val release = (updateState as? UpdateState.Available)?.release ?: return
+      updateState = UpdateState.Downloading(-1f)
+      viewModelScope.launch {
+         try {
+            val apk = File(context.cacheDir, "AndroNSZ_${release.versionName}.apk")
+            UpdateChecker.downloadApk(release.apkUrl, apk) { fraction ->
+               updateState = UpdateState.Downloading(fraction)
+            }
+            ApkInstaller.install(context, apk)
+            // Keep the dialog dismissible; the system installer takes over now.
+            showUpdateDialog = false
+            updateState = UpdateState.Available(release)
+         } catch (e: Exception) {
+            updateState = UpdateState.Failed(e.message ?: "Download failed")
+         }
+      }
+   }
+
+   /**
+    * Hide the main-screen banner for the current version. The overflow-menu
+    * notification stays (updateState remains Available); a newer version un-hides
+    * the banner.
+    */
+   fun hideUpdate(context: android.content.Context) {
+      (updateState as? UpdateState.Available)?.let {
+         hiddenBannerVersion = it.release.versionName
+         SettingsRepository.getInstance(context).saveHiddenBannerVersion(it.release.versionName)
+      }
+      showUpdateDialog = false
+   }
+
+   /** Close the update dialog; a still-available update keeps its banner. */
+   fun dismissUpdateDialog() {
+      showUpdateDialog = false
+      if (updateState is UpdateState.UpToDate || updateState is UpdateState.Failed) {
+         updateState = UpdateState.Idle
+      }
    }
 
    fun saveAccentColor(context: android.content.Context, colorArgb: Int) {
@@ -286,6 +433,32 @@ class MainViewModel : ViewModel() {
    }
 
    fun selectFolder(context: android.content.Context, uri: Uri) {
+      scanFolderInto(context, uri) { statusCb ->
+         FolderScanner.scanFolder(context, uri, statusCb)
+      }
+   }
+
+   /**
+    * Folder-mode selection from the in-app picker, where the source is a real
+    * path. Walks it with [com.androNSZ.fs.RawFolderScanner] (file:// uris), so the
+    * rest of the folder pipeline is unchanged.
+    */
+   fun selectFolderFromFile(context: android.content.Context, folder: java.io.File) {
+      scanFolderInto(context, Uri.fromFile(folder)) { statusCb ->
+         com.androNSZ.fs.RawFolderScanner.scanFolder(folder, statusCb)
+      }
+   }
+
+   /**
+    * Shared folder-scan orchestration for both SAF ([selectFolder]) and raw-path
+    * ([selectFolderFromFile]) sources: sets up the log/status plumbing, runs the
+    * given [scan], and stores the resulting [FolderStructure] + mode.
+    */
+   private inline fun scanFolderInto(
+      context: android.content.Context,
+      rootUri: Uri,
+      crossinline scan: suspend (NszConverter.StatusCallback) -> FolderStructure
+   ) {
       viewModelScope.launch {
          try {
             statusMessage = context.getString(R.string.status_scanning_folder)
@@ -305,10 +478,10 @@ class MainViewModel : ViewModel() {
                }
             }
 
-            val structure = FolderScanner.scanFolder(context, uri, statusCb)
+            val structure = scan(statusCb)
             folderStructure = structure
             buildFolderFileEntries(structure)
-            conversionMode = ConversionMode.FolderMode(uri, structure)
+            conversionMode = ConversionMode.FolderMode(rootUri, structure)
             statusMessage = null
          } catch (e: Exception) {
             statusMessage = context.getString(R.string.error_scan_failed, e.message ?: "")
@@ -320,11 +493,12 @@ class MainViewModel : ViewModel() {
       }
    }
 
-   /** Rebuilds [folderFileEntries] (all Pending) from the scanned NSZ/XCZ files. */
+   /** Rebuilds [folderFileEntries] (all Pending) from every scanned file
+    *  (NSZ/XCZ that get unpacked plus everything else that gets copied). */
    private fun buildFolderFileEntries(structure: FolderStructure) {
       folderFileEntries.clear()
       folderFileEntries.addAll(
-         collectCompressedFiles(structure.allFiles).map { node ->
+         collectAllFiles(structure.allFiles).map { node ->
             FileEntry(node.uri, node.name, node.sizeBytes)
          }
       )
@@ -339,13 +513,118 @@ class MainViewModel : ViewModel() {
          status = event.status,
          unpackDurationMs = event.durationMs ?: e.unpackDurationMs,
          unpackSpeedMBps = event.speedMBps ?: e.unpackSpeedMBps,
-         unpackedSize = event.unpackedSize ?: e.unpackedSize
+         unpackedSize = event.unpackedSize ?: e.unpackedSize,
+         verify = event.verify
       )
+   }
+
+   /**
+    * Combined-mode selection from the in-app picker: appends the newly marked
+    * files/folders (skipping duplicates already in the list), scanning each folder
+    * once via [RawFolderScanner] off the main thread, then rebuilds the merged
+    * structure. Scanning folders is why this is async — [combinedScanning] flags it.
+    */
+   fun setCombinedSelection(context: android.content.Context, files: List<java.io.File>) {
+      viewModelScope.launch {
+         combinedScanning = true
+         try {
+            val existing = combinedItems.mapTo(mutableSetOf()) { it.file.absolutePath }
+            for (f in files) {
+               if (!existing.add(f.absolutePath)) continue
+               val item = withContext(Dispatchers.IO) { buildCombinedItem(f) }
+               combinedItems.add(item)
+            }
+            rebuildCombinedStructure()
+         } finally {
+            combinedScanning = false
+         }
+      }
+   }
+
+   /** Builds one selection entry: a scanned folder, or a standalone file. */
+   private suspend fun buildCombinedItem(f: java.io.File): CombinedItem {
+      return if (f.isDirectory) {
+         val structure = com.androNSZ.fs.RawFolderScanner.scanFolder(f)
+         CombinedItem(
+            file = f,
+            isDirectory = true,
+            structure = structure,
+            sizeBytes = structure.totalSize,
+            nszCount = structure.nszFiles.size,
+            xczCount = structure.xczFiles.size
+         )
+      } else {
+         val name = f.name
+         val isNsz = name.endsWith(".nsz", ignoreCase = true)
+         val isXcz = name.endsWith(".xcz", ignoreCase = true)
+         CombinedItem(
+            file = f,
+            isDirectory = false,
+            structure = null,
+            sizeBytes = f.length(),
+            nszCount = if (isNsz) 1 else 0,
+            xczCount = if (isXcz) 1 else 0
+         )
+      }
+   }
+
+   fun removeCombinedItem(index: Int) {
+      if (index in combinedItems.indices) {
+         combinedItems.removeAt(index)
+         rebuildCombinedStructure()
+      }
+   }
+
+   /**
+    * Merges [combinedItems] into a single [FolderStructure] (standalone files as
+    * top-level nodes, each folder as a top-level directory carrying its scanned
+    * subtree) and stores it in the folder-mode fields so the shared pipeline and
+    * per-file list work unchanged. The synthetic rootUri is unused (combined
+    * creates no wrapper folder).
+    */
+   private fun rebuildCombinedStructure() {
+      if (combinedItems.isEmpty()) {
+         folderStructure = null
+         folderFileEntries.clear()
+         return
+      }
+      val allFiles = mutableListOf<FileNode>()
+      val nsz = mutableListOf<Uri>()
+      val xcz = mutableListOf<Uri>()
+      var total = 0L
+      for (item in combinedItems) {
+         if (item.isDirectory) {
+            val s = item.structure ?: continue
+            allFiles.add(FileNode.Directory(item.file.name, s.allFiles))
+            nsz.addAll(s.nszFiles)
+            xcz.addAll(s.xczFiles)
+            total += s.totalSize
+         } else {
+            val name = item.file.name
+            val isNsz = name.endsWith(".nsz", ignoreCase = true)
+            val isXcz = name.endsWith(".xcz", ignoreCase = true)
+            val uri = Uri.fromFile(item.file)
+            allFiles.add(FileNode.File(uri, name, isNsz, isXcz, item.sizeBytes))
+            if (isNsz) nsz.add(uri) else if (isXcz) xcz.add(uri)
+            total += item.sizeBytes
+         }
+      }
+      val structure = FolderStructure(
+         rootUri = Uri.EMPTY,
+         nszFiles = nsz,
+         xczFiles = xcz,
+         allFiles = allFiles,
+         totalSize = total
+      )
+      folderStructure = structure
+      buildFolderFileEntries(structure)
    }
 
    fun resetConversionState() {
       conversionMode = ConversionMode.None
       fileQueue.clear()
+      combinedItems.clear()
+      combinedScanning = false
       folderStructure = null
       folderFileEntries.clear()
       isConverting = false
@@ -457,12 +736,16 @@ class MainViewModel : ViewModel() {
                unpackedSize = null
             )
             val fileStartMs = System.currentTimeMillis()
+            // Captured by convert()'s onVerified below; local to this per-file
+            // coroutine, so it never races with other parallel conversions. XCZ
+            // stays NOT_CHECKED (XCI verification is not implemented).
+            var verifyStatus = VerifyStatus.NOT_CHECKED
             try {
                // XCZ → XCI, everything else → NSZ → NSP.
                val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
                   NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
                } else {
-                  NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
+                  NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb, mask, onVerified = { verifyStatus = it })
                }
                // NB: no .catch here — a failure must propagate to the surrounding
                // try/catch so the file stays Failed. Swallowing it with .catch lets
@@ -484,7 +767,8 @@ class MainViewModel : ViewModel() {
                   status = FileStatus.Completed,
                   unpackDurationMs = fileDurationMs,
                   unpackSpeedMBps = fileSpeedMBps,
-                  unpackedSize = unpackedBytes
+                  unpackedSize = unpackedBytes,
+                  verify = verifyStatus
                )
             } catch (e: Exception) {
                fileQueue[i] = file.copy(status = FileStatus.Failed)
@@ -565,7 +849,46 @@ class MainViewModel : ViewModel() {
       }
    }
 
-   fun startFolderConversion(context: android.content.Context) {
+   fun startFolderConversion(context: android.content.Context) =
+      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+         FolderProcessor.processFolder(
+            context, structure, verifyKey, outputFolderUri, concurrency,
+            smartDistribution, progressCallback, statusCallback, fileEventCallback
+         )
+      }
+
+   /**
+    * Combined mode (files + folders together). Reuses the whole folder-mode
+    * pipeline (state, progress, stats, logging) and only swaps in
+    * [FolderProcessor.processCombined], which plants the selection directly in the
+    * output base (no wrapper folder). Operates on the merged [folderStructure]
+    * built by [rebuildCombinedStructure].
+    */
+   fun startCombinedConversion(context: android.content.Context) =
+      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+         FolderProcessor.processCombined(
+            context, structure, verifyKey, outputFolderUri, concurrency,
+            smartDistribution, progressCallback, statusCallback, fileEventCallback
+         )
+      }
+
+   /**
+    * Shared orchestration for the folder-style modes (folder and combined). Both
+    * operate on [folderStructure] and drive the same folder-* progress/stats
+    * fields, differing only in the [process] call. Sets up verification, logging
+    * and the timer, runs [process], then maps the summary into the stats UI.
+    */
+   private fun runFolderStyleConversion(
+      context: android.content.Context,
+      process: suspend (
+         structure: FolderStructure,
+         verifyKey: ByteArray?,
+         concurrency: Int,
+         progressCallback: (FolderProgressUpdate) -> Unit,
+         statusCallback: NszConverter.StatusCallback,
+         fileEventCallback: (FolderFileEvent) -> Unit
+      ) -> Result<Pair<Uri, FolderConversionSummary>>
+   ) {
       val structure = folderStructure ?: return
 
       isConverting = true
@@ -610,13 +933,10 @@ class MainViewModel : ViewModel() {
 
       viewModelScope.launch {
          try {
-            val result = FolderProcessor.processFolder(
-               context,
+            val result = process(
                structure,
                verifyKey,
-               outputFolderUri,
                concurrency,
-               smartDistribution,
                { update ->
                   folderOverallProgress = update.overallProgress
                   folderActiveFiles = update.activeFiles

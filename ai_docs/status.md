@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-03)
+# Status (updated: 2026-07-08)
 
 ## Working
 
@@ -15,6 +15,11 @@
   The filename check is an approximation, see [architecture.md](architecture.md) A12.
 - Output to a chosen folder (SAF tree / file uri) — in all modes, with a fallback
   to Downloads (`NszConverter.createOutputUri`).
+- **Custom in-app file picker** (split-screen, browses the raw filesystem via
+  `MANAGE_EXTERNAL_STORAGE`) replaces the SAF input pickers in both modes: files-mode
+  multi-selects files, folder-mode selects one folder (A14). Compiles/installs/launches
+  on device; interactive flows tested manually (adb tap injection is blocked on the
+  MIUI test device).
 - "Save on-screen log" button under the log panel (both modes) → `nsz_screen_log.txt`,
   separate from the engine and folder logs.
 - EN/RU localization, in-app language selection (`recreate()`), output folder
@@ -54,6 +59,11 @@
 
 ## Deferred
 
+- **Combined picker mode** (mark files + folders together in one pass) and then
+  dropping the two separate modes — the picker is built mode-scoped for now (A14).
+- **Multi-folder selection** in folder mode — the folder pipeline is single-root.
+- **Picker row-spacing tuning control** — the gear menu's two live spacing fields are a
+  temporary aid; once good values are found, hardcode them and remove the fields/menu.
 - **Block-level parallelism in C** — branch `block-parallel-wip` (commit `aa7cf73`).
   Currently BROKEN, not in `stable`. `stable` uses file-level batch parallelism. Reason
   deferred: instability; the perf target is already met by other means.
@@ -69,6 +79,16 @@
 
 ## Decision log
 
+- 2026-07-08 — **custom in-app file picker** ([architecture.md](architecture.md) A14).
+  Replaced the SAF input pickers with a split-screen picker that browses the raw
+  filesystem (`java.io.File`) under `MANAGE_EXTERNAL_STORAGE`. Reason: SAF adds files one
+  at a time and can't roam storage freely; the raw path also feeds the engine `file://`
+  directly (fast path). Reused what already accepts `file://` (engine `convert`,
+  `FolderProcessor`); only the folder scanner was duplicated (`RawFolderScanner`). New:
+  `FilePickerScreen`, `PickerMode`, `StoragePermission`, `Screen.FilePicker`,
+  `MainViewModel.selectFolderFromFile`. Fixed `file://` name/size helpers
+  ([gotchas.md](gotchas.md) G13). Scope kept minimal (files-mode = files, folder-mode =
+  one folder); combined mode deferred. New JNI: none.
 - 2026-07-08 — **release prep on `dev`** (three changes):
   1. **Accent color:** new `AccentMode.DEFAULT` (fixed brand accent `#a6c8ff`,
      `Color.kt` `DefaultAccent`), listed **first** and now the out-of-box default

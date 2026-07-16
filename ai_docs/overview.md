@@ -49,8 +49,9 @@ AndroNSZ/
         ├── data/                 # SettingsRepository (DataStore + SharedPrefs)
         ├── model/                # data classes and sealed state classes
         ├── nut/                  # KeysManager / KeysParser (prod.keys)
-        ├── fs/                   # folder scanner, FolderProcessor, temp, logs
-        ├── ui/                   # screen/ + conversion/ + components/ + theme/
+        ├── fs/                   # folder scanners (SAF + raw FS), FolderProcessor, temp, logs
+        ├── util/                 # FileUtils/FormatUtils, StoragePermission (all-files access)
+        ├── ui/                   # screen/ (incl. FilePickerScreen) + conversion/ + components/ + theme/
         └── viewmodel/            # MainViewModel — all state and logic
 ```
 

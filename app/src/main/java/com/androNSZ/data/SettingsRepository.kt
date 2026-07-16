@@ -11,6 +11,7 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.androNSZ.model.AccentMode
+import com.androNSZ.model.ReleaseInfo
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
 import kotlinx.coroutines.flow.Flow
@@ -42,6 +43,16 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val VERIFICATION_KEY = "verification_enabled"
       private const val DECOMPRESSION_THREADS_KEY = "decompression_threads"
       private const val SMART_DISTRIBUTION_KEY = "smart_distribution"
+      private const val COMPACT_CARD_NAMES_KEY = "compact_card_names"
+      private const val SHOW_UPDATE_BANNER_KEY = "show_update_banner"
+      private const val LAST_UPDATE_CHECK_KEY = "last_update_check_ms"
+      private const val HIDDEN_BANNER_VERSION_KEY = "hidden_banner_version"
+      // The last known available release, cached so the main-screen banner
+      // survives app restarts (and the once-a-day check throttle).
+      private const val AVAILABLE_VERSION_KEY = "available_update_version"
+      private const val AVAILABLE_APK_URL_KEY = "available_update_apk_url"
+      private const val AVAILABLE_PAGE_URL_KEY = "available_update_page_url"
+      private const val AVAILABLE_NOTES_KEY = "available_update_notes"
       // Default custom accent = the app's built-in purple (Purple40).
       const val DEFAULT_ACCENT_COLOR = 0xFF6650A4.toInt()
    }
@@ -113,6 +124,66 @@ class SettingsRepository private constructor(private val context: Context) {
 
    fun saveSmartDistribution(enabled: Boolean) {
       langPrefs.edit().putBoolean(SMART_DISTRIBUTION_KEY, enabled).apply()
+   }
+
+   // GUI: render each file card's name on a single line and show its extension
+   // (NSZ/XCZ highlighted) in the stats row. Default OFF. Read synchronously.
+   fun getCompactCardNames(): Boolean = langPrefs.getBoolean(COMPACT_CARD_NAMES_KEY, false)
+
+   fun saveCompactCardNames(enabled: Boolean) {
+      langPrefs.edit().putBoolean(COMPACT_CARD_NAMES_KEY, enabled).apply()
+   }
+
+   // Whether to show the "update available" banner on the main screen. Default ON.
+   // This gates only the banner — the update check itself always runs, so the
+   // (non-disableable) overflow-menu notification stays accurate.
+   fun getShowUpdateBanner(): Boolean = langPrefs.getBoolean(SHOW_UPDATE_BANNER_KEY, true)
+
+   fun saveShowUpdateBanner(enabled: Boolean) {
+      langPrefs.edit().putBoolean(SHOW_UPDATE_BANNER_KEY, enabled).apply()
+   }
+
+   fun getLastUpdateCheckMillis(): Long = langPrefs.getLong(LAST_UPDATE_CHECK_KEY, 0L)
+
+   fun saveLastUpdateCheckMillis(millis: Long) {
+      langPrefs.edit().putLong(LAST_UPDATE_CHECK_KEY, millis).apply()
+   }
+
+   // Version whose banner the user tapped "Hide" on; the main-screen banner stays
+   // hidden for it (a newer version un-hides it). The menu notification ignores this.
+   fun getHiddenBannerVersion(): String = langPrefs.getString(HIDDEN_BANNER_VERSION_KEY, "") ?: ""
+
+   fun saveHiddenBannerVersion(version: String) {
+      langPrefs.edit().putString(HIDDEN_BANNER_VERSION_KEY, version).apply()
+   }
+
+   /** The cached available release, or null once the app is up to date. */
+   fun getAvailableRelease(): ReleaseInfo? {
+      val version = langPrefs.getString(AVAILABLE_VERSION_KEY, "") ?: ""
+      if (version.isEmpty()) return null
+      return ReleaseInfo(
+         versionName = version,
+         apkUrl = langPrefs.getString(AVAILABLE_APK_URL_KEY, "") ?: "",
+         releasePageUrl = langPrefs.getString(AVAILABLE_PAGE_URL_KEY, "") ?: "",
+         notes = langPrefs.getString(AVAILABLE_NOTES_KEY, "") ?: ""
+      )
+   }
+
+   /** Cache (or clear, when null) the available release for the persistent banner. */
+   fun saveAvailableRelease(release: ReleaseInfo?) {
+      langPrefs.edit().apply {
+         if (release == null) {
+            remove(AVAILABLE_VERSION_KEY)
+            remove(AVAILABLE_APK_URL_KEY)
+            remove(AVAILABLE_PAGE_URL_KEY)
+            remove(AVAILABLE_NOTES_KEY)
+         } else {
+            putString(AVAILABLE_VERSION_KEY, release.versionName)
+            putString(AVAILABLE_APK_URL_KEY, release.apkUrl)
+            putString(AVAILABLE_PAGE_URL_KEY, release.releasePageUrl)
+            putString(AVAILABLE_NOTES_KEY, release.notes)
+         }
+      }.apply()
    }
 
    val statsFormatFlow: Flow<StatsFormat> = context.dataStore.data
