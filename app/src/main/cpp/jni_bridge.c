@@ -5,6 +5,7 @@
 #include "ncz_engine.h"
 #include "nca_verifier.h"
 #include "nca_cnmt.h"
+#include "cpu_affinity.h"
 #include "nsz_debug.h"
 
 #define LOG_TAG "AndroNSZ"
@@ -318,4 +319,26 @@ Java_com_androNSZ_NszConverter_nativeVerifyNsp(
 
     if (rc == 0) return NULL;
     return (*env)->NewStringUTF(env, err[0] ? err : "verify: unknown error");
+}
+
+/* ---------- JNI: thread CPU affinity ----------
+ * Pin the CURRENT thread (the IO thread that runs nativeConvert) to a CPU
+ * cluster mask, so the core-aware scheduler keeps a conversion on the intended
+ * big/little cores. The spawned async_writer pthread inherits this mask. */
+JNIEXPORT jint JNICALL
+Java_com_androNSZ_NszConverter_nativeSetThreadAffinity(
+        JNIEnv *env, jclass clazz, jlong mask)
+{
+    (void)env;
+    (void)clazz;
+    return (jint)cpu_affinity_set((uint64_t)mask);
+}
+
+JNIEXPORT void JNICALL
+Java_com_androNSZ_NszConverter_nativeClearThreadAffinity(
+        JNIEnv *env, jclass clazz)
+{
+    (void)env;
+    (void)clazz;
+    cpu_affinity_reset();
 }

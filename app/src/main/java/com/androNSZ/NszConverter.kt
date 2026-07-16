@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
+import com.androNSZ.model.VerifyStatus
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.queryFileName
@@ -70,6 +71,20 @@ object NszConverter {
         keyAreaKeys: ByteArray?
     )
 
+    /**
+     * Pin the CURRENT thread to the CPU cluster in [mask] (bit i = CPU i), so the
+     * core-aware scheduler keeps a conversion on the intended big/little cores.
+     * Must be called on the same thread that then runs [nativeConvert]. Returns 0
+     * on success or a negative errno (e.g. EPERM on kernels that forbid it — the
+     * caller falls back to no pinning). See [ioPinned].
+     */
+    @JvmStatic
+    external fun nativeSetThreadAffinity(mask: Long): Int
+
+    /** Restore the affinity saved by the last [nativeSetThreadAffinity] on this thread. */
+    @JvmStatic
+    external fun nativeClearThreadAffinity()
+
     interface ProgressCallback {
         fun onProgress(done: Long, total: Long)
     }
@@ -104,6 +119,11 @@ object NszConverter {
         headerKey: ByteArray?,
         outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
+        affinityMask: Long? = null,
+        // Invoked once with the verification outcome. Captured per-call so the
+        // queue can label the card without racing on the shared lastVerify* fields
+        // under parallel conversions.
+        onVerified: (VerifyStatus) -> Unit = {},
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
@@ -165,7 +185,7 @@ object NszConverter {
                 }
             }
 
-            var result = withContext(Dispatchers.IO) {
+            var result = ioPinned(affinityMask) {
                 nativeConvert(inputPath, nativePath, cb, statusCallback)
             }
 
@@ -182,18 +202,22 @@ object NszConverter {
                 inputPfd = null
                 val r = withContext(Dispatchers.IO) { resolveToFilePath(context, inputUri, statusCallback) }
                 resolvedInput = r
-                result = withContext(Dispatchers.IO) {
+                result = ioPinned(affinityMask) {
                     nativeConvert(r.file.absolutePath, nativePath, cb, statusCallback)
                 }
             }
 
+            var verify = VerifyStatus.NOT_CHECKED
             if (result == 0 && headerKey != null) {
-                lastVerifyError = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
+                val err = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
+                lastVerifyError = err
                 lastVerifySkipped = false
+                verify = if (err == null) VerifyStatus.CHECKED else VerifyStatus.FAILED
             } else if (result == 0) {
                 lastVerifyError = null
                 lastVerifySkipped = true
             }
+            if (result == 0) onVerified(verify)
 
             when (result) {
                 OK -> {
@@ -230,6 +254,7 @@ object NszConverter {
         headerKey: ByteArray?,
         outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
+        affinityMask: Long? = null,
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
@@ -288,7 +313,7 @@ object NszConverter {
                 }
             }
 
-            var result = withContext(Dispatchers.IO) {
+            var result = ioPinned(affinityMask) {
                 nativeConvertXcz(inputPath, nativePath, cb, statusCallback)
             }
 
@@ -303,7 +328,7 @@ object NszConverter {
                 inputPfd = null
                 val r = withContext(Dispatchers.IO) { resolveToFilePath(context, inputUri, statusCallback) }
                 resolvedInput = r
-                result = withContext(Dispatchers.IO) {
+                result = ioPinned(affinityMask) {
                     nativeConvertXcz(r.file.absolutePath, nativePath, cb, statusCallback)
                 }
             }
@@ -338,6 +363,35 @@ object NszConverter {
     }
 
     fun cancel() = nativeCancel()
+
+    /**
+     * Probe whether thread affinity is usable on this device (some OEM kernels
+     * return EPERM). Sets and clears a trivial mask on an IO thread; true if the
+     * kernel accepted it. The core-aware scheduler falls back to no pinning when
+     * this is false.
+     */
+    suspend fun affinitySupported(): Boolean = withContext(Dispatchers.IO) {
+        val rc = nativeSetThreadAffinity(1L)  // CPU 0 always exists
+        if (rc == 0) nativeClearThreadAffinity()
+        rc == 0
+    }
+
+    /**
+     * Run [block] (a native convert call) on the IO dispatcher, pinned to the
+     * [affinityMask] CPU cluster for its duration. The async_writer thread spawned
+     * by native inherits this affinity. `null` = no pinning (homogeneous CPU or
+     * affinity unsupported). Affinity is reset afterwards so the pooled IO thread
+     * isn't left pinned for later work.
+     */
+    private suspend fun <T> ioPinned(affinityMask: Long?, block: () -> T): T =
+        withContext(Dispatchers.IO) {
+            if (affinityMask != null) nativeSetThreadAffinity(affinityMask)
+            try {
+                block()
+            } finally {
+                if (affinityMask != null) nativeClearThreadAffinity()
+            }
+        }
 
     private fun createOutputUri(context: Context, outputBaseUri: Uri?, outputName: String): Uri {
         if (outputBaseUri != null) {

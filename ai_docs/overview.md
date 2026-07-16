@@ -49,8 +49,9 @@ AndroNSZ/
         ├── data/                 # SettingsRepository (DataStore + SharedPrefs)
         ├── model/                # data classes and sealed state classes
         ├── nut/                  # KeysManager / KeysParser (prod.keys)
-        ├── fs/                   # folder scanner, FolderProcessor, temp, logs
-        ├── ui/                   # screen/ + conversion/ + components/ + theme/
+        ├── fs/                   # folder scanners (SAF + raw FS), FolderProcessor, temp, logs
+        ├── util/                 # FileUtils/FormatUtils, StoragePermission (all-files access)
+        ├── ui/                   # screen/ (incl. FilePickerScreen) + conversion/ + components/ + theme/
         └── viewmodel/            # MainViewModel — all state and logic
 ```
 
@@ -64,7 +65,9 @@ Per-module details — in [subsystems/kotlin-layer.md](subsystems/kotlin-layer.m
 - Hardware AES-CTR and SHA-256 (ARMv8 crypto extensions) with a software fallback.
 - No-copy input reading via `fd:N` with a temp-copy fallback for FUSE providers.
 - Async output writing (`async_writer`), zstd built with `-O3`, ThinLTO.
-- Core-adaptive batch parallelism in queue mode (`BATCH_CONCURRENCY` = 1..3).
+- Core-adaptive batch/folder parallelism (`resolveConcurrency` → auto 1..3);
+  overridable up to the core count via a Settings slider when verification is off
+  (an experiment to measure core scaling — see [architecture.md](architecture.md) A07).
 - EN/RU localization, in-app language selection, output folder selection (SAF).
 - SHA-256 verification of the finished NCA/NSP (non-fatal — see
   [architecture.md](architecture.md) A12; needs header_key in prod.keys).

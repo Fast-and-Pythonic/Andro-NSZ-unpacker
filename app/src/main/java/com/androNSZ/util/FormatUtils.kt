@@ -3,6 +3,7 @@ package com.androNSZ.util
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import java.io.File
 
 fun resolveDisplayName(context: Context, uri: Uri): String {
    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
@@ -15,6 +16,9 @@ fun resolveDisplayName(context: Context, uri: Uri): String {
 }
 
 fun getUriSize(context: Context, uri: Uri): Long {
+   // A file:// uri points straight at the file; ContentResolver.query() returns
+   // nothing for it and would yield 0, zeroing the overall-progress denominator.
+   if (uri.scheme == "file") return File(uri.path ?: return 0L).length()
    context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
       if (cursor.moveToFirst()) {
          val idx = cursor.getColumnIndex(OpenableColumns.SIZE)

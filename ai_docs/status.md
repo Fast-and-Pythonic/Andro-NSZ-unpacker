@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-03)
+# Status (updated: 2026-07-08)
 
 ## Working
 
@@ -15,6 +15,11 @@
   The filename check is an approximation, see [architecture.md](architecture.md) A12.
 - Output to a chosen folder (SAF tree / file uri) — in all modes, with a fallback
   to Downloads (`NszConverter.createOutputUri`).
+- **Custom in-app file picker** (split-screen, browses the raw filesystem via
+  `MANAGE_EXTERNAL_STORAGE`) replaces the SAF input pickers in both modes: files-mode
+  multi-selects files, folder-mode selects one folder (A14). Compiles/installs/launches
+  on device; interactive flows tested manually (adb tap injection is blocked on the
+  MIUI test device).
 - "Save on-screen log" button under the log panel (both modes) → `nsz_screen_log.txt`,
   separate from the engine and folder logs.
 - EN/RU localization, in-app language selection (`recreate()`), output folder
@@ -54,6 +59,11 @@
 
 ## Deferred
 
+- **Combined picker mode** (mark files + folders together in one pass) and then
+  dropping the two separate modes — the picker is built mode-scoped for now (A14).
+- **Multi-folder selection** in folder mode — the folder pipeline is single-root.
+- **Picker row-spacing tuning control** — the gear menu's two live spacing fields are a
+  temporary aid; once good values are found, hardcode them and remove the fields/menu.
 - **Block-level parallelism in C** — branch `block-parallel-wip` (commit `aa7cf73`).
   Currently BROKEN, not in `stable`. `stable` uses file-level batch parallelism. Reason
   deferred: instability; the perf target is already met by other means.
@@ -69,6 +79,64 @@
 
 ## Decision log
 
+- 2026-07-08 — **custom in-app file picker** ([architecture.md](architecture.md) A14).
+  Replaced the SAF input pickers with a split-screen picker that browses the raw
+  filesystem (`java.io.File`) under `MANAGE_EXTERNAL_STORAGE`. Reason: SAF adds files one
+  at a time and can't roam storage freely; the raw path also feeds the engine `file://`
+  directly (fast path). Reused what already accepts `file://` (engine `convert`,
+  `FolderProcessor`); only the folder scanner was duplicated (`RawFolderScanner`). New:
+  `FilePickerScreen`, `PickerMode`, `StoragePermission`, `Screen.FilePicker`,
+  `MainViewModel.selectFolderFromFile`. Fixed `file://` name/size helpers
+  ([gotchas.md](gotchas.md) G13). Scope kept minimal (files-mode = files, folder-mode =
+  one folder); combined mode deferred. New JNI: none.
+- 2026-07-08 — **release prep on `dev`** (three changes):
+  1. **Accent color:** new `AccentMode.DEFAULT` (fixed brand accent `#a6c8ff`,
+     `Color.kt` `DefaultAccent`), listed **first** and now the out-of-box default
+     (was `SYSTEM`/Material You) in `SettingsRepository.getAccentMode`, the ViewModel
+     initial state, and the `AndroNSZTheme` param. Users can still pick System/Manual;
+     `DEFAULT` shows no manual controls (gated on `== CUSTOM`).
+  2. **Smart core distribution disabled + hidden** (A13): `smartDistribution` forced
+     `false` and not loaded from prefs; the Settings `Card` and its wiring removed.
+     Scheduler code kept (deferred experiment).
+  3. **Use all cores:** `AUTO_CONCURRENCY` = `(availableProcessors()/2).coerceAtLeast(1)`
+     (was `(…/2 − 1).coerceIn(1,3)`). 8 cores → 4 parallel files → all 8 cores busy
+     (2 threads/file). No cores reserved for system/GUI. See [architecture.md](architecture.md) A07.
+- 2026-07-07 — smart load distribution, step 2: **core-aware scheduler**
+  ([architecture.md](architecture.md) A13). Step 1's plain LPT measured *worse*
+  (~840→~700 MB/s) because order alone doesn't control which core takes which file.
+  New: `CpuTopology` (sysfs speed + cluster masks), `CoreScheduler` (LPT + greedy ECT +
+  makespan local search, static, "protect makespan" — no work-stealing), and native
+  `cpu_affinity.c` + `nativeSetThreadAffinity/Clear` pinning the decompress to a cluster
+  on the IO thread before `nativeConvert`. Engages only when the CPU is heterogeneous
+  and affinity works (EPERM → baseline); homogeneous/no-affinity → natural-order
+  semaphore. `convert*`/`convertDirect` gained `affinityMask`; `processFolder` gained
+  `smartDistribution` (replaces `largestFirst`). Unit tests: `CoreSchedulerTest`,
+  `CpuTopologyTest`. **Deferred:** speed calibration by measurement + guarded
+  work-stealing (hybrid); then SHA-256 per-core layout (A12 §3). New JNI methods are
+  additive; crypto/decompress untouched.
+- 2026-07-07 — smart load distribution, step 1: **LPT (largest-first)**
+  ([architecture.md](architecture.md) A07). Measurement confirmed decompression is
+  CPU-bound (1 worker ~250–360 MB/s → ~800 MB/s aggregate at ~6 cores), so the old
+  "write ceiling" assumption is wrong for ≤6 cores. Both batch and folder now create
+  their conversion coroutines in descending-size order; the fair `Semaphore` hands
+  permits to the largest files first, so a heavy file never trails on a slow core.
+  Gated by a **separate Settings toggle** `smart_distribution` (default ON; kept
+  toggleable for A/B measurement). `FolderProcessor.processFolder` gained a
+  `largestFirst` param. Kotlin-only — no native changes. **Next steps** (deferred):
+  (a) explicit big/little core affinity — new native `cpu_affinity.c` +
+  `nativeSetThreadAffinity` (`sched_setaffinity` on the IO thread before
+  `nativeConvert`) + a Kotlin `CpuTopology` reader (sysfs `cpu_capacity` /
+  `cpuinfo_max_freq`), largest files → big cluster, EPERM → silent fallback to plain
+  LPT, under the same toggle; (b) smart SHA-256 core layout (A12 §3).
+- 2026-07-07 — configurable decompression parallelism (measurement experiment,
+  [architecture.md](architecture.md) A07). `BATCH_CONCURRENCY`/`FOLDER_CONCURRENCY`
+  replaced by `MainViewModel.resolveConcurrency(verificationEnabled, override)`; a
+  Settings slider (`decompression_threads`, 0 = auto) can raise the worker count up to
+  the core count, **only when verification is off**. `FolderProcessor.processFolder`
+  now takes a `concurrency` param. Goal: test the A12 §3 premise (bottleneck = storage
+  write, not cores) before investing in `block-parallel-wip` or the "SHA on dedicated
+  cores" layout. Native code, crypto and `nativeSetVerification` untouched. Parallelism
+  is per-file — the slider only scales a queue/folder of several files.
 - 2026-07-03 — CNMT-based verification + a settings toggle (A12). New native module
   `nca_cnmt.c` extracts full expected NCA hashes from the input's META NCA (XTS header →
   ECB key-area unwrap with `key_area_key_application_XX` from prod.keys → CTR PFS0 →

@@ -8,13 +8,18 @@
     <string name="action_add_files">Добавить файлы</string>
     <string name="action_select_files">Выбрать файлы</string>
     <string name="action_select_folder">Выбрать папку</string>
+    <string name="action_select_files_folders">Выбрать файлы/папки</string>
     <string name="action_convert_files">Распаковать %d файл(ов)</string>
     <string name="action_convert_folder">Конвертировать папку</string>
+    <string name="action_add_files_folders">Добавить файлы и папки</string>
+    <string name="action_convert_combined">Распаковать %d объект(ов)</string>
+    <string name="action_show_selected">Все выбранные файлы и папки (%1$d · %2$s)</string>
+    <string name="action_hide_selected">Все выбранные файлы и папки (%1$d · %2$s)</string>
     <string name="action_delete">Удалить</string>
     <string name="action_show_structure">Показать структуру папки</string>
     <string name="action_hide_structure">Скрыть структуру папки</string>
-    <string name="action_show_unpack_files">Файлы NSZ/XCZ для распаковки</string>
-    <string name="action_hide_unpack_files">Скрыть файлы NSZ/XCZ</string>
+    <string name="action_show_unpack_files">Все файлы</string>
+    <string name="action_hide_unpack_files">Скрыть все файлы</string>
     <string name="action_show_log">Показать лог</string>
     <string name="action_hide_log">Скрыть лог</string>
     <string name="action_wrap_lines_on">Перенос Включён</string>
@@ -22,6 +27,35 @@
     <string name="action_install_prod_keys">Установить prod.keys</string>
     <string name="action_change_prod_keys">Изменить prod.keys</string>
     <string name="action_remove_prod_keys">Удалить prod.keys</string>
+    <string name="action_cancel">Отмена</string>
+    <string name="action_done">Готово</string>
+
+    <!-- File picker -->
+    <string name="picker_title_files">Выбор файлов</string>
+    <string name="picker_title_folder">Выбор папки</string>
+    <string name="picker_title_mixed">Выбор файлов и папок</string>
+    <string name="picker_selected_count">Выбрано: %d</string>
+    <string name="picker_nothing_selected">Пока ничего не выбрано</string>
+    <string name="picker_up">На уровень вверх</string>
+    <string name="picker_empty_folder">Пустая папка</string>
+    <string name="picker_permission_rationale">Файловому менеджеру нужен доступ ко всем файлам, чтобы просматривать хранилище. Выдайте его на открывшемся экране настроек.</string>
+    <string name="picker_permission_grant">Выдать доступ</string>
+    <string name="picker_gui_settings">Настройка GUI</string>
+    <string name="picker_crosses_side">Сторона крестиков</string>
+    <string name="picker_checkboxes_side">Сторона чекбоксов</string>
+    <string name="picker_side_left">Слева</string>
+    <string name="picker_side_right">Справа</string>
+    <string name="picker_spacing_settings">Настройка отступов</string>
+    <string name="picker_row_spacing_top">Отступ строк (верх)</string>
+    <string name="picker_row_spacing_files">Отступ файлов</string>
+    <string name="picker_row_spacing_folders">Отступ папок</string>
+    <string name="cd_picker_settings">Настройки пикера</string>
+    <string name="cd_picker_sort">Сортировка</string>
+    <string name="picker_sort_by">Сортировать по</string>
+    <string name="picker_sort_name">Имени</string>
+    <string name="picker_sort_size">Размеру</string>
+    <string name="picker_sort_date">Дате изменения</string>
+    <string name="picker_sort_type">Типу</string>
 
     <!-- Labels -->
     <string name="label_current_file">Текущий файл</string>
@@ -33,16 +67,24 @@
     <string name="msg_select_mode">Выберите режим распаковки</string>
     <string name="msg_select_files_desc">Выберите один или несколько NSZ/XCZ файлов для распаковки</string>
     <string name="msg_select_folder_desc">Конвертирует все NSZ/XCZ файлы в выбранной папке, сохраняя её структуру</string>
+    <string name="msg_select_files_folders_desc">Отмечайте файлы и целые папки вместе; каждый объект распаковывается в выходную папку</string>
     <string name="msg_tap_add_files">Нажмите \"Добавить файлы\" чтобы начать</string>
+    <string name="msg_tap_add_files_folders">Нажмите \"Добавить файлы и папки\" чтобы начать</string>
     <string name="msg_saved_to_downloads">Сохранено в Downloads</string>
     <string name="msg_see_log_details">Подробности в логе</string>
 
     <!-- Status -->
     <string name="status_waiting">Ожидает</string>
-    <string name="status_converting">Конвертируется…</string>
+    <string name="status_converting">Распаковка…</string>
+    <string name="status_copying">Копирование…</string>
     <string name="status_unpacking">Распаковываем…</string>
     <string name="status_unpacked">Распаковано</string>
+    <string name="status_not_unpacked">Не распаковано</string>
+    <string name="status_copied">Скопировано</string>
+    <string name="status_not_copied">Не скопировано</string>
     <string name="status_done">Готово</string>
+    <string name="status_verified">Проверено</string>
+    <string name="status_not_verified">Не проверено</string>
     <string name="status_error">Ошибка</string>
     <string name="status_scanning_folder">Сканирование папки…</string>
     <string name="status_cancelled">Отменено.</string>
@@ -59,6 +101,7 @@
     <string name="format_files_queued">Файлов в очереди: %d</string>
     <string name="format_files_processed">Файлы: %1$d / %2$d</string>
     <string name="format_nsz_files_count">NSZ файлов: %d</string>
+    <string name="format_xcz_files_count">XCZ файлов: %d</string>
     <string name="format_total_files_count">Всего файлов: %d</string>
     <string name="format_size">Размер: %s</string>
     <string name="format_files_completed">Обработано %1$d из %2$d файлов</string>
@@ -84,6 +127,11 @@
     <string name="stats_xcz_conversion">XCZ файлов распаковано:</string>
     <string name="stats_files_copied">Файлов просто скопировано:</string>
 
+    <!-- GUI settings (conversion screen overflow menu) -->
+    <string name="action_gui_settings">Настроить GUI</string>
+    <string name="gui_settings_title">Настройка GUI</string>
+    <string name="settings_compact_card_names">Краткие имена карточек файлов</string>
+
     <!-- Settings screen -->
     <string name="action_settings">Настройки</string>
     <string name="settings_title">Настройки</string>
@@ -103,11 +151,17 @@
     <string name="theme_light">Светлая</string>
     <string name="theme_dark">Тёмная</string>
     <string name="settings_accent">Акцентный цвет</string>
+    <string name="accent_default">Дефолтный</string>
     <string name="accent_system">Системный</string>
     <string name="accent_custom">Вручную</string>
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
     <string name="settings_verification">Проверка результата</string>
     <string name="settings_verification_desc">Сверять хеши распакованных NCA с метаданными CNMT. Почти бесплатно; несовпадения выводятся как предупреждения, а результат всегда сохраняется.</string>
+    <string name="settings_decompression_threads">Воркеры распаковки</string>
+    <string name="settings_threads_auto">Авто</string>
+    <string name="settings_decompression_threads_desc">Экспериментально: сколько файлов распаковывать параллельно (доступно только при выключенной проверке). «Авто» подстраивается под число ядер. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
+    <string name="settings_smart_distribution">Умное распределение по ядрам</string>
+    <string name="settings_smart_distribution_desc">На big.LITTLE-телефонах крупные файлы идут на быстрые ядра, мелкие — на медленные (с привязкой к ядрам), вместо того чтобы тяжёлый файл застревал на слабом ядре. Ускоряет очередь или папку из нескольких файлов; при однородном CPU или недоступной привязке — обычное планирование.</string>
 
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>
@@ -140,4 +194,20 @@
     <string name="action_save_log">Сохранить лог с экрана</string>
     <string name="msg_screen_log_saved">Лог сохранён: %1$s</string>
     <string name="msg_screen_log_save_failed">Не удалось сохранить лог: %1$s</string>
+
+    <!-- Update check -->
+    <string name="action_check_updates">Проверить обновления</string>
+    <string name="menu_update_available">Вышла новая версия v%s</string>
+    <string name="update_dialog_title">Обновление приложения</string>
+    <string name="msg_checking_update">Проверка обновлений…</string>
+    <string name="msg_update_available">Доступна версия %s.</string>
+    <string name="update_notes_label">Что нового</string>
+    <string name="action_update_now">Обновить</string>
+    <string name="action_update_later">Позже</string>
+    <string name="action_hide">Скрыть</string>
+    <string name="msg_downloading_update">Загрузка обновления…</string>
+    <string name="msg_up_to_date">У вас последняя версия.</string>
+    <string name="msg_update_check_failed">Не удалось проверить обновления: %s</string>
+    <string name="settings_show_update_banner">Показывать баннер обновления на главном экране</string>
+    <string name="settings_show_update_banner_desc">Когда доступен новый релиз, показывать баннер на главном экране. Проверка обновлений выполняется всегда, а уведомление в меню ⋮ отключить нельзя.</string>
 </resources>

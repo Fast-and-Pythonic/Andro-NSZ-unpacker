@@ -23,6 +23,7 @@ Python reference nicoboss/nsz.
 | `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
 | `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS of the header, "NCA3" magic check, SHA-256 of sections |
 | `nca_cnmt.c` | CNMT verification: extract full expected NCA hashes from the input's META NCA (`CnmtHashSet`); global config `nca_verify_config_set`. See [../architecture.md](../architecture.md) A12 |
+| `cpu_affinity.c` | Thread CPU affinity (`sched_setaffinity`) for the core-aware scheduler; pins the current thread to a big/little cluster mask and restores it. Android-only. See [../architecture.md](../architecture.md) A13 |
 | `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps |
 | `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
@@ -97,6 +98,7 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
 | `nativeVerifyNsp(nspPath, headerKey): String?` | NCA verification in an NSP (structural: section-header hashes) |
 | `nativeSetVerification(enabled, headerKey, keyAreaKeys)` | Set CNMT verification config once before a batch (global, read-only during conversion — [../gotchas.md](../gotchas.md) G11) |
+| `nativeSetThreadAffinity(mask): Int` / `nativeClearThreadAffinity()` | Pin/unpin the calling (IO) thread to a CPU cluster for the core-aware scheduler (A13). Returns 0 or -errno |
 | `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log |
 | `nativeCancel()` | Cancellation request |
 | `nativeErrorString(code): String` | Error code → text |

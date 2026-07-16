@@ -66,7 +66,9 @@ data class FolderFileEvent(
     val status: FileStatus,
     val durationMs: Long? = null,
     val speedMBps: Double? = null,
-    val unpackedSize: Long? = null
+    val unpackedSize: Long? = null,
+    // Verification outcome for the output NSP (see FileEntry.verify).
+    val verify: VerifyStatus = VerifyStatus.NOT_CHECKED
 )
 
 /** A single file currently being converted in parallel, for the per-file bars. */

@@ -14,6 +14,11 @@
 /captures
 .externalNativeBuild
 .cxx
+
+# Packaged app binaries (distributed via GitHub Releases, not the repo)
+*.apk
+*.aab
+
 local.properties
 .claude/
 nsz_debug.log

@@ -5,4 +5,5 @@ sealed class Screen {
    object Conversion : Screen()
    object About : Screen()
    object Settings : Screen()
+   data class FilePicker(val mode: PickerMode) : Screen()
 }

@@ -55,7 +55,7 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE jni_bridge.c)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE jni_bridge.c cpu_affinity.c)
 endif()
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE

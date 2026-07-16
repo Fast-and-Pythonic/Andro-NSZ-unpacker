@@ -52,6 +52,10 @@ fun resolveToFilePath(
 }
 
 fun queryFileName(context: Context, uri: Uri): String {
+    // A file:// uri carries the real path, so read the name straight off it.
+    // ContentResolver.query() returns nothing for file:// and would fall through
+    // to the "input.nsz" default, mis-naming the output of every raw-path input.
+    if (uri.scheme == "file") return File(uri.path!!).name
     context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
         if (cursor.moveToFirst()) {
             val idx = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)

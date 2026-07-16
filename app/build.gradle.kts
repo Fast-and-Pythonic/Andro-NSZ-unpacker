@@ -15,8 +15,8 @@ android {
       applicationId = "com.androNSZ"
       minSdk = 31
       targetSdk = 36
-      versionCode = 1
-      versionName = "1.0"
+      versionCode = 3
+      versionName = "1.2"
 
       testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
       ndk {
@@ -31,11 +31,26 @@ android {
 
    buildTypes {
       release {
-         isMinifyEnabled = false
+         // R8: strip unused code (Compose + material-icons-extended's thousands
+         // of unused icons dominate the DEX) and shrink unused resources.
+         // JNI keep rules live in proguard-rules.pro.
+         isMinifyEnabled = true
+         isShrinkResources = true
          proguardFiles(
             getDefaultProguardFile("proguard-android-optimize.txt"),
             "proguard-rules.pro"
          )
+      }
+      // Installable, release-optimized build for judging real runtime performance
+      // (e.g. Compose scroll smoothness): same R8/shrink as release but debug-signed
+      // so it can go straight onto a device. isDebuggable=false is the key bit — a
+      // debuggable build runs Compose far slower and makes scrolling look janky in a
+      // way release never does. This does NOT touch the real release variant.
+      create("benchmark") {
+         initWith(getByName("release"))
+         signingConfig = signingConfigs.getByName("debug")
+         matchingFallbacks += "release"
+         isDebuggable = false
       }
    }
    compileOptions {
@@ -50,6 +65,9 @@ android {
    }
    buildFeatures {
       compose = true
+      // BuildConfig.VERSION_NAME is read at runtime by the update checker to
+      // compare the installed version against the latest GitHub release.
+      buildConfig = true
    }
    ndkVersion = "28.2.13676358"
    buildToolsVersion = "36.0.0"

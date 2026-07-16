@@ -1,9 +1,15 @@
 package com.androNSZ.ui.screen
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
@@ -13,6 +19,7 @@ import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.platform.LocalContext
@@ -23,6 +30,7 @@ import com.androNSZ.nut.KeysManager
 import com.androNSZ.util.toDisplayPath
 import com.androNSZ.ui.components.AppDropdownMenuItem
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
+import com.androNSZ.ui.conversion.CombinedModeUI
 import com.androNSZ.ui.conversion.FolderModeUI
 import com.androNSZ.ui.conversion.SingleFilesUI
 import com.androNSZ.viewmodel.MainViewModel
@@ -44,6 +52,7 @@ fun ConversionScreen(
 
    val context = LocalContext.current
    var settingsMenuExpanded by remember { mutableStateOf(false) }
+   var guiSettingsDialog by remember { mutableStateOf(false) }
 
    Scaffold(
       topBar = {
@@ -119,6 +128,17 @@ fun ConversionScreen(
                      AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
+                           guiSettingsDialog = true
+                        },
+                        leadingIcon = {
+                           Icon(imageVector = Icons.Filled.Tune, contentDescription = null)
+                        }
+                     ) {
+                        Text(stringResource(R.string.action_gui_settings))
+                     }
+                     AppDropdownMenuItem(
+                        onClick = {
+                           settingsMenuExpanded = false
                            onNavigateToSettings()
                         },
                         leadingIcon = {
@@ -140,6 +160,34 @@ fun ConversionScreen(
                      }
                   }
                }
+
+               if (guiSettingsDialog) {
+                  AlertDialog(
+                     onDismissRequest = { guiSettingsDialog = false },
+                     title = { Text(stringResource(R.string.gui_settings_title)) },
+                     text = {
+                        Row(
+                           modifier = Modifier.fillMaxWidth(),
+                           horizontalArrangement = Arrangement.SpaceBetween,
+                           verticalAlignment = Alignment.CenterVertically
+                        ) {
+                           Text(
+                              text = stringResource(R.string.settings_compact_card_names),
+                              modifier = Modifier.weight(1f).padding(end = 12.dp)
+                           )
+                           Switch(
+                              checked = vm.compactCardNames,
+                              onCheckedChange = { vm.saveCompactCardNames(context, it) }
+                           )
+                        }
+                     },
+                     confirmButton = {
+                        TextButton(onClick = { guiSettingsDialog = false }) {
+                           Text(stringResource(R.string.action_done))
+                        }
+                     }
+                  )
+               }
             },
             colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
                containerColor = MaterialTheme.colorScheme.primary,
@@ -157,6 +205,9 @@ fun ConversionScreen(
          }
          is ConversionMode.FolderMode -> {
             FolderModeUI(vm, mode, padding)
+         }
+         ConversionMode.Combined -> {
+            CombinedModeUI(vm, padding)
          }
       }
    }

@@ -1,21 +1,22 @@
 package com.androNSZ.ui.screen
 
 import android.net.Uri
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Checklist
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InsertDriveFile
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material.icons.filled.SystemUpdate
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -24,13 +25,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
-import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.androNSZ.R
 import com.androNSZ.model.ConversionMode
+import com.androNSZ.model.UpdateState
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.ui.components.AppDropdownMenuItem
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
@@ -46,7 +46,11 @@ fun ModeSelectionScreen(
    onNavigateToSettings: () -> Unit,
    onCheckKeys: () -> Unit,
    onChangeOutputFolder: () -> Unit,
-   outputFolderUri: Uri?
+   outputFolderUri: Uri?,
+   updateState: UpdateState,
+   updateBannerVisible: Boolean,
+   onCheckForUpdates: () -> Unit,
+   onShowUpdateDialog: () -> Unit
 ) {
    val context = LocalContext.current
    var settingsMenuExpanded by remember { mutableStateOf(false) }
@@ -69,6 +73,29 @@ fun ModeSelectionScreen(
                      onDismissRequest = { settingsMenuExpanded = false },
                      shape = RoundedCornerShape(14.dp)
                   ) {
+                     // Non-disableable "new version" notification: always present
+                     // while an update exists, opens the update dialog.
+                     val menuUpdate = updateState as? UpdateState.Available
+                     if (menuUpdate != null) {
+                        AppDropdownMenuItem(
+                           onClick = {
+                              settingsMenuExpanded = false
+                              onShowUpdateDialog()
+                           },
+                           leadingIcon = {
+                              Icon(imageVector = Icons.Filled.SystemUpdate, contentDescription = null)
+                           }
+                        ) {
+                           Text(
+                              stringResource(
+                                 R.string.menu_update_available,
+                                 menuUpdate.release.versionName
+                              ),
+                              color = MaterialTheme.colorScheme.primary
+                           )
+                        }
+                        HorizontalDivider()
+                     }
                      AppDropdownMenuItem(
                         onClick = {
                            settingsMenuExpanded = false
@@ -132,6 +159,17 @@ fun ModeSelectionScreen(
                      ) {
                         Text(stringResource(R.string.action_about_app))
                      }
+                     AppDropdownMenuItem(
+                        onClick = {
+                           settingsMenuExpanded = false
+                           onCheckForUpdates()
+                        },
+                        leadingIcon = {
+                           Icon(imageVector = Icons.Filled.SystemUpdate, contentDescription = null)
+                        }
+                     ) {
+                        Text(stringResource(R.string.action_check_updates))
+                     }
                   }
                }
             },
@@ -149,6 +187,41 @@ fun ModeSelectionScreen(
             .padding(horizontal = 16.dp, vertical = 20.dp),
          verticalArrangement = Arrangement.spacedBy(12.dp)
       ) {
+         // Persistent "update available" banner — kept as the very first row so it
+         // stays visible above everything until the user updates or skips it.
+         val available = updateState as? UpdateState.Available
+         if (available != null && updateBannerVisible) {
+            Card(
+               modifier = Modifier.fillMaxWidth(),
+               onClick = onShowUpdateDialog,
+               colors = CardDefaults.cardColors(
+                  containerColor = MaterialTheme.colorScheme.primaryContainer
+               )
+            ) {
+               Row(
+                  modifier = Modifier
+                     .fillMaxWidth()
+                     .padding(16.dp),
+                  horizontalArrangement = Arrangement.spacedBy(12.dp),
+                  verticalAlignment = Alignment.CenterVertically,
+               ) {
+                  Icon(
+                     imageVector = Icons.Filled.SystemUpdate,
+                     contentDescription = null,
+                     tint = MaterialTheme.colorScheme.onPrimaryContainer
+                  )
+                  Text(
+                     text = stringResource(
+                        R.string.msg_update_available,
+                        available.release.versionName
+                     ),
+                     style = MaterialTheme.typography.bodyMedium,
+                     color = MaterialTheme.colorScheme.onPrimaryContainer,
+                  )
+               }
+            }
+         }
+
          if (!keysInstalled) {
             Card(
                modifier = Modifier.fillMaxWidth(),
@@ -192,6 +265,17 @@ fun ModeSelectionScreen(
                .padding(top = 4.dp, bottom = 4.dp)
          )
 
+         // Combined mode: files + folders together, unpacked straight into the
+         // output folder. Routes through the shared Conversion screen like the
+         // other two modes (CombinedModeUI opens the universal picker).
+         ModeCard(
+            title = stringResource(R.string.action_select_files_folders),
+            description = stringResource(R.string.msg_select_files_folders_desc),
+            icon = Icons.Filled.Checklist,
+            enabled = keysInstalled,
+            onClick = { onModeSelected(ConversionMode.Combined) }
+         )
+
          ModeCard(
             title = stringResource(R.string.action_select_files),
             description = stringResource(R.string.msg_select_files_desc),
@@ -208,31 +292,69 @@ fun ModeSelectionScreen(
             onClick = { onModeSelected(ConversionMode.FolderMode(Uri.EMPTY, null)) }
          )
 
+         // Quick-access controls mirroring the overflow menu (kept for convenience).
+         // Shown only when keys are installed — otherwise the install card above
+         // already covers the prod.keys action.
          if (keysInstalled) {
+            Spacer(modifier = Modifier.height(4.dp))
+
             Row(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .clip(RoundedCornerShape(12.dp))
-                  .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                  .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp))
-                  .padding(horizontal = 14.dp, vertical = 10.dp),
-               verticalAlignment = Alignment.CenterVertically,
-               horizontalArrangement = Arrangement.spacedBy(10.dp)
+               modifier = Modifier.fillMaxWidth(),
+               horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+               OutlinedButton(
+                  modifier = Modifier.weight(1f),
+                  onClick = onInstallKeys
+               ) {
+                  Icon(
+                     imageVector = Icons.Filled.Edit,
+                     contentDescription = null,
+                     modifier = Modifier.size(18.dp)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(stringResource(R.string.action_change_prod_keys))
+               }
+               OutlinedButton(
+                  modifier = Modifier.weight(1f),
+                  onClick = {
+                     KeysManager.deleteKeys(context)
+                     onCheckKeys()
+                  },
+                  colors = ButtonDefaults.outlinedButtonColors(
+                     contentColor = MaterialTheme.colorScheme.error
+                  ),
+                  border = BorderStroke(1.dp, MaterialTheme.colorScheme.error)
+               ) {
+                  Icon(
+                     imageVector = Icons.Filled.Delete,
+                     contentDescription = null,
+                     modifier = Modifier.size(18.dp)
+                  )
+                  Spacer(modifier = Modifier.width(6.dp))
+                  Text(stringResource(R.string.action_remove_prod_keys))
+               }
+            }
+
+            OutlinedButton(
+               modifier = Modifier.fillMaxWidth(),
+               onClick = onChangeOutputFolder,
+               contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp)
             ) {
                Icon(
-                  imageVector = Icons.Filled.Lock,
+                  imageVector = Icons.Filled.FolderOpen,
                   contentDescription = null,
-                  modifier = Modifier.size(16.dp),
-                  tint = MaterialTheme.colorScheme.onSurfaceVariant
+                  modifier = Modifier.size(18.dp)
                )
-               Text(
-                  text = buildAnnotatedString {
-                     append("prod.keys")
-                     outputFolderUri?.let { append(" · ${it.toDisplayPath()}") }
-                  },
-                  style = MaterialTheme.typography.bodySmall.copy(fontStyle = FontStyle.Italic),
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+               Spacer(modifier = Modifier.width(12.dp))
+               Column(modifier = Modifier.weight(1f)) {
+                  // "Output folder" is intentionally NOT translated — keep as-is for all languages
+                  Text("Output folder")
+                  Text(
+                     text = outputFolderUri?.toDisplayPath() ?: "Downloads",
+                     style = MaterialTheme.typography.labelSmall,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+               }
             }
          }
       }
