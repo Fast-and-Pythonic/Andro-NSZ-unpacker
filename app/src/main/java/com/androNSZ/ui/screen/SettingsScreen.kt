@@ -430,8 +430,10 @@ fun SettingsScreen(
                   Text(
                      text = stringResource(R.string.settings_verification),
                      style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                     modifier = Modifier.weight(1f)
                   )
+                  Spacer(modifier = Modifier.width(8.dp))
                   Switch(
                      checked = currentVerification,
                      onCheckedChange = onVerificationChange
@@ -502,8 +504,10 @@ fun SettingsScreen(
                   Text(
                      text = stringResource(R.string.settings_show_update_banner),
                      style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                     modifier = Modifier.weight(1f)
                   )
+                  Spacer(modifier = Modifier.width(8.dp))
                   Switch(
                      checked = currentShowUpdateBanner,
                      onCheckedChange = onShowUpdateBannerChange

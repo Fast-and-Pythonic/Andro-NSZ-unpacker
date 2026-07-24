@@ -188,11 +188,11 @@ class SettingsRepository private constructor(private val context: Context) {
 
    val statsFormatFlow: Flow<StatsFormat> = context.dataStore.data
       .map { preferences ->
-         val formatString = preferences[STATS_FORMAT_KEY] ?: StatsFormat.DETAILED.name
+         val formatString = preferences[STATS_FORMAT_KEY] ?: StatsFormat.COMPACT3.name
          try {
             StatsFormat.valueOf(formatString)
          } catch (e: IllegalArgumentException) {
-            StatsFormat.DETAILED
+            StatsFormat.COMPACT3
          }
       }
 
