@@ -158,7 +158,7 @@ class MainViewModel : ViewModel() {
    val statusLog = mutableStateListOf<LogEntry>()
 
    // Settings
-   var statsFormat by mutableStateOf(StatsFormat.DETAILED)
+   var statsFormat by mutableStateOf(StatsFormat.COMPACT3)
    var outputFolderUri by mutableStateOf<Uri?>(null)
    var appLanguage by mutableStateOf("system")
    var themeMode by mutableStateOf(ThemeMode.SYSTEM)
@@ -401,7 +401,7 @@ class MainViewModel : ViewModel() {
 
    private fun reapplyStats(context: android.content.Context, format: StatsFormat) {
       val summary = lastFolderSummary ?: return
-      if (format == StatsFormat.COMPACT2) {
+      if (format == StatsFormat.COMPACT2 || format == StatsFormat.COMPACT3) {
          compact2Stats = buildCompact2Data(context, summary, lastLogPathMsg)
          statusMessage = null
       } else {
