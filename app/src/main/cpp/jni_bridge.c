@@ -3,7 +3,6 @@
 #include <stdlib.h>
 #include <android/log.h>
 #include "ncz_engine.h"
-#include "nca_verifier.h"
 #include "nca_cnmt.h"
 #include "nsz_debug.h"
 
@@ -288,34 +287,4 @@ Java_com_androNSZ_NszConverter_nativeSetVerification(
          (int)enabled, header_ptr ? 1 : 0, kak_count);
 
     free(kak);
-}
-
-/* ---------- JNI: verifyNsp ---------- */
-JNIEXPORT jstring JNICALL
-Java_com_androNSZ_NszConverter_nativeVerifyNsp(
-        JNIEnv *env, jclass clazz,
-        jstring j_nsp_path,
-        jbyteArray j_header_key)
-{
-    (void)clazz;
-
-    const char *nsp_path = (*env)->GetStringUTFChars(env, j_nsp_path, NULL);
-
-    jsize key_len = (*env)->GetArrayLength(env, j_header_key);
-    if (key_len != 32) {
-        (*env)->ReleaseStringUTFChars(env, j_nsp_path, nsp_path);
-        return (*env)->NewStringUTF(env, "verify: header_key must be 32 bytes");
-    }
-
-    jbyte *key_bytes = (*env)->GetByteArrayElements(env, j_header_key, NULL);
-
-    char err[512] = {0};
-    int rc = nca_verify_nsp(nsp_path, (const uint8_t *)key_bytes, err, (int)sizeof(err));
-    LOGI("nativeVerifyNsp: rc=%d  path=%s", rc, nsp_path);
-
-    (*env)->ReleaseByteArrayElements(env, j_header_key, key_bytes, JNI_ABORT);
-    (*env)->ReleaseStringUTFChars(env, j_nsp_path, nsp_path);
-
-    if (rc == 0) return NULL;
-    return (*env)->NewStringUTF(env, err[0] ? err : "verify: unknown error");
 }

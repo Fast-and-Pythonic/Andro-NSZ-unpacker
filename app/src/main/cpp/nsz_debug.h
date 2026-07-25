@@ -11,6 +11,11 @@
  *   dbg_close();
  *
  * Output goes to the log file AND to Android logcat (tag AndroNSZ).
+ *
+ * dbg_open/dbg_close are **reference counted** and the log is truncated only by
+ * the outermost open, so concurrent conversions sharing one log file cannot
+ * truncate or close it under each other. Open it once per job, not per file.
+ * dbg_open(NULL) force-closes regardless of the refcount.
  */
 
 void dbg_open(const char *path);

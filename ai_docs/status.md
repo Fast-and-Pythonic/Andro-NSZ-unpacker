@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-25)
+# Status (updated: 2026-07-26)
 
 ## Working
 
@@ -89,6 +89,25 @@
 
 ## Decision log
 
+- 2026-07-26 — **cleanup: dead verifier deleted, native debug log fixed**
+  ([architecture.md](architecture.md) A12/A16). (1) `nca_verifier.c`/`.h`, the
+  `nativeVerifyNsp` JNI entry point and its Kotlin `external fun` are **deleted**. Checked
+  against the reference first: nicoboss/nsz has **no** structural NCA verifier — its
+  verification is entirely CNMT-hash based and `nsz -D` enforces nothing, so our inline
+  check already matches it and the structural pass was a superset with no caller.
+  (2) The native debug log was opened **per file** on one fixed path with `fopen(..., "w")`:
+  every file of a parallel batch truncated it and the first to finish closed it for all the
+  others; folder/combined mode never opened it at all. Now opened **once per job**
+  (`NszConverter.openJobDebugLog/closeJobDebugLog`, called next to `nativeSetVerification`
+  in `startBatchConversion` and `runFolderStyleConversion`), closed via `invokeOnCompletion`
+  (batch) and the existing `finally` under `NonCancellable` (folder — which also stops a
+  cancelled scope from skipping temp cleanup). `dbg_open`/`dbg_close` are now **refcounted**,
+  so no future per-file open can truncate or close another conversion's log; the elapsed-ms
+  read of `s_start_time` moved under the mutex that writes it.
+  Verified on device: a 4-file parallel batch produced one 224 k-line log with all four
+  conversions and ~2.8 k lines written *after* the first file finished (the old cut-off
+  point); folder mode produced a 280 k-line log with all 5 conversions where it previously
+  produced none. Builds + tests green.
 - 2026-07-25 — **write-bound diagnosis; two features built, measured and rejected**
   ([architecture.md](architecture.md) A15/A07/A12, [gotchas.md](gotchas.md) G17). An adb CLI
   benchmark overturned the "CPU-bound" model: decompression scales to ~2375 MB/s

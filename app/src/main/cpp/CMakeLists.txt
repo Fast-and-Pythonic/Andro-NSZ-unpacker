@@ -50,7 +50,6 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     async_writer.c
     ncz_decompress.c
     ncz_engine.c
-    nca_verifier.c
     nca_cnmt.c
 )
 

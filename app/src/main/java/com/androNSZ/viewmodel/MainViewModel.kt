@@ -34,6 +34,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Semaphore
@@ -666,6 +667,10 @@ class MainViewModel : ViewModel() {
       // code while files convert). The per-file verdict then comes from the engine's
       // inline VERIFIED/CORRUPTED tags — no separate output re-read pass.
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
+      // Native debug log: one per batch, closed when the job completes below.
+      // Opening it per file truncated the shared log for every started file and
+      // let the first finished file close it for all the others.
+      NszConverter.openJobDebugLog(context)
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -812,6 +817,11 @@ class MainViewModel : ViewModel() {
             }
          }
          isSuccess = failed == 0 && completed == fileQueue.size
+      }.invokeOnCompletion {
+         // Fires on success, failure and cancellation alike. A one-liner here
+         // instead of wrapping the whole body in try/finally: closing the log is
+         // a quick fclose, and this keeps the batch body untouched.
+         runCatching { NszConverter.closeJobDebugLog() }
       }
    }
 
@@ -878,6 +888,10 @@ class MainViewModel : ViewModel() {
       val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
       // Configure CNMT verification once for the whole run (see startBatchConversion).
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
+      // Native debug log for the whole run, closed in the finally below. Folder and
+      // combined mode never opened it before (FolderProcessor calls native directly),
+      // so these modes had no native diagnostics at all — only logcat.
+      NszConverter.openJobDebugLog(context)
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -962,7 +976,12 @@ class MainViewModel : ViewModel() {
          } finally {
             folderActiveFiles = emptyList()
             stopTimer()
-            withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
+            // NonCancellable: if the scope was cancelled, a plain withContext would
+            // throw here and skip the cleanup entirely, leaking temp files.
+            withContext(NonCancellable + Dispatchers.IO) {
+               runCatching { NszConverter.closeJobDebugLog() }
+               TempFileManager.cleanupManagedCache(context)
+            }
          }
       }
    }

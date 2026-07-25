@@ -39,7 +39,6 @@ AndroNSZ/
     │   ├── pfs0.c / hfs0.c       # NSP/NSZ and XCI/XCZ containers
     │   ├── aes_ctr.c / aes_xts.c # AES-128 CTR (sections) and XTS (NCA header)
     │   ├── sha256.c              # SHA-256 (hardware + software)
-    │   ├── nca_verifier.c        # NCA verification inside a finished NSP
     │   ├── nsz_debug.c           # log to file + logcat
     │   └── nsz_types.h           # error codes, callback types
     └── java/com/androNSZ/        # === Kotlin layer ===

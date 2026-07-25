@@ -21,9 +21,8 @@ Python reference nicoboss/nsz.
 | `aes_ctr.c` | AES-128-CTR for NCA sections. Counter: `nonce[0:8] \|\| (offset>>4)` big-endian. Hardware + software (A02) |
 | `aes_xts.c` | AES-128-XTS for decrypting the NCA header (0x200 sectors, IEEE 1619) |
 | `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
-| `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS of the header, "NCA3" magic check, SHA-256 of sections |
 | `nca_cnmt.c` | CNMT verification: extract full expected NCA hashes from the input's META NCA (`CnmtHashSet`); global config `nca_verify_config_set`. See [../architecture.md](../architecture.md) A12 |
-| `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps |
+| `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps. Open/close are refcounted so parallel conversions sharing the one log file can't truncate or close it under each other (A16) |
 | `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
 ## Dependency graph (C)
@@ -37,11 +36,6 @@ jni_bridge.c
          ├─ aes_ctr.c
          ├─ sha256.c
          └─ async_writer.c
-
-nca_verifier.c      (separate entry point via JNI)
- ├─ pfs0.c
- ├─ aes_xts.c
- └─ sha256.c
 
 nca_cnmt.c          (called by ncz_engine.c; config set via JNI)
  ├─ aes_xts.c        (NCA header)
@@ -95,9 +89,8 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 |---------------|-------------|
 | `nativeConvert(input, output, progressCb, statusCb): Int` | NSZ → NSP |
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
-| `nativeVerifyNsp(nspPath, headerKey): String?` | ~~NCA verification in an NSP (structural: section-header hashes)~~ — **dead code since 2026-07-25**: it re-read the whole output; verification is now inline (A12). Kept only until a cleanup pass removes it with `nca_verifier.c` |
 | `nativeSetVerification(enabled, headerKey, keyAreaKeys)` | Set CNMT verification config once before a batch (global, read-only during conversion — [../gotchas.md](../gotchas.md) G11) |
-| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log |
+| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log. **Reference counted and opened once per job**, not per file — see [../architecture.md](../architecture.md) A16. Kotlin wraps them as `NszConverter.openJobDebugLog/closeJobDebugLog`; `nativeSetDebugLog(null)` force-closes |
 | `nativeCancel()` | Cancellation request (bumps the global cancel epoch — cancels every in-flight conversion; see A15) |
 | `nativeErrorString(code): String` | Error code → text |
 

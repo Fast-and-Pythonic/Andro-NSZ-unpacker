@@ -55,9 +55,6 @@ object NszConverter {
     @JvmStatic
     external fun nativeErrorString(errorCode: Int): String
 
-    @JvmStatic
-    external fun nativeVerifyNsp(nspPath: String, headerKey: ByteArray): String?
-
     /**
      * Configure CNMT verification once before a batch/folder job. Read-only in
      * native code during conversion. [headerKey] is 32 bytes (or null);
@@ -90,8 +87,31 @@ object NszConverter {
     const val ERR_CANCELLED = -8
     const val ERR_HASH_MISMATCH = -9
 
+    /** Path of the native debug log opened by [openJobDebugLog]. */
     var lastDebugLogPath: String? = null
         private set
+
+    /**
+     * Opens the native engine's debug log for one whole job (queue, folder or
+     * combined) and returns its path.
+     *
+     * Deliberately per job, not per file: the log has a single fixed path, so a
+     * per-file open truncated it for every file of a parallel batch and the first
+     * file to finish closed it for all the others, leaving them with logcat only.
+     * The native side reference counts (see nsz_debug.h), so an extra open is
+     * harmless — but every call must still be paired with [closeJobDebugLog].
+     */
+    @JvmStatic
+    fun openJobDebugLog(context: Context): String {
+        val logFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
+        lastDebugLogPath = logFile.absolutePath
+        nativeSetDebugLog(logFile.absolutePath)
+        return logFile.absolutePath
+    }
+
+    /** Drops this job's reference to the native debug log (see [openJobDebugLog]). */
+    @JvmStatic
+    fun closeJobDebugLog() = nativeCloseDebugLog()
 
     /**
      * Derives the per-file verify verdict from the inline hashing tags the engine
@@ -134,18 +154,16 @@ object NszConverter {
         val originalFileName = queryFileName(context, inputUri)
         val outputName = originalFileName.substringBeforeLast('.') + ".nsp"
 
-        val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
         var pfd: ParcelFileDescriptor? = null
         var inputPfd: ParcelFileDescriptor? = null
         var resolvedInput: ResolvedInputFile? = null
 
-        lastDebugLogPath = debugLogFile.absolutePath
         val tracker = VerifyTracker(statusCallback)
 
+        // NB: the native debug log is opened once per job by the caller
+        // (see [openJobDebugLog]), not here — see that function for why.
         try {
-            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
-
             // Resolve the input to a native path. Prefer reading the source
             // directly through its file descriptor (no copy); fall back to a
             // temp-file copy only when the provider returns a non-seekable fd.
@@ -234,7 +252,6 @@ object NszConverter {
             close(e)
         } finally {
             withContext(Dispatchers.IO) {
-                runCatching { nativeCloseDebugLog() }
                 runCatching { pfd?.close() }
                 runCatching { inputPfd?.close() }
                 resolvedInput?.deleteIfTemp()
@@ -255,20 +272,18 @@ object NszConverter {
         val originalFileName = queryFileName(context, inputUri)
         val outputName = originalFileName.substringBeforeLast('.') + ".xci"
 
-        val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
         var pfd: ParcelFileDescriptor? = null
         var inputPfd: ParcelFileDescriptor? = null
         var resolvedInput: ResolvedInputFile? = null
 
-        lastDebugLogPath = debugLogFile.absolutePath
         // XCZ hashes NCAs inline per HFS0 partition (secure partition carries the
         // META), so the verdict comes from the same VERIFIED/CORRUPTED tags.
         val tracker = VerifyTracker(statusCallback)
 
+        // NB: the native debug log is opened once per job by the caller
+        // (see [openJobDebugLog]), not here.
         try {
-            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
-
             // Resolve the input to a native path. Prefer reading the source
             // directly through its file descriptor (no copy); fall back to a
             // temp-file copy only when the provider returns a non-seekable fd.
@@ -350,7 +365,6 @@ object NszConverter {
             close(e)
         } finally {
             withContext(Dispatchers.IO) {
-                runCatching { nativeCloseDebugLog() }
                 runCatching { pfd?.close() }
                 runCatching { inputPfd?.close() }
                 resolvedInput?.deleteIfTemp()

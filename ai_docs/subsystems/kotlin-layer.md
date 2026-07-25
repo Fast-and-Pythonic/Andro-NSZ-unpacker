@@ -91,8 +91,9 @@ A singleton over `libAndroNSZ`. `convert()` (NSZ→NSP) and `convertXcz()` (XCZ�
 4. Derive the verify verdict from the engine's **inline** hashing tags: a per-call
    `VerifyTracker` (a `StatusCallback` decorator) watches for `VERIFIED` / `CORRUPTED`
    and reports `VerifyStatus` via `onVerified`. There is **no** post-conversion
-   `nativeVerifyNsp` re-read any more — it cost a full re-read of the output, which is
-   expensive on write-bound storage (A15). Both `convert` and `convertXcz` report a verdict.
+   output re-read any more — that pass cost a full re-read of the output, which is
+   expensive on write-bound storage (A15), and was deleted along with `nca_verifier.c`.
+   Both `convert` and `convertXcz` report a verdict.
 5. Temp cleanup; on a FUSE failure — fall back to a temp copy and retry (G03).
 
 `startBatchConversion`/`startFolderConversion` in **MainViewModel** parse the keys

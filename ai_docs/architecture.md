@@ -172,7 +172,7 @@ SHA-256 (already computed streaming, essentially free) is checked against the se
 CNMT NCA itself is excluded from the set (it never lists itself). XCZ builds one set
 **per HFS0 partition** (the secure partition carries the META).
 **Reading the CNMT** reuses existing crypto: AES-XTS header decrypt with `header_key`
-(as in `nca_verifier.c`), then AES-128-**ECB** unwrap of the key area with
+(`aes_xts.c`), then AES-128-**ECB** unwrap of the key area with
 `key_area_key_application_XX` read **directly** from prod.keys (XX = key generation =
 `max(cryptoType, cryptoType2) − 1`; no master-key/KEK derivation, unlike the reference),
 then AES-CTR of the PFS0 section (key = key-area entry index 2, counter = section nonce
@@ -198,10 +198,14 @@ tracker, so parallel files never race.
 **The structural `nca_verify_nsp` post-pass was REMOVED (2026-07-25):** it re-read the
 *entire* output file, which on write-bound storage (A15) cost ~30 % of a single file's
 wall-clock and stole bandwidth from parallel writers. The CNMT check it duplicated is
-already streaming, inline and authoritative. The JNI entry point and `nca_verifier.c`
-remain in the tree but are now dead code (cleanup pending). Consequence: XCZ/XCI now
-reports a real verdict too (it hashes per HFS0 partition), where before it was always
-`NOT_CHECKED`.
+already streaming, inline and authoritative. `nca_verifier.c`, its JNI entry point and the
+Kotlin `external fun` were **deleted** on 2026-07-26. Consequence: XCZ/XCI now reports a
+real verdict too (it hashes per HFS0 partition), where before it was always `NOT_CHECKED`.
+**Checked against the reference:** nicoboss/nsz has no structural NCA verifier at all —
+its verification is entirely CNMT-hash based (`FileExistingChecks.ExtractHashes` →
+`NszDecompressor.__decompressContainer`), and `nsz -D` performs no enforced verification,
+only advisory `[VERIFIED]`/`[CORRUPTED]` prints. Our inline behaviour matches that; the
+structural check was a superset we no longer carry.
 **Deferred:** per-core layout optimization (all SHA on 1–2 cores) — [status.md](status.md).
 
 ## A13: Core-aware scheduler for heterogeneous CPUs (big.LITTLE) — DELETED
@@ -325,12 +329,42 @@ alongside a number (G17).
   and polls `ncz_cancelled(start_epoch)`; `ncz_request_cancel()` bumps it, cancelling all
   in-flight files (the existing UX). `ncz_decompress()` / `copy_bytes()` / `xcz_process_file()`
   take `int start_epoch` instead of a flag pointer; JNI surface unchanged.
+**Done in the follow-up (2026-07-26):** the dead structural verifier was deleted (A12) and
+the native debug log is now opened **once per job** and reference counted (A16).
 **Deferred / known-but-not-done:**
-- The per-file `nativeSetDebugLog` opens one shared global log path with mode `"w"`, so
-  parallel files truncate each other's log and the first to finish calls
-  `nativeCloseDebugLog`, silencing the rest. Should be opened once per batch.
-- `nca_verifier.c` + `nativeVerifyNsp` are now dead code (A12) — remove in a cleanup pass.
 - Releasing the gate slot before per-file MediaStore finalize (the old "Step 7"): with the
   cap at 4 and the verify re-read gone, the remaining tail work is small. Only worth it if a
   benchmark shows inter-file gaps.
 - Block-mode (non-solid) NCZ is still untouched by all of the above.
+
+## A16: The native debug log is per job and reference counted
+**Context:** `nsz_debug.c` keeps one global `FILE*` opened with `"w"`, and Kotlin used to
+call `nativeSetDebugLog`/`nativeCloseDebugLog` **per converted file** on one fixed path
+(`<externalFilesDir>/nsz_debug.log`). With up to 4 files in parallel that meant every
+starting file truncated the shared log and the first file to finish closed it for all the
+others — they silently continued to logcat only. Folder/combined mode was worse: it never
+opened the log at all (`FolderProcessor.convertDirect` calls native directly), so those
+modes produced no native log whatsoever.
+**Decision:**
+- Kotlin opens the log **once per job**, next to the other once-per-job call
+  (`nativeSetVerification`): `NszConverter.openJobDebugLog(context)` in
+  `MainViewModel.startBatchConversion` and in `runFolderStyleConversion` (which serves both
+  folder and combined). Closing: `job.invokeOnCompletion` for the batch — it covers success,
+  failure and cancellation without wrapping the ~130-line body in `try/finally` — and the
+  existing `finally` for folder mode, under `NonCancellable` so a cancelled scope still
+  closes the log and cleans temp files.
+- `dbg_open`/`dbg_close` are **reference counted** (`nsz_debug.c`): the outermost open
+  truncates and writes the header, a nested open just takes a reference (never truncates,
+  never reopens — a differing path is logged and ignored), and only the last close writes
+  the footer and `fclose`s. `dbg_open(NULL)` still force-closes. This makes the bug class
+  unrepeatable: no future per-file open can truncate or close another conversion's log.
+- Kept `"w"` (truncate once per job, so the file is exactly "the last run"), unlike the
+  Kotlin `FolderLogWriter`, which appends — the native log is a high-volume per-NCA trace
+  with no rotation.
+- Also fixed in passing: `s_start_time` was read outside the mutex in `dbg_log`/`dbg_hex`;
+  the elapsed-ms computation now happens under the same lock that writes it.
+**Consequences:** a 4-file parallel batch produced a single 224 k-line log containing all
+four conversions, with ~2.8 k lines written *after* the first file finished (previously the
+cut-off point); folder mode now yields a full log (280 k lines, 5 conversions) where it had
+none. The three other sinks are untouched: `FolderLogWriter` (`nsz_folder_debug.log`),
+`nsz_screen_log.txt`, logcat.

@@ -100,10 +100,11 @@ calloc/fread when the count is 0.
 **Fix:** [hfs0.c](../app/src/main/cpp/hfs0.c) `hfs0_parse_stream` — allow 0, allocate and
 read entries only when `file_count > 0` (the rest of the parse: the loop runs 0 times,
 `free(NULL)` is safe). Came from PR #6 (manx98).
-**Diagnosis (for next time):** the file log `nsz_debug.log` is useless here — `dbg_open`
-opens it with `"w"` (rewritten on every run), and the desktop copy goes stale. What helped
-was the "Save on-screen log" button (`nsz_screen_log.txt`) and `adb logcat`. If the native
-log looks "empty/old" — look at the on-screen log and logcat, not the file.
+**Diagnosis (for next time):** `nsz_debug.log` is still truncated once per job (`"w"`), so a
+desktop copy goes stale — but since 2026-07-26 it is opened once per job and refcounted
+(A16), so it now contains *all* files of a parallel run and folder mode produces one too.
+The "Save on-screen log" button (`nsz_screen_log.txt`) and `adb logcat` remain the quickest
+cross-checks; logcat receives every `DBG` even when no log file is open.
 
 ## G08: `Flow.catch` in batch mode masks a failure as "Done"
 **Symptom:** in "files" mode a failed XCZ→XCI showed a green "Done", with "Processed 1 of
@@ -137,10 +138,11 @@ didn't touch them; only function imports are flagged, class imports are fine; th
 error names a symbol you actually changed or removed.
 
 ## G10: Folder mode — verify falsely fails with "cannot parse NSP container"
-**Status:** largely **moot since 2026-07-25** — the post-conversion output re-read was
-removed entirely (A12), so there is no reopen to race. Kept because the underlying trap
-(reopening a FUSE-backed file whose write handle is still open) applies to *any* future
-code that re-reads a just-written output. The write pfd is still closed before finalize.
+**Status:** **moot** — the post-conversion output re-read was removed (A12) and its code
+(`nca_verifier.c` + `nativeVerifyNsp`) deleted on 2026-07-26, so there is no reopen left to
+race. Kept because the underlying trap (reopening a FUSE-backed file whose write handle is
+still open) applies to *any* future code that re-reads a just-written output. The write pfd
+is still closed before finalize.
 **Symptom:** parallel folder NSZ→NSP marks nearly every file failed with
 `Verification failed: verify: cannot parse NSP container (code: -9)` and deletes the
 output; the same files in single-file mode pass.
