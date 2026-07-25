@@ -88,17 +88,20 @@ A singleton over `libAndroNSZ`. `convert()` (NSZ→NSP) and `convertXcz()` (XCZ�
    `/proc/self/fd/<fd>`.
 3. `nativeConvert`/`nativeConvertXcz`, progress is streamed via `callbackFlow`
    (throttling — A09).
-4. Verify via `nativeVerifyNsp` (if header_key is present). CNMT verification proper runs
-   **inside** the native engine and is configured once per job (see MainViewModel below);
-   it isn't a separate Kotlin call.
+4. Derive the verify verdict from the engine's **inline** hashing tags: a per-call
+   `VerifyTracker` (a `StatusCallback` decorator) watches for `VERIFIED` / `CORRUPTED`
+   and reports `VerifyStatus` via `onVerified`. There is **no** post-conversion
+   `nativeVerifyNsp` re-read any more — it cost a full re-read of the output, which is
+   expensive on write-bound storage (A15). Both `convert` and `convertXcz` report a verdict.
 5. Temp cleanup; on a FUSE failure — fall back to a temp copy and retry (G03).
 
 `startBatchConversion`/`startFolderConversion` in **MainViewModel** parse the keys
 (`KeysParser.parseHeaderKey` + `parseKeyAreaKeys`) and call
 `NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)` **once**
-before launching the job (global native config, read-only during conversion — G11). When
-the toggle is off, the post-conversion `nativeVerifyNsp` is skipped too (a null
-`verifyKey` is passed into `convert`/`convertXcz`).
+before launching the job (global native config, read-only during conversion — G11). That
+single call is the only place keys are passed; `convert`/`convertXcz`/`convertDirect` no
+longer take a `headerKey`/`verifyKey` parameter. With the toggle off nothing is hashed, so
+the verdict is `NOT_CHECKED`.
 
 ## Other modules
 
@@ -123,22 +126,22 @@ the toggle is off, the post-conversion `nativeVerifyNsp` is skipped too (a null
   `FolderProcessor` (NSZ→NSP, XCZ→XCI, everything else → copy; preserves structure,
   continues on errors). Since 2026-06-22 it mirrors the "new" file-mode pipeline: phase 1
   builds the output-folder tree and a flat `WorkItem` list; phase 2 runs files in parallel
-  via `Semaphore(FOLDER_CONCURRENCY)`. Phase 2 is factored into the private `executePlan`,
+  via `Semaphore(concurrency)` (A07). Phase 2 is factored into the private `executePlan`,
   shared by `processFolder` (wraps everything in one `<name>_unpacked` folder) and
   `processCombined` (combined mode: plants the top level straight into the output base — no
   wrapper — appending `_unpacked` to a folder name only on collision). Input is read via `fd:N` (no-copy, FUSE fallback to
   temp), the result is written **straight** into the destination descriptor (no
-  temp-output+copy), verify via `nativeVerifyNsp` is enabled (a mismatch → the file is
-  marked failed). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
+  temp-output+copy); the verify verdict comes from the engine's inline `VERIFIED`/`CORRUPTED`
+  tags (non-fatal — output kept). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
   `TempFileManager` (`cacheDir`, `andronsz_<UUID>_<name>.<ext>`), `FolderLogWriter`
   (thread-safe log writing under a `Mutex`).
 
 ## Data flow (brief)
 
-- **Queue:** add → `startBatchConversion` → up to `BATCH_CONCURRENCY` files in parallel
-  via a `Semaphore`, by extension `.xcz` → `NszConverter.convertXcz()`, otherwise
-  `NszConverter.convert()`; statuses Pending→Converting→Completed/Failed; overall progress
-  from the sum of `fileTotals`.
+- **Queue:** add → `startBatchConversion` → files in parallel via `Semaphore`
+  (`resolveConcurrency` → `min(cores − 1, 4)`, A07), by extension `.xcz` →
+  `NszConverter.convertXcz()`, otherwise `NszConverter.convert()`; statuses
+  Pending→Converting→Completed/Failed; overall progress from the sum of `fileTotals`.
 - **Folder:** `FolderScanner.scanFolder` → `FolderStructure` → `startFolderConversion` →
   `FolderProcessor.processFolder` (phase 1: folder tree + plan, phase 2: parallel unpacking
   via a `Semaphore`) → `FolderConversionSummary` → the log is closed, temp is cleaned.

@@ -64,13 +64,14 @@ Per-module details — in [subsystems/kotlin-layer.md](subsystems/kotlin-layer.m
 - All three conversion modes (single file, queue, folder), NSZ→NSP and XCZ→XCI.
 - Hardware AES-CTR and SHA-256 (ARMv8 crypto extensions) with a software fallback.
 - No-copy input reading via `fd:N` with a temp-copy fallback for FUSE providers.
-- Async output writing (`async_writer`), zstd built with `-O3`, ThinLTO.
-- Core-adaptive batch/folder parallelism (`resolveConcurrency` → auto 1..3);
-  overridable up to the core count via a Settings slider when verification is off
-  (an experiment to measure core scaling — see [architecture.md](architecture.md) A07).
+- Async output writing (`async_writer`) with page-cache pacing, zstd built with `-O3`, ThinLTO.
+- Batch/folder parallelism fixed at `min(cores − 1, 4)` — unpacking is **write-bound** and
+  the storage saturates at ~4 parallel files ([architecture.md](architecture.md) A07/A15).
+  A Settings slider can pin any count (fewer = faster individual files).
 - EN/RU localization, in-app language selection, output folder selection (SAF).
-- SHA-256 verification of the finished NCA/NSP (non-fatal — see
-  [architecture.md](architecture.md) A12; needs header_key in prod.keys).
+- SHA-256 verification of every unpacked NCA, computed inline during decompression
+  (non-fatal, no output re-read — see [architecture.md](architecture.md) A12; needs
+  header_key in prod.keys).
 
 **With caveats / deferred:** see [status.md](status.md).
 

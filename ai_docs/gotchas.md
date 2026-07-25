@@ -137,6 +137,10 @@ didn't touch them; only function imports are flagged, class imports are fine; th
 error names a symbol you actually changed or removed.
 
 ## G10: Folder mode — verify falsely fails with "cannot parse NSP container"
+**Status:** largely **moot since 2026-07-25** — the post-conversion output re-read was
+removed entirely (A12), so there is no reopen to race. Kept because the underlying trap
+(reopening a FUSE-backed file whose write handle is still open) applies to *any* future
+code that re-reads a just-written output. The write pfd is still closed before finalize.
 **Symptom:** parallel folder NSZ→NSP marks nearly every file failed with
 `Verification failed: verify: cannot parse NSP container (code: -9)` and deletes the
 output; the same files in single-file mode pass.
@@ -269,3 +273,41 @@ read-grant flag. Provider + permission live in
 **How to spot:** the download completes (the cached `AndroNSZ_<v>.apk` exists) but the
 installer doesn't appear — check, in order, the manifest permission, the FileProvider
 authority match, and the "install unknown apps" toggle for the app.
+
+## G17: Unpacking speed is bounded by a *drifting* flash write ceiling — benchmark accordingly
+**Symptom:** raising the worker count doesn't raise total throughput; instead each file
+gets slower (aggregate pinned at roughly the same MB/s while per-file ≈ ceiling ÷ N). Or:
+two runs of the identical benchmark disagree by 2× for no visible reason.
+**Root cause:** unpacking is **write-bound**, not CPU-bound (see
+[architecture.md](architecture.md) A15). Worse, the ceiling is not a constant: a fresh UFS
+absorbs ~1000 MB/s, but after sustained multi-GB writing its SLC cache is exhausted and it
+falls to ~450–500 MB/s. Recovery needs *minutes* of idle, not seconds. This is not thermal
+throttling — check before blaming heat: `/sys/class/thermal/thermal_zone*/temp` stayed
+~50 °C and per-core `cpufreq/scaling_cur_freq` showed no capping.
+**How to benchmark so the numbers mean something:**
+- Separate the two regimes deliberately: measure "fresh" (device idle for minutes) and
+  "sustained" (after ≥20 GB written) as *different* data points. Never average them. The
+  same 4-file batch measured **967 MB/s fresh and 680–740 MB/s worn** — a 40 % spread from
+  the flash alone, easily mistaken for a code regression. Cross-time A/B over a long
+  session is worthless; interleave the variants or compare within one run.
+- **Make the file count a multiple of the worker count.** With 5 files and 4 workers the
+  first wave runs 4-up (~1000 MB/s) and then the 5th runs *alone* at single-file speed; the
+  "average aggregate" (total bytes ÷ wall clock) is dragged down by that tail and misleads
+  badly. It also made a 7-worker config look competitive with 4 — at 7 all 5 files ran in
+  one wave, so it had no tail at all. (The same tail effect must not be read as storage
+  degradation by any throughput-reactive logic — that bug was found and fixed here.)
+- Isolate the resource: run the CLI to `/dev/null` (`--verify`) for CPU+memory only, to
+  `/data/local/tmp` for raw UFS, to `/sdcard` for the FUSE path. Comparing those three
+  attributes the ceiling to the right layer.
+- Warm the input page cache (`cat file > /dev/null`) when the aim is to measure *writes*.
+- Sample `/proc/stat` busy% during the run: cores idling means I/O-bound, not CPU-bound.
+  `/proc/pressure/*` (PSI) would be ideal but needs root — shell gets EACCES.
+- Pin with `taskset` to compare big vs little cores (this device: cap 1024 vs 569, only a
+  ~1.2× spread on decompression, so core choice matters far less than expected).
+**Toolchain:** cross-compile the CLI with
+`aarch64-linux-android31-clang`, linking the arm64 `libzstd.a` already built under
+`app/.cxx/<cfg>/arm64-v8a/_deps/zstd-build/lib/`, and `-llog` (for `nsz_debug.c`).
+`--verify` decompresses without writing; the CLI prints a `BENCH elapsed=… MBps=…` line.
+**Trap when driving adb from Git Bash on Windows:** MSYS rewrites `/data/local/tmp` into a
+Windows path, so `adb push` fails with `remote secure_mkdirs failed`. Prefix the command
+with `MSYS_NO_PATHCONV=1`.

@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-08)
+# Status (updated: 2026-07-25)
 
 ## Working
 
@@ -6,13 +6,15 @@
   NSZ→NSP (debugged) and XCZ→XCI (**tested on a device 2026-07-01, both modes**,
   after the empty-partition fix — [gotchas.md](gotchas.md) G07).
 - Folder mode moved to the "new" pipeline (like the file queue): no-copy `fd:N`
-  input, writing the result straight into the destination descriptor, parallelism
-  via `FOLDER_CONCURRENCY`, NSP verify, a GUI bar per active file.
+  input, writing the result straight into the destination descriptor, adaptive
+  parallelism, inline NSP verify, a GUI bar per active file.
 - The perf pipeline in `stable`: hardware AES-CTR + SHA-256 with a software
-  fallback, no-copy input via `fd:N`, async writer, zstd `-O3`, ThinLTO,
-  core-adaptive batch parallelism (`BATCH_CONCURRENCY` 1..3). Result: 2 GB ~7 s.
-- NCA SHA-256 verify — **non-fatal** (mismatch → `WARN`, output kept, not deleted).
-  The filename check is an approximation, see [architecture.md](architecture.md) A12.
+  fallback, no-copy input via `fd:N`, async writer + page-cache pacing, input
+  zstd `-O3`, ThinLTO, parallelism fixed at 4 (A07). Unpacking is
+  **write-bound** — see A15 for the measured ceilings.
+- NCA SHA-256 verify — **non-fatal** (mismatch → `WARN` + `CORRUPTED` tag, output kept,
+  not deleted), computed inline during decompression with no output re-read; the
+  filename check is a fallback approximation. See [architecture.md](architecture.md) A12.
 - Output to a chosen folder (SAF tree / file uri) — in all modes, with a fallback
   to Downloads (`NszConverter.createOutputUri`).
 - **Custom in-app file picker** (split-screen, browses the raw filesystem via
@@ -45,6 +47,14 @@
   them. Only when keys are missing / the META NCA can't be parsed does it fall back to
   the (non-authoritative) filename content-id check, marked `VERIFIED … (by name)`. A
   mismatch stays non-fatal in both modes — never return `NCZ_ERR_HASH_MISMATCH` here.
+  The per-file UI verdict rides on the `VERIFIED`/`CORRUPTED` status tags (there is no
+  output re-read pass any more) — renaming those tags silently breaks the file cards.
+- **Unpacking is write-bound, and the ceiling drifts** (A15, G17). More workers do **not**
+  raise total throughput past ~4; they only slice per-file speed. Before "optimizing
+  parallelism", re-read the measured table — and benchmark fresh vs sustained separately,
+  since the flash slows ~2× once its SLC cache is exhausted.
+- **`async_writer`'s `sync_file_range`/`FADV_DONTNEED` pacing is load-bearing.** It looks
+  like a removable "experiment" but disabling it collapses parallel writes ~2.2×.
 - **Writing folder results straight into a SAF descriptor.** Folder mode writes output
   via `/proc/self/fd` into an arbitrary folder (not just Downloads). On rare firmwares
   FUSE failures are possible — input has a temp fallback, output does not.
@@ -79,6 +89,45 @@
 
 ## Decision log
 
+- 2026-07-25 — **write-bound diagnosis; two features built, measured and rejected**
+  ([architecture.md](architecture.md) A15/A07/A12, [gotchas.md](gotchas.md) G17). An adb CLI
+  benchmark overturned the "CPU-bound" model: decompression scales to ~2375 MB/s
+  (→ `/dev/null`) while **writing** caps at ~1000–1080 MB/s and decays to ~450–500 under
+  sustained load (UFS SLC exhaustion, not thermal — CPU stayed ~50 °C). FUSE ≈ raw UFS, so the
+  output path is innocent. The `cores − 1` step from 2026-07-24 was therefore a regression
+  (per-file cut ~2×, no aggregate gain).
+  **Kept:** (1) `nativeVerifyNsp` post-pass **removed** — it re-read the entire output; the
+  per-file `VerifyStatus` now comes from the engine's inline `VERIFIED`/new `CORRUPTED` tags via
+  `NszConverter.VerifyTracker` (XCZ gets a real verdict for the first time; `headerKey` plumbing
+  dropped from `convert`/`convertXcz`/`convertDirect`). (2) Parallelism fixed at
+  `min(cores − 1, 4)`. (3) Step-6 fadvise/`sync_file_range` reclassified **load-bearing**
+  (2.2× on parallel writes — disabling it collapses them); 256 KiB chunk confirmed (1 MiB is
+  worse for writes).
+  **Rejected after measuring** (both worked correctly, both bought nothing — details and the
+  numbers in A07/A15, kept as "don't retry this" notes): an *adaptive* worker-count controller
+  (`AdaptivePolicy`/`AdaptiveGate`, hill-climb on aggregate MB/s) — its premise is false, since
+  fewer workers never raise aggregate at any wear level, and its ramp cost ~7 %; and a native
+  *input prefetch* pthread in `SolidReader` — reads are never the bottleneck and kernel
+  readahead already covers them.
+  **End state, measured in the app** (4 files × 2.7 GB out, fresh flash): aggregate
+  **967 MB/s**, per-file **242–254 MB/s**, all files `Checked`, 10.7 GB in 11 s — vs per-file
+  ~115–140 at the 7-worker starting point. Builds + 8 unit tests green; verified on device
+  (POCO/HyperOS, Android 16, SM8735).
+- 2026-07-24 — **parallel-decompression throughput pass** ([architecture.md](architecture.md)
+  A15) on branch `dev-parallel-files-2`. (1) `AUTO_CONCURRENCY` → `cores − 1` and the
+  Settings slider's verify-off gate removed (`resolveConcurrency(override)`); slider now
+  always shown. (2) Native solid path: `NCZ_CHUNK_SIZE` 64 KiB→256 KiB, `NCZ_WRITER_BUFFERS`
+  12, `NCZ_IN_BUF_SIZE` 1 MiB, input+output `FILE*` set to `_IONBF` (kills the stdio
+  double-copy), `copy_bytes` mallocs only what it copies. (3) Experimental page-cache
+  hygiene in `async_writer.c` (`sync_file_range`+`FADV_DONTNEED` every 64 MiB) +
+  `FADV_SEQUENTIAL` on input — measure-gated, note the verify-reread trade-off. (4)
+  Per-conversion cancel **epoch** (`g_cancel_epoch`) fixes the parallel un-cancel bug;
+  `ncz_decompress`/`copy_bytes`/`xcz_process_file` now take `int start_epoch`. (5) **Deleted**
+  the disabled core-aware scheduler (A13): `CoreScheduler.kt`, `CpuTopology.kt`,
+  `cpu_affinity.c/.h`, `nativeSetThreadAffinity/Clear`, `smart_distribution` pref + strings,
+  and their unit tests. Builds (both ABIs) + Kotlin + unit tests green; on-device speed
+  benchmark pending (user). **Deferred:** plan Step 7 (release the permit before
+  verify/finalize) and the shared-debug-log-per-batch cleanup.
 - 2026-07-08 — **custom in-app file picker** ([architecture.md](architecture.md) A14).
   Replaced the SAF input pickers with a split-screen picker that browses the raw
   filesystem (`java.io.File`) under `MANAGE_EXTERNAL_STORAGE`. Reason: SAF adds files one

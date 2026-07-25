@@ -57,41 +57,42 @@ IO` with an active `inputPfd`, `NszConverter` copies the input to cache
 the retry is almost free.
 **Consequences:** reliability across all providers at the cost of a rare retry.
 
-## A07: Core-adaptive batch parallelism (queue mode)
-**Context:** in multi-file mode files can be converted in parallel.
-**Decision:** `AUTO_CONCURRENCY = (availableProcessors()/2).coerceAtLeast(1)`
-(8 cores → 4, 6 → 3, ≤2 → 1). Each file occupies two CPU threads — the producer
-(zstd + AES) and the async writer (fwrite + SHA-256) — so `cores/2` parallel files
-saturate every core. Files are launched via a `Semaphore`, native work runs on
-`Dispatchers.IO`, state is written on Main.
-**Consequences:** loads all cores; no cores are reserved for system/GUI (measurement
-favored the extra throughput over the reservation). Per-file progress is in
-`activeFileProgress` (keyed by index).
-**History:** the earlier formula was `(availableProcessors()/2 − 1).coerceIn(1, 3)`
-(8 cores → 3, using ~6 cores), which deliberately left 1–2 cores free and capped at 3
-on an assumed storage write ceiling. Dropped 2026-07-08 — the ceiling only bounded the
-auto value, not the achievable throughput (see the "Measured" note below).
-**Override (experiment):** `MainViewModel.resolveConcurrency(verificationEnabled, override)`
-keeps this auto value as the default, but when verification is **off** an optional
-Settings slider (`decompression_threads`, 0 = auto) raises the worker count up to the
-full core count. The gate to verify-off scopes the "use all cores" experiment and keeps
-the safe 1..3 whenever CNMT verification runs. Purpose: measure whether decompression
-actually scales past 3 workers or plateaus at the write ceiling — this decides the next
-step (intra-file `block-parallel-wip` vs. the A12 §3 "SHA on dedicated cores" layout).
-NB: parallelism is per-file, so the slider only helps a queue/folder of ≥ N files, not a
-single large file.
-**Measured (2026-07-07):** decompression is **CPU-bound**, not write-bound as this note
-originally assumed — 1 worker ~250–360 MB/s, scaling to ~800 MB/s aggregate at ~6 cores
-(past 6 is uncertain). So the old "storage write ceiling" only bounds the *auto* value,
-not the achievable throughput; the override exists to exploit that.
-**Load distribution (LPT):** when smart distribution is on (`smart_distribution`,
-default ON), both batch and folder dispatch the **largest files first**. The existing
-`Semaphore` is fair (FIFO), so creating the coroutines in descending-size order makes
-permits fall to the largest files first — a heavy file never trails the batch on a slow
-core, and small files fill the tail. Ordered by *input* (compressed) size (a proxy for
-the unpacked size, unknown until parsing). `FolderProcessor.processFolder` takes a
-`largestFirst` flag. Explicit big/little core affinity (`sched_setaffinity` + sysfs
-topology) is the planned next layer under the same toggle — [status.md](status.md).
+## A07: Batch/folder parallelism = a fixed 4 (queue and folder modes)
+**Context:** in multi-file mode files convert in parallel. The shared resource is
+**storage write bandwidth** (A15), not CPU.
+**Decision:** `AUTO_CONCURRENCY = (availableProcessors() − 1).coerceIn(1, 4)`
+(≥8 cores → 4, 6 → 4, 4 → 3, 2 → 1). `resolveConcurrency(override, queueSize)` returns a
+plain `Int`, clamped to the queue size; a Settings slider (`decompression_threads`,
+1..cores) pins any value. We control only the *number* of workers, never core placement
+(placement control was tried and regressed — A13, deleted).
+**Why 4, and why not adaptive:** measured aggregate throughput rises with the worker
+count up to ~4 and then flattens, **at every wear level of the flash** — fresh
+400/695/1013/1079 MB/s at N=1/2/4/6; worn 279/534/716 at N=1/2/4 (A15). Two conclusions:
+- Past 4, aggregate gains ≈nothing while per-file speed keeps falling (a fixed ceiling
+  divided by N). At 4, per-file is ~250 MB/s; at 7 it was ~115–140.
+- **Fewer workers never improve aggregate at any wear level**, so the optimum does not
+  drift and there is nothing for a runtime controller to discover.
+**Rejected: adaptive hill-climbing.** A full controller was built and measured on device
+(2026-07-25): `AdaptivePolicy` + `AdaptiveGate`, sampling aggregate MB/s and probing the
+worker count up/down with hysteresis. It was **deleted**, because its premise is false
+per the second bullet above — shedding can only lose throughput. Measured cost while it
+existed: starting at 2 and ramping cost ~7 % aggregate on a short 4-file batch (674 vs
+720 MB/s) because the run spent much of its life under-parallelized. If you are tempted
+to re-add it: the only thing lowering N buys is *per-file* latency, which is a user
+preference — that is what the slider is for, and it needs no measurement loop.
+**Consequences:** trivial `Semaphore(concurrency)` in both `MainViewModel.startBatchConversion`
+and `FolderProcessor.executePlan`. Per-file progress is in `activeFileProgress`.
+**History:** `(…/2 − 1).coerceIn(1, 3)` → `(…/2).coerceAtLeast(1)` (2026-07-08) →
+`(… − 1).coerceAtLeast(1)` (2026-07-24, on a wrong "CPU-bound" reading; 7 workers on this
+device — **regressed per-file badly for zero aggregate gain**) → adaptive (2026-07-25,
+rejected same day) → `(… − 1).coerceIn(1, 4)`.
+NB: parallelism is per-file, so it only helps a queue of several files. A single large
+solid file is one zstd stream and cannot be parallelized; see A15 for what was tried.
+**Load distribution (LPT) — rejected:** dispatching largest-first over the fair
+`Semaphore` measured *worse* on-device (~840 → ~700 MB/s): order alone doesn't control
+which core takes which file, so a heavy file can strand on a slow core (Q||Cmax). The
+core-aware scheduler that tried to fix this (A13) also regressed and was **deleted**
+2026-07-24. The shipping path is the plain natural-order `Semaphore`.
 
 ## A08: Per-app language via `attachBaseContext` + SharedPreferences
 **Context:** changing the language in-app without changing the system one.
@@ -186,45 +187,36 @@ the roadmap's earlier "probably off").
 **Semantics:** a mismatch stays **non-fatal** — `WARN` "hash mismatch (output kept)", the
 file is never deleted. Config is pushed once per batch via
 `nativeSetVerification(enabled, header_key, key_area_keys)` and is read-only during
-conversion (safe under `BATCH_CONCURRENCY` — see [gotchas.md](gotchas.md)). The
-structural `nca_verify_nsp` post-pass (section-header hashes) is kept, orthogonal.
+conversion (safe under parallel conversions — see [gotchas.md](gotchas.md)).
+**Reporting the verdict (2026-07-25):** the engine emits a machine-readable `CORRUPTED`
+tag alongside the human `WARN` in both mismatch branches of `report_hash_result`
+([ncz_engine.c](../app/src/main/cpp/ncz_engine.c)). Kotlin derives the per-file
+`VerifyStatus` from the inline `VERIFIED`/`CORRUPTED` tags via a per-call `VerifyTracker`
+(a `StatusCallback` decorator in [NszConverter.kt](../app/src/main/java/com/androNSZ/NszConverter.kt);
+`FolderProcessor.convertDirect` has the same interception). Each conversion has its own
+tracker, so parallel files never race.
+**The structural `nca_verify_nsp` post-pass was REMOVED (2026-07-25):** it re-read the
+*entire* output file, which on write-bound storage (A15) cost ~30 % of a single file's
+wall-clock and stole bandwidth from parallel writers. The CNMT check it duplicated is
+already streaming, inline and authoritative. The JNI entry point and `nca_verifier.c`
+remain in the tree but are now dead code (cleanup pending). Consequence: XCZ/XCI now
+reports a real verdict too (it hashes per HFS0 partition), where before it was always
+`NOT_CHECKED`.
 **Deferred:** per-core layout optimization (all SHA on 1–2 cores) — [status.md](status.md).
 
-## A13: Core-aware scheduler for heterogeneous CPUs (big.LITTLE)
-**Status:** DISABLED for release (2026-07-08). `MainViewModel.smartDistribution` is
-forced `false` and the Settings toggle is hidden, so the `coreAware` guard is never
-true and the plain `Semaphore` baseline always runs (no affinity JNI calls). The code
-below (`CoreScheduler`, `CpuTopology`, `cpu_affinity.c`, unit tests) stays in the tree
-as a deferred experiment; re-enabling means restoring the toggle + the prefs load.
-**Context:** measurement (2026-07-07) showed decompression is CPU-bound and scales to
-~6 cores (A07). But plain largest-first ordering over a work-conserving `Semaphore`
-(step 1) actually **regressed** (~840→~700 MB/s): order alone doesn't control *which*
-core takes *which* file, so a heavy file can land on a slow core and become the tail.
-Assigning files to cores of different speeds to minimize the finish time of the last
-one is the **Q||Cmax** problem.
-**Decision:** a core-aware scheduler ([CoreScheduler.kt](../app/src/main/java/com/androNSZ/fs/CoreScheduler.kt)),
-gated by the `smart_distribution` toggle.
-- **Topology** ([CpuTopology.kt](../app/src/main/java/com/androNSZ/util/CpuTopology.kt)):
-  per-core speed from sysfs `cpu_capacity` (→ `cpufreq/cpuinfo_max_freq` → homogeneous),
-  and a per-tier **cluster** affinity mask.
-- **Assignment** = LPT (largest file first) + greedy earliest-completion-time
-  (`load[c] + size/speed[c]`), then a **makespan-minimizing local search** (move a job
-  off the max-load core while it strictly lowers the global max). Work proxy = input
-  (compressed) size; speed proxy = capacity. Static (no work-stealing): a slow core may
-  idle rather than take a heavy file — protects makespan.
-- **Execution:** one coroutine per used core, each processing its assigned files
-  sequentially and **pinning** the native decompress to its cluster via
-  `nativeSetThreadAffinity` (new `cpu_affinity.c`, `sched_setaffinity` on the IO thread
-  before `nativeConvert`; the `async_writer` pthread inherits the mask). Reset after.
-- **Fallback:** only engages when the CPU is heterogeneous *and* affinity works
-  (probed once; EPERM on some OEM kernels). Otherwise → the natural-order `Semaphore`
-  baseline (order-only would just re-introduce the regression). Homogeneous CPU → baseline.
-**Consequences:** heavy files run on fast cores, pinned, without stranding on slow cores.
-`FolderProcessor.processFolder` gained a `smartDistribution` param; batch/folder share a
-per-file `body(index, mask)`. **Caveats:** static proxies don't see thermal throttling
-(pinning heavy work to big cores can throttle them) and compressed size is a proxy for
-unpacked size — calibration + guarded work-stealing (hybrid) is the deferred next step
-([status.md](status.md)). Then the SHA-256 per-core layout (A12 §3).
+## A13: Core-aware scheduler for heterogeneous CPUs (big.LITTLE) — DELETED
+**Status:** DELETED 2026-07-24. The scheduler (`CoreScheduler.kt`, `CpuTopology.kt`,
+`cpu_affinity.c` + `nativeSetThreadAffinity/Clear`, unit tests) was removed from the
+tree along with the `smart_distribution` toggle. It had been disabled since 2026-07-08.
+**Why it existed / why it failed:** measurement (2026-07-07) showed decompression is
+CPU-bound and scales to ~6 cores (A07). Plain largest-first ordering over a fair
+`Semaphore` regressed (~840→~700 MB/s) because order alone doesn't control *which* core
+takes *which* file (the **Q||Cmax** problem). The scheduler assigned files to cores by
+speed (LPT + greedy earliest-completion-time + makespan local search) and pinned the
+native decompress to a cluster via `sched_setaffinity`. It also regressed in practice
+(static proxies ignore thermal throttling; compressed size is a poor proxy for unpacked
+size), so it never shipped. The shipping path is the plain natural-order `Semaphore`
+(A07). Re-attempting this would need calibration + guarded work-stealing — not planned.
 
 ## A14: In-app file picker over the raw filesystem (`MANAGE_EXTERNAL_STORAGE`)
 **Context:** input selection used SAF only (`OpenDocument`/`OpenDocumentTree`,
@@ -249,3 +241,96 @@ two old modes, are deferred. Output-folder and prod.keys pickers stay on SAF (wr
 **Consequences:** free navigation + multi-select; `file://` inputs skip the fd/temp path.
 Trap: `file://` needs explicit handling in the name/size helpers (see
 [gotchas.md](gotchas.md) G13).
+
+## A15: Throughput pass + the write-bound diagnosis (solid mode, 2026-07-24/25)
+**Context:** with several files converting at once, zstd *looked* dominant and the
+per-file pipeline wasn't feeding it efficiently. A batch of changes was shipped on that
+assumption; then a proper on-device measurement overturned the assumption.
+
+### The measurement (2026-07-25) — unpacking is WRITE-bound, not CPU-bound
+Method: the host CLI ([tools/andro_nsz_cli.c](../app/src/main/cpp/tools/andro_nsz_cli.c))
+cross-compiled for arm64 and run over adb on a SM8735 device (8 heterogeneous cores,
+UFS storage), one 2.88 GB-output NSZ, N processes in parallel. See
+[gotchas.md](gotchas.md) G17 for the methodology and its traps.
+
+| Target | N=1 | N=2 | N=4 | N=6 | N=8 |
+|---|---|---|---|---|---|
+| → `/dev/null` (no write) | 611 | 1105 | 1905 | 2158 | **2375** |
+| → raw UFS (`/data/local/tmp`) | 400 | 695 | 1013 | 1079 | — |
+| → FUSE (`/sdcard`) | 467 | 737 | 1053 | 1008 | — |
+| → raw UFS, **Step-6 disabled** | — | 548 | 451 | 477 | — |
+
+Conclusions, each of which contradicted a prior belief:
+1. **Decompression is not the ceiling.** It scales to ~2375 MB/s; writing caps at
+   ~1000–1080 MB/s (N≈4 knee) and **degrades to ~450–500 MB/s under sustained load** —
+   flash SLC-cache exhaustion, *not* thermal (CPU stayed ~50 °C, and per-core `cpufreq`
+   showed no throttling). CPU busy during a write run (72 %) < during `/dev/null` (79 %):
+   cores stall on I/O.
+2. **FUSE/MediaStore is innocent** (FUSE ≈ raw UFS). The app's output path is not the problem.
+3. **The Step-6 page-cache hygiene below is essential, not harmful** — disabling it makes
+   parallel writes *collapse* (451 vs 1013 at N=4). The "measure-gated, probably revert"
+   note it shipped with was wrong; it is now load-bearing.
+4. **Chunk size barely matters for decompression** (64 K ≈ 256 K ≈ 512 K ≈ 1 M, 362–380 MB/s
+   single-threaded) but **1 MiB writes are worse than 256 KiB** (491 vs 887 at N=4). 256 KiB
+   is the right pick, for the write side.
+5. **A single solid file is producer-bound, not write-bound** (one zstd stream, ~600 MB/s to
+   /dev/null vs 400–467 with a write, while the write path is free). Attacking that with an
+   input prefetcher didn't work (see the rejected item below); a solid frame can't be
+   parallelized, so single-file speed is now bounded by one zstd stream.
+
+### End state, measured in the app (4 files × 2.7 GB out, 4 workers, fresh flash)
+Aggregate **967 MB/s**, per-file **242–254 MB/s**, every file `Checked`, 10.7 GB in 11 s.
+Compare the starting point of this whole effort (7 workers): per-file ~115–140 MB/s with no
+better aggregate. Per-file roughly doubled and the aggregate now sits at the storage write
+ceiling measured by the CLI (~1013 MB/s at N=4). On a *worn* flash the same run gives
+~680–740 MB/s — that spread is the flash, not the code, so always note the wear state
+alongside a number (G17).
+
+**Decisions:**
+- **Fixed parallelism of 4** (replaces the `cores − 1` step, which regressed per-file speed
+  for zero aggregate gain); an adaptive controller was built and rejected — see A07.
+- **Verify post-pass removed** (the biggest single-file win: it re-read the whole output) —
+  see A12.
+- The verify gate on the concurrency slider was removed — see A07.
+- **Rejected: user-space input prefetch thread.** A `Prefetcher` pthread (ring of 3 × 1 MiB,
+  mutex + condvars) was implemented to overlap the compressed-input `fread` with
+  decompression, aiming at the single-file case. Measured on device with `-DNCZ_NO_PREFETCH`
+  as the A/B control, pinned to one core, 3 paired rounds warm **and** cold (page cache
+  evicted with a 6 GB ballast read between runs): **no gain either way** — warm 341.6 vs
+  344.7 MB/s (prefetch marginally *slower*, sync overhead), cold 337/310 vs 340/312. Output
+  SHA-256 was byte-identical, so it worked; it just bought nothing, and was removed.
+  Reason: decompression emits ~340 MB/s of output ≈ 250 MB/s of compressed input while the
+  storage delivers 600+ MB/s — reads are never the bottleneck — and the kernel's readahead
+  (hinted by `POSIX_FADV_SEQUENTIAL`) already overlaps them. Don't re-add without a
+  measurement showing reads actually stalling the producer.
+- **Bigger solid chunks:** `NCZ_CHUNK_SIZE` 64 KiB → **256 KiB** (≥ `ZSTD_DStreamOutSize()`,
+  so zstd flushes full blocks; 4× fewer mutex/condvar and `aes_ctr_set_offset` ops). Async
+  pool `NCZ_WRITER_BUFFERS = 12` (3 MiB/file). Output is byte-identical to the reference's
+  0x10000 (AES reseeds per chunk from the absolute offset; chunks clamp to section ends).
+- **No stdio double-copy:** input and output `FILE*` are now `_IONBF` (were 4 MiB `_IOFBF`).
+  The solid reader reads the compressed stream in 1 MiB (`NCZ_IN_BUF_SIZE`) freads straight
+  into its own buffer; the async writer submits 256 KiB writes. Removes a full memcpy of
+  every byte in and out, and ~8 MiB/file of stdio buffers. `copy_bytes` now mallocs
+  `min(size, IO_BUF_SIZE)` (was always 4 MiB, for 0x4000 header copies).
+- **Page-cache hygiene — LOAD-BEARING, do not remove:** `posix_fadvise(SEQUENTIAL)` on the
+  input; the async writer does `sync_file_range(WRITE)` + `posix_fadvise(DONTNEED)` every
+  `AW_DROP_INTERVAL` (64 MiB) to bound dirty pages under N parallel writers. Best-effort
+  (FUSE returns EINVAL, ignored). Measured **2.2× on parallel writes** (see point 3 above) —
+  it shipped labelled "experimental, probably revert" and turned out to be one of the most
+  valuable changes. The old worry that DONTNEED would penalise the verify re-read is moot:
+  that re-read is gone (A12).
+- **Per-conversion cancel:** the old single global `g_cancel` (reset to 0 at every
+  conversion's entry) let a newly-started parallel file un-cancel the others. Replaced with
+  a monotonic **epoch counter** (`g_cancel_epoch`): each conversion snapshots it at entry
+  and polls `ncz_cancelled(start_epoch)`; `ncz_request_cancel()` bumps it, cancelling all
+  in-flight files (the existing UX). `ncz_decompress()` / `copy_bytes()` / `xcz_process_file()`
+  take `int start_epoch` instead of a flag pointer; JNI surface unchanged.
+**Deferred / known-but-not-done:**
+- The per-file `nativeSetDebugLog` opens one shared global log path with mode `"w"`, so
+  parallel files truncate each other's log and the first to finish calls
+  `nativeCloseDebugLog`, silencing the rest. Should be opened once per batch.
+- `nca_verifier.c` + `nativeVerifyNsp` are now dead code (A12) — remove in a cleanup pass.
+- Releasing the gate slot before per-file MediaStore finalize (the old "Step 7"): with the
+  cap at 4 and the verify re-read gone, the remaining tail work is small. Only worth it if a
+  benchmark shows inter-file gaps.
+- Block-mode (non-solid) NCZ is still untouched by all of the above.
