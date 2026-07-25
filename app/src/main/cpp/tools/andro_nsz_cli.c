@@ -6,11 +6,12 @@
 #include "sha256.h"
 
 #include <ctype.h>
-#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include <sys/stat.h>
 
 typedef enum {
    MODE_AUTO,
@@ -207,11 +208,10 @@ static int convert_single_ncz(const char *input, const char *output,
       goto done;
    }
 
-   volatile atomic_int cancel = ATOMIC_VAR_INIT(0);
    int64_t body_written = 0;
    rc = ncz_decompress(in_fp, out_fp, &hdr,
                        &sha_ctx,
-                       &cancel,
+                       0,   /* start_epoch: CLI never cancels */
                        cb, cb_ctx,
                        NCA_HEADER_SIZE + hdr.decompressed_size,
                        &body_written);
@@ -313,12 +313,33 @@ int main(int argc, char **argv)
 
    ProgressState progress = {-1};
    int rc;
+   struct timespec t0, t1;
+   clock_gettime(CLOCK_MONOTONIC, &t0);
    if (mode == MODE_XCZ) {
       rc = ncz_convert_xcz_to_xci(input, output, progress_cb, &progress, status_cb, &cli);
    } else if (mode == MODE_NCZ) {
       rc = convert_single_ncz(input, output, progress_cb, &progress, &cli);
    } else {
       rc = ncz_convert_nsz_to_nsp(input, output, progress_cb, &progress, status_cb, &cli);
+   }
+   clock_gettime(CLOCK_MONOTONIC, &t1);
+
+   /* Benchmark line: wall-clock elapsed + throughput over the decompressed
+    * (output) size. For /dev/null runs the size is unknown here — pair with a
+    * file run for the byte count. */
+   {
+      double elapsed = (double)(t1.tv_sec - t0.tv_sec)
+                     + (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
+      long long out_bytes = -1;
+      if (output && strcmp(output, VERIFY_SINK_PATH) != 0) {
+         struct stat st;
+         if (stat(output, &st) == 0) out_bytes = (long long)st.st_size;
+      }
+      if (out_bytes >= 0)
+         fprintf(stderr, "BENCH elapsed=%.3fs bytes=%lld MBps=%.1f\n",
+                 elapsed, out_bytes, (double)out_bytes / 1048576.0 / elapsed);
+      else
+         fprintf(stderr, "BENCH elapsed=%.3fs bytes=? MBps=?\n", elapsed);
    }
 
    if (debug_log) dbg_close();

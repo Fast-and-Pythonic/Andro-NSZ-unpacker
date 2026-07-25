@@ -17,12 +17,30 @@
 #include <stdatomic.h>
 #include <time.h>
 #include <unistd.h>
+#if defined(__linux__)
+#include <fcntl.h>
+#endif
 
-/* ---------- cancellation flag ---------- */
-static volatile atomic_int g_cancel = ATOMIC_VAR_INIT(0);
+/* Hint sequential access on an input stream so the kernel reads ahead
+ * aggressively. Best-effort: a no-op on FUSE-backed fds and non-Linux hosts. */
+static void advise_sequential(FILE *fp)
+{
+#if defined(__linux__)
+    if (fp) posix_fadvise(fileno(fp), 0, 0, POSIX_FADV_SEQUENTIAL);
+#else
+    (void)fp;
+#endif
+}
 
-void ncz_request_cancel(void) { atomic_store(&g_cancel, 1); }
-void ncz_reset_cancel(void)   { atomic_store(&g_cancel, 0); }
+/* ---------- cancellation epoch ----------
+ * A monotonically increasing counter rather than a single shared flag: each
+ * conversion snapshots it at entry and is cancelled once the global epoch moves
+ * past that snapshot. This lets several conversions run concurrently without one
+ * starting file resetting another's cancel state (the old single-flag bug). */
+static atomic_int g_cancel_epoch = ATOMIC_VAR_INIT(0);
+
+void ncz_request_cancel(void) { atomic_fetch_add(&g_cancel_epoch, 1); }
+int  ncz_cancelled(int start_epoch) { return atomic_load(&g_cancel_epoch) != start_epoch; }
 
 /* ---------- error strings ---------- */
 const char *ncz_error_string(int code)
@@ -199,6 +217,10 @@ static void report_hash_result(const char *name, const uint8_t digest[32],
         } else {
             DBG("CNMT HASH MISMATCH '%s': %s not in set", name, hex);
             EMIT("WARN", "   hash mismatch (output kept): %s", name);
+            /* Machine-readable mismatch tag: the Kotlin/CLI layer keys the
+             * per-file verify status off VERIFIED/CORRUPTED, so no separate
+             * output re-read pass is needed. Non-fatal (output kept). */
+            EMIT("CORRUPTED", "   %s", name);
         }
         return;
     }
@@ -216,21 +238,27 @@ static void report_hash_result(const char *name, const uint8_t digest[32],
     } else {
         DBG("HASH MISMATCH '%s': expected=%s got=%s", name, base, hex);
         EMIT("WARN", "   hash mismatch (output kept): %s", name);
+        EMIT("CORRUPTED", "   %s", name);
     }
 
 #undef EMIT
 }
 
 /* Copy helper with optional SHA-256 feed */
-static int copy_bytes(FILE *in, FILE *out, uint64_t size, Sha256Ctx *sha_ctx)
+static int copy_bytes(FILE *in, FILE *out, uint64_t size, Sha256Ctx *sha_ctx,
+                      int start_epoch)
 {
-    uint8_t *buf = malloc(IO_BUF_SIZE);
+    /* Only allocate as much as we actually copy — callers pass small sizes
+     * (0x4000 NCA headers) far more often than a full IO_BUF_SIZE run. */
+    size_t buf_size = size < IO_BUF_SIZE ? (size_t)size : IO_BUF_SIZE;
+    if (buf_size == 0) return NCZ_OK;
+    uint8_t *buf = malloc(buf_size);
     if (!buf) return NCZ_ERR_OOM;
 
     uint64_t remaining = size;
     while (remaining > 0) {
-        if (atomic_load(&g_cancel)) { free(buf); return NCZ_ERR_CANCELLED; }
-        size_t chunk = remaining < IO_BUF_SIZE ? (size_t)remaining : IO_BUF_SIZE;
+        if (ncz_cancelled(start_epoch)) { free(buf); return NCZ_ERR_CANCELLED; }
+        size_t chunk = remaining < buf_size ? (size_t)remaining : buf_size;
         if (fread(buf, 1, chunk, in) != chunk) { free(buf); return NCZ_ERR_IO; }
         if (sha_ctx) sha256_update(sha_ctx, buf, chunk);
         if (fwrite(buf, 1, chunk, out) != chunk) { free(buf); return NCZ_ERR_IO; }
@@ -248,7 +276,8 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
                             NczStatusCb status_cb,
                             void *status_ctx)
 {
-    atomic_store(&g_cancel, 0);
+    /* Snapshot the cancel epoch; this conversion aborts once it moves on. */
+    int start_epoch = atomic_load(&g_cancel_epoch);
 
 #define EMIT(tag, ...) \
     do { \
@@ -285,7 +314,12 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
     /* 2. Pre-scan NCZ headers for decompressed sizes */
     FILE *in_fp = open_input_file(input_path);
     if (!in_fp) return NCZ_ERR_OPEN_INPUT;
-    setvbuf(in_fp, NULL, _IOFBF, IO_BUF_SIZE);
+    /* Unbuffered: the solid reader already reads the compressed stream in large
+     * (NCZ_IN_BUF_SIZE) freads straight into its own buffer, so a 4 MiB stdio
+     * buffer on top would just copy every byte a second time. Header/CNMT parsing
+     * does a handful of small reads — a few extra syscalls per file, negligible. */
+    setvbuf(in_fp, NULL, _IONBF, 0);
+    advise_sequential(in_fp);
 
     uint64_t *new_sizes = calloc(container.file_count, sizeof(uint64_t));
     if (!new_sizes) { fclose(in_fp); return NCZ_ERR_OOM; }
@@ -343,7 +377,10 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         free(new_sizes); fclose(in_fp); cnmt_hashset_free(&cnmt_set);
         return NCZ_ERR_OPEN_OUTPUT;
     }
-    setvbuf(out_fp, NULL, _IOFBF, IO_BUF_SIZE);
+    /* Unbuffered: the async writer submits large (NCZ_CHUNK_SIZE) chunks and
+     * copy_bytes writes in <=IO_BUF_SIZE pieces, so a 4 MiB stdio buffer would
+     * only memcpy every output byte again before the kernel write. */
+    setvbuf(out_fp, NULL, _IONBF, 0);
 
     /* 4. Write PFS0 header */
     if (pfs0_write_header(out_fp, &container, new_sizes) != 0) {
@@ -367,7 +404,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
             Sha256Ctx sha_ctx;
             if (hash_it) sha256_init(&sha_ctx);
 
-            ret = copy_bytes(in_fp, out_fp, f->size, hash_it ? &sha_ctx : NULL);
+            ret = copy_bytes(in_fp, out_fp, f->size, hash_it ? &sha_ctx : NULL, start_epoch);
             done_bytes += (int64_t)f->size;
             if (progress_cb) progress_cb(done_bytes, total_output_bytes, cb_ctx);
 
@@ -390,7 +427,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         if (hash_it) sha256_init(&sha_ctx);
 
         /* Copy NCA header verbatim (first 0x4000 bytes) */
-        ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL);
+        ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL, start_epoch);
         if (ret != NCZ_OK) break;
 
         /* Parse NCZ header at offset 0x4000 */
@@ -409,7 +446,7 @@ int ncz_convert_nsz_to_nsp(const char *input_path,
         int64_t body_written = 0;
         ret = ncz_decompress(in_fp, out_fp, &hdr,
                              hash_it ? &sha_ctx : NULL,
-                             &g_cancel,
+                             start_epoch,
                              progress_cb, cb_ctx,
                              total_output_bytes,
                              &body_written);
@@ -456,6 +493,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
                             const char *name, uint64_t f_size, int is_ncz,
                             uint64_t new_size, int64_t total_output_bytes,
                             int64_t *done_bytes, const CnmtHashSet *set,
+                            int start_epoch,
                             NczProgressCb progress_cb, void *cb_ctx,
                             NczStatusCb status_cb, void *status_ctx)
 {
@@ -476,7 +514,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
         int hash_it = should_hash(name, set);
         if (hash_it) sha256_init(&sha_ctx);
 
-        ret = copy_bytes(in_fp, out_fp, f_size, hash_it ? &sha_ctx : NULL);
+        ret = copy_bytes(in_fp, out_fp, f_size, hash_it ? &sha_ctx : NULL, start_epoch);
         *done_bytes += (int64_t)f_size;
         if (progress_cb) progress_cb(*done_bytes, total_output_bytes, cb_ctx);
 
@@ -493,7 +531,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
     if (hash_it) sha256_init(&sha_ctx);
 
     /* Copy NCA header verbatim (first 0x4000 bytes) */
-    ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL);
+    ret = copy_bytes(in_fp, out_fp, NCA_HEADER_SIZE, hash_it ? &sha_ctx : NULL, start_epoch);
     if (ret != NCZ_OK) return ret;
 
     /* Parse NCZ header at offset 0x4000 */
@@ -508,7 +546,7 @@ static int xcz_process_file(FILE *in_fp, FILE *out_fp,
     int64_t body_written = 0;
     ret = ncz_decompress(in_fp, out_fp, &hdr,
                          hash_it ? &sha_ctx : NULL,
-                         &g_cancel,
+                         start_epoch,
                          progress_cb, cb_ctx,
                          total_output_bytes,
                          &body_written);
@@ -533,7 +571,8 @@ int ncz_convert_xcz_to_xci(const char *input_path,
                             NczStatusCb status_cb,
                             void *status_ctx)
 {
-    atomic_store(&g_cancel, 0);
+    /* Snapshot the cancel epoch; this conversion aborts once it moves on. */
+    int start_epoch = atomic_load(&g_cancel_epoch);
 
 #define EMIT(tag, ...) \
     do { \
@@ -563,7 +602,12 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     /* 1. Open input. fd:N is supported so SAF/FUSE sources need no temp copy. */
     in_fp = open_input_file(input_path);
     if (!in_fp) return NCZ_ERR_OPEN_INPUT;
-    setvbuf(in_fp, NULL, _IOFBF, IO_BUF_SIZE);
+    /* Unbuffered: the solid reader already reads the compressed stream in large
+     * (NCZ_IN_BUF_SIZE) freads straight into its own buffer, so a 4 MiB stdio
+     * buffer on top would just copy every byte a second time. Header/CNMT parsing
+     * does a handful of small reads — a few extra syscalls per file, negligible. */
+    setvbuf(in_fp, NULL, _IONBF, 0);
+    advise_sequential(in_fp);
 
     /* 2. Read the first 0x200 and locate the XCI header.
      *    Trimmed XCI: the header (magic "HEAD" at +0x100) is this first block.
@@ -691,7 +735,10 @@ int ncz_convert_xcz_to_xci(const char *input_path,
     /* 5. Open output */
     out_fp = open_output_file(output_path);
     if (!out_fp) { ret = NCZ_ERR_OPEN_OUTPUT; goto done; }
-    setvbuf(out_fp, NULL, _IOFBF, IO_BUF_SIZE);
+    /* Unbuffered: the async writer submits large (NCZ_CHUNK_SIZE) chunks and
+     * copy_bytes writes in <=IO_BUF_SIZE pieces, so a 4 MiB stdio buffer would
+     * only memcpy every output byte again before the kernel write. */
+    setvbuf(out_fp, NULL, _IONBF, 0);
 
     /* 6. XCI header verbatim (nsz copies the original 0x200 header unchanged) */
     if (fwrite(xci_header, 1, 0x200, out_fp) != 0x200) { ret = NCZ_ERR_IO; goto done; }
@@ -737,7 +784,7 @@ int ncz_convert_xcz_to_xci(const char *input_path,
             EMIT("EXISTS", "     %s", f->name);
             ret = xcz_process_file(in_fp, out_fp, f->name, f->size, f->is_ncz,
                                    inner_new_sizes[p][i], total_output_bytes, &done_bytes,
-                                   &part_sets[p],
+                                   &part_sets[p], start_epoch,
                                    progress_cb, cb_ctx, status_cb, status_ctx);
         }
     }

@@ -3,7 +3,6 @@
 #include "nsz_types.h"
 #include "sha256.h"
 #include <stdio.h>
-#include <stdatomic.h>
 
 /*
  * NCZ decompression engine — mirrors Python NszDecompressor.py:175-210.
@@ -20,7 +19,8 @@
  * out_fp:   output file, positioned where decompressed body should be written
  * hdr:      parsed NCZ header (with sections, optional block header, FakeSection)
  * sha_ctx:  if non-NULL, all output bytes are fed into this hash context
- * cancel:   atomic flag — set to 1 from another thread to abort
+ * start_epoch: cancel-epoch snapshot from the caller; the loop aborts once
+ *           ncz_cancelled(start_epoch) becomes true (see ncz_engine.h)
  * cb:       progress callback (may be NULL)
  * cb_ctx:   opaque user data for callback
  * total_est: total estimated output size (for progress reporting)
@@ -31,7 +31,7 @@ int ncz_decompress(FILE *in_fp,
                    FILE *out_fp,
                    const NczHeader *hdr,
                    Sha256Ctx *sha_ctx,
-                   volatile atomic_int *cancel,
+                   int start_epoch,
                    NczProgressCb cb,
                    void *cb_ctx,
                    int64_t total_est,

@@ -29,6 +29,7 @@
  *   6. Last block remainder handling
  */
 #include "ncz_decompress.h"
+#include "ncz_engine.h"
 #include "aes_ctr.h"
 #include "async_writer.h"
 #include "nsz_debug.h"
@@ -37,6 +38,43 @@
 #include <string.h>
 #include <time.h>
 #include <zstd.h>
+
+/*
+ * Decompressed-chunk size for the solid write loop, and the async-writer pool
+ * depth. 256 KiB is >= ZSTD_DStreamOutSize() (so zstd flushes full blocks
+ * instead of partial 64 KiB pieces) and cuts the per-chunk mutex/condvar and
+ * aes_ctr_set_offset traffic 4x vs the old 64 KiB. Output bytes are invariant to
+ * this size: AES-CTR is reseeded per chunk from the absolute offset i, chunks are
+ * clamped to section ends, the solid reader returns exact lengths, and the writer
+ * preserves submit order for both fwrite and SHA — so 256 KiB produces the same
+ * output as the reference's 0x10000. 12 x 256 KiB = 3 MiB in-flight per file.
+ */
+/* Overridable at compile time (-D...) for benchmark A/B sweeps. */
+#ifndef NCZ_CHUNK_SIZE
+#define NCZ_CHUNK_SIZE     (256 * 1024)
+#endif
+#ifndef NCZ_WRITER_BUFFERS
+#define NCZ_WRITER_BUFFERS 12
+#endif
+
+/*
+ * Compressed-input read size for the solid reader. Larger than
+ * ZSTD_DStreamInSize() (~128 KiB) so that, with the input FILE* now unbuffered
+ * (see ncz_engine.c), each fread is a single ~1 MiB syscall straight into in_buf
+ * rather than many small reads through a redundant stdio buffer.
+ */
+#define NCZ_IN_BUF_SIZE (1 << 20)
+
+/*
+ * NB: a user-space input prefetch thread was implemented and measured here
+ * (2026-07-25) and then removed — it produced no gain, warm or cold. Reason:
+ * decompression emits ~340 MB/s of output, i.e. only ~250 MB/s of compressed
+ * input, while the storage delivers 600+ MB/s, so reading is never the
+ * bottleneck — and the kernel's readahead (hinted by POSIX_FADV_SEQUENTIAL in
+ * ncz_engine.c) already overlaps it with computation. Don't re-add it without a
+ * measurement that shows reads actually stalling the producer.
+ * See architecture.md A15.
+ */
 
 /* ── Block decompression reader ──────────────────────────────────────────── */
 /* Mirrors Python BlockDecompressorReader.py */
@@ -173,7 +211,7 @@ typedef struct {
 static int solid_reader_init(SolidReader *sr, FILE *fp)
 {
     sr->fp = fp;
-    sr->in_buf_size = ZSTD_DStreamInSize();
+    sr->in_buf_size = NCZ_IN_BUF_SIZE;
     sr->in_buf = malloc(sr->in_buf_size);
     if (!sr->in_buf) return NCZ_ERR_OOM;
 
@@ -232,7 +270,7 @@ int ncz_decompress(FILE *in_fp,
                    FILE *out_fp,
                    const NczHeader *hdr,
                    Sha256Ctx *sha_ctx,
-                   volatile atomic_int *cancel,
+                   int start_epoch,
                    NczProgressCb cb,
                    void *cb_ctx,
                    int64_t total_est,
@@ -256,7 +294,7 @@ int ncz_decompress(FILE *in_fp,
 
     /* Chunk buffer for reading decompressed data (used when there is no
      * output stream; otherwise the async writer owns the buffers). */
-    uint8_t *chunk_buf = malloc(0x10000);
+    uint8_t *chunk_buf = malloc(NCZ_CHUNK_SIZE);
     if (!chunk_buf) {
         if (use_block) block_reader_free(&block_reader);
         else solid_reader_free(&solid_reader);
@@ -267,7 +305,7 @@ int ncz_decompress(FILE *in_fp,
      * decompress + AES on this thread. */
     AsyncWriter *aw = NULL;
     if (out_fp) {
-        aw = aw_start(out_fp, sha_ctx, 0x10000, 32);
+        aw = aw_start(out_fp, sha_ctx, NCZ_CHUNK_SIZE, NCZ_WRITER_BUFFERS);
         if (!aw) {
             free(chunk_buf);
             if (use_block) block_reader_free(&block_reader);
@@ -330,16 +368,17 @@ int ncz_decompress(FILE *in_fp,
             (long long)s->crypto_type, use_crypto, (unsigned long long)i);
 
         while (i < end && ret == NCZ_OK) {
-            if (cancel && atomic_load(cancel)) { ret = NCZ_ERR_CANCELLED; break; }
+            if (ncz_cancelled(start_epoch)) { ret = NCZ_ERR_CANCELLED; break; }
 
             /* Python: crypto.seek(i) — set CTR counter to absolute NCA offset */
             if (use_crypto) {
                 aes_ctr_set_offset(&aes, s->crypto_counter, (uint64_t)i);
             }
 
-            /* Python: chunkSz = 0x10000 if end - i > 0x10000 else end - i */
+            /* Python uses 0x10000; we use a larger NCZ_CHUNK_SIZE (output-identical,
+             * see the constant's note). chunkSz = min(NCZ_CHUNK_SIZE, end - i). */
             int64_t remain = end - i;
-            size_t chunk_sz = remain > 0x10000 ? 0x10000 : (size_t)remain;
+            size_t chunk_sz = remain > NCZ_CHUNK_SIZE ? NCZ_CHUNK_SIZE : (size_t)remain;
 
             /* Acquire a buffer: an async-writer buffer when writing, else the
              * local scratch buffer. */
