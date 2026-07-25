@@ -159,9 +159,7 @@
     <string name="settings_verification_desc">Сверять хеши распакованных NCA с метаданными CNMT. Почти бесплатно; несовпадения выводятся как предупреждения, а результат всегда сохраняется.</string>
     <string name="settings_decompression_threads">Воркеры распаковки</string>
     <string name="settings_threads_auto">Авто</string>
-    <string name="settings_decompression_threads_desc">Экспериментально: сколько файлов распаковывать параллельно (доступно только при выключенной проверке). «Авто» подстраивается под число ядер. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
-    <string name="settings_smart_distribution">Умное распределение по ядрам</string>
-    <string name="settings_smart_distribution_desc">На big.LITTLE-телефонах крупные файлы идут на быстрые ядра, мелкие — на медленные (с привязкой к ядрам), вместо того чтобы тяжёлый файл застревал на слабом ядре. Ускоряет очередь или папку из нескольких файлов; при однородном CPU или недоступной привязке — обычное планирование.</string>
+    <string name="settings_decompression_threads_desc">Сколько файлов распаковывать параллельно. «Авто» подстраивается под число ядер. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
 
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>

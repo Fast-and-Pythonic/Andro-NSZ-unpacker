@@ -445,42 +445,40 @@ fun SettingsScreen(
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                )
 
-               // Experimental decompression-parallelism control, only meaningful
-               // (and thus only shown) while verification is off.
-               if (!currentVerification) {
-                  Spacer(modifier = Modifier.height(4.dp))
-                  Row(
-                     modifier = Modifier.fillMaxWidth(),
-                     horizontalArrangement = Arrangement.SpaceBetween,
-                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                  ) {
-                     Text(
-                        text = stringResource(R.string.settings_decompression_threads),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                     )
-                     Text(
-                        text = if (currentDecompressionThreads <= 0) {
-                           stringResource(R.string.settings_threads_auto)
-                        } else {
-                           currentDecompressionThreads.toString()
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                     )
-                  }
-                  Slider(
-                     value = currentDecompressionThreads.coerceIn(0, maxThreads).toFloat(),
-                     onValueChange = { onDecompressionThreadsChange(it.roundToInt()) },
-                     valueRange = 0f..maxThreads.toFloat(),
-                     steps = (maxThreads - 1).coerceAtLeast(0)
+               // Decompression-parallelism control: how many files to unpack at
+               // once. Independent of verification (CNMT verification is nearly free).
+               Spacer(modifier = Modifier.height(4.dp))
+               Row(
+                  modifier = Modifier.fillMaxWidth(),
+                  horizontalArrangement = Arrangement.SpaceBetween,
+                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
+               ) {
+                  Text(
+                     text = stringResource(R.string.settings_decompression_threads),
+                     style = MaterialTheme.typography.titleMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
                   Text(
-                     text = stringResource(R.string.settings_decompression_threads_desc),
-                     style = MaterialTheme.typography.bodySmall,
+                     text = if (currentDecompressionThreads <= 0) {
+                        stringResource(R.string.settings_threads_auto)
+                     } else {
+                        currentDecompressionThreads.toString()
+                     },
+                     style = MaterialTheme.typography.titleMedium,
                      color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
                }
+               Slider(
+                  value = currentDecompressionThreads.coerceIn(0, maxThreads).toFloat(),
+                  onValueChange = { onDecompressionThreadsChange(it.roundToInt()) },
+                  valueRange = 0f..maxThreads.toFloat(),
+                  steps = (maxThreads - 1).coerceAtLeast(0)
+               )
+               Text(
+                  text = stringResource(R.string.settings_decompression_threads_desc),
+                  style = MaterialTheme.typography.bodySmall,
+                  color = MaterialTheme.colorScheme.onSurfaceVariant
+               )
             }
          }
 

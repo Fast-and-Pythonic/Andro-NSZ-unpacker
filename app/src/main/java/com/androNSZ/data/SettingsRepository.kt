@@ -42,7 +42,6 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val ACCENT_COLOR_KEY = "accent_color"
       private const val VERIFICATION_KEY = "verification_enabled"
       private const val DECOMPRESSION_THREADS_KEY = "decompression_threads"
-      private const val SMART_DISTRIBUTION_KEY = "smart_distribution"
       private const val COMPACT_CARD_NAMES_KEY = "compact_card_names"
       private const val SHOW_UPDATE_BANNER_KEY = "show_update_banner"
       private const val LAST_UPDATE_CHECK_KEY = "last_update_check_ms"
@@ -108,22 +107,13 @@ class SettingsRepository private constructor(private val context: Context) {
       langPrefs.edit().putBoolean(VERIFICATION_KEY, enabled).apply()
    }
 
-   // Experimental override for the decompression parallelism (number of files
-   // converted at once). 0 = auto (the core-adaptive 1..3 formula). Only honored
-   // when verification is OFF — see MainViewModel. Read synchronously at job start.
+   // Override for the decompression parallelism (number of files converted at
+   // once). 0 = auto (the core-adaptive AUTO_CONCURRENCY). See MainViewModel.
+   // Read synchronously at job start.
    fun getDecompressionThreads(): Int = langPrefs.getInt(DECOMPRESSION_THREADS_KEY, 0)
 
    fun saveDecompressionThreads(count: Int) {
       langPrefs.edit().putInt(DECOMPRESSION_THREADS_KEY, count).apply()
-   }
-
-   // Smart load distribution: dispatch the largest files first (LPT), so a heavy
-   // file never trails the batch on a slow core. Default ON — it's strictly better;
-   // the toggle exists to A/B measure it (and will later also gate core affinity).
-   fun getSmartDistribution(): Boolean = langPrefs.getBoolean(SMART_DISTRIBUTION_KEY, true)
-
-   fun saveSmartDistribution(enabled: Boolean) {
-      langPrefs.edit().putBoolean(SMART_DISTRIBUTION_KEY, enabled).apply()
    }
 
    // GUI: render each file card's name on a single line and show its extension

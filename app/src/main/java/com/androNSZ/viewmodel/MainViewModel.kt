@@ -14,12 +14,10 @@ import com.androNSZ.BuildConfig
 import com.androNSZ.R
 import com.androNSZ.NszConverter
 import com.androNSZ.data.SettingsRepository
-import com.androNSZ.fs.CoreScheduler
 import com.androNSZ.fs.FolderLogWriter
 import com.androNSZ.fs.FolderScanner
 import com.androNSZ.fs.FolderProcessor
 import com.androNSZ.fs.TempFileManager
-import com.androNSZ.util.CpuTopology
 import com.androNSZ.model.*
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.nut.KeysParser
@@ -44,28 +42,34 @@ import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * How many files to convert in parallel in batch mode.
+ * How many files to unpack in parallel by default.
  *
- * Each file occupies two CPU threads — the producer (zstd + AES decompress) and
- * the async writer (fwrite + SHA-256) — so `cores / 2` parallel files saturate
- * every core. We deliberately keep no cores reserved for system/GUI: measurement
- * showed the extra cores help throughput more than the reservation protects UI.
- *   8 cores -> 4,  6 -> 3,  <=2 -> 1.
+ * Unpacking is **write-bound** (architecture.md A15): the storage write path is the
+ * ceiling, and on-device measurement showed aggregate throughput rising with the
+ * worker count up to ~4 and then flattening — at *every* wear level of the flash
+ * (fresh: 400/695/1013/1079 MB/s at N=1/2/4/6; worn: 279/534/716 at N=1/2/4). Two
+ * consequences:
+ *  - 4 is the knee, so that is the cap. Past it, aggregate gains ~nothing while
+ *    per-file speed keeps dropping (the ceiling is simply divided by N).
+ *  - the optimum does **not** drift, so there is nothing for a runtime controller to
+ *    discover. An adaptive hill-climb was built, measured and removed — see A07.
+ * Also bounded by `cores - 1` so a low-core device keeps a core for the UI.
+ *   >=8 cores -> 4,  6 -> 4,  4 -> 3,  2 -> 1.
  */
 private val AUTO_CONCURRENCY: Int =
-   (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+   (Runtime.getRuntime().availableProcessors() - 1).coerceIn(1, 4)
 
 /**
- * Resolve how many files to convert in parallel for a job. Defaults to the
- * core-adaptive [AUTO_CONCURRENCY]. An experimental override (Settings) can raise
- * it up to the full core count (one file per core), but only when verification is
- * OFF — that gate keeps the core-adaptive default whenever CNMT verification runs.
- * `override == 0` means auto.
+ * How many files to convert in parallel for a job of [queueSize] files. Defaults to
+ * [AUTO_CONCURRENCY]; a Settings override (1..cores) pins it. Lowering it trades
+ * total batch throughput for faster *individual* files — that trade is the user's
+ * to make, which is exactly what the slider is for. Never more workers than files.
  */
-fun resolveConcurrency(verificationEnabled: Boolean, override: Int): Int {
-   if (verificationEnabled) return AUTO_CONCURRENCY
-   val maxCores = Runtime.getRuntime().availableProcessors()
-   return if (override in 1..maxCores) override else AUTO_CONCURRENCY
+fun resolveConcurrency(override: Int, queueSize: Int): Int {
+   val cores = Runtime.getRuntime().availableProcessors()
+   val q = queueSize.coerceAtLeast(1)
+   val n = if (override in 1..cores) override else AUTO_CONCURRENCY
+   return n.coerceAtMost(q).coerceAtLeast(1)
 }
 
 class MainViewModel : ViewModel() {
@@ -167,13 +171,9 @@ class MainViewModel : ViewModel() {
    var verificationEnabled by mutableStateOf(true)
    // GUI: compact (single-line) file card names + extension in the stats row.
    var compactCardNames by mutableStateOf(false)
-   // Experimental: 0 = auto (core-adaptive), else the number of parallel decompression
-   // workers to use (honored only when verification is off). See resolveConcurrency.
+   // 0 = auto (core-adaptive [AUTO_CONCURRENCY]), else the number of files to unpack
+   // in parallel. See resolveConcurrency.
    var decompressionThreads by mutableIntStateOf(0)
-   // Smart core distribution (core-aware scheduler + CPU affinity, A13) — a deferred
-   // experiment, disabled for release. Kept false so the conversion path always takes
-   // the plain Semaphore baseline; the setting is hidden from the UI.
-   var smartDistribution by mutableStateOf(false)
    // Whether the main-screen "update available" banner is shown. The update check
    // itself always runs regardless (so the overflow-menu notification stays
    // accurate) — only the banner is user-disableable.
@@ -227,7 +227,6 @@ class MainViewModel : ViewModel() {
       verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
       compactCardNames = SettingsRepository.getInstance(context).getCompactCardNames()
       decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
-      // smartDistribution stays off (disabled for release) — not loaded from prefs.
 
       val repo = SettingsRepository.getInstance(context)
       showUpdateBanner = repo.getShowUpdateBanner()
@@ -272,11 +271,6 @@ class MainViewModel : ViewModel() {
    fun saveDecompressionThreads(context: android.content.Context, count: Int) {
       decompressionThreads = count
       SettingsRepository.getInstance(context).saveDecompressionThreads(count)
-   }
-
-   fun saveSmartDistribution(context: android.content.Context, enabled: Boolean) {
-      smartDistribution = enabled
-      SettingsRepository.getInstance(context).saveSmartDistribution(enabled)
    }
 
    fun saveShowUpdateBanner(context: android.content.Context, enabled: Boolean) {
@@ -669,9 +663,9 @@ class MainViewModel : ViewModel() {
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
       val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
       // Configure CNMT verification once for the whole batch (read-only in native
-      // code while files convert). When disabled, skip the post-conversion check too.
+      // code while files convert). The per-file verdict then comes from the engine's
+      // inline VERIFIED/CORRUPTED tags — no separate output re-read pass.
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
-      val verifyKey = if (verificationEnabled) headerKey else null
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -703,11 +697,8 @@ class MainViewModel : ViewModel() {
 
          // The native work inside convert() runs on Dispatchers.IO, so concurrent
          // flows run on separate threads; we collect on Main to keep state writes safe.
-         val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
-         statusCb.onStatus(
-            "INFO",
-            "Parallelism: $concurrency (verification ${if (verificationEnabled) "on" else "off"})"
-         )
+         val concurrency = resolveConcurrency(decompressionThreads, fileQueue.size)
+         statusCb.onStatus("INFO", "Parallelism: $concurrency")
          val perFileDone = LongArray(fileQueue.size)
          val processed = AtomicInteger(0)
          val overallThrottler = ProgressThrottler()
@@ -723,10 +714,8 @@ class MainViewModel : ViewModel() {
             overallThrottler.sample(done, total)?.let { batchOverallProgress = it }
          }
 
-         // One file's conversion, shared by the core-aware scheduler and the
-         // baseline path. [mask] pins the native decompress to a CPU cluster
-         // (null = no pinning).
-         suspend fun convertOne(i: Int, mask: Long?) {
+         // One file's conversion, run under the Semaphore below.
+         suspend fun convertOne(i: Int) {
             val file = fileQueue[i]
             batchCurrentFileName = file.displayName
             fileQueue[i] = file.copy(
@@ -737,15 +726,15 @@ class MainViewModel : ViewModel() {
             )
             val fileStartMs = System.currentTimeMillis()
             // Captured by convert()'s onVerified below; local to this per-file
-            // coroutine, so it never races with other parallel conversions. XCZ
-            // stays NOT_CHECKED (XCI verification is not implemented).
+            // coroutine, so it never races with other parallel conversions. Both
+            // NSZ and XCZ now report a verdict from their inline hashing tags.
             var verifyStatus = VerifyStatus.NOT_CHECKED
             try {
                // XCZ → XCI, everything else → NSZ → NSP.
                val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
-                  NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
+                  NszConverter.convertXcz(context, file.uri, outputFolderUri, statusCb, onVerified = { verifyStatus = it })
                } else {
-                  NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb, mask, onVerified = { verifyStatus = it })
+                  NszConverter.convert(context, file.uri, outputFolderUri, statusCb, onVerified = { verifyStatus = it })
                }
                // NB: no .catch here — a failure must propagate to the surrounding
                // try/catch so the file stays Failed. Swallowing it with .catch lets
@@ -780,34 +769,11 @@ class MainViewModel : ViewModel() {
             }
          }
 
-         // Core-aware scheduling only helps on a heterogeneous CPU with working
-         // affinity; otherwise it degrades to order-only, which measured *worse*
-         // than the baseline — so fall back to natural order in that case.
-         val topology = CpuTopology.detect()
-         val coreAware = smartDistribution && topology.isHeterogeneous &&
-            NszConverter.affinitySupported()
-         if (coreAware) {
-            val coreSpecs = topology.cores.sortedByDescending { it.capacity }
-               .take(concurrency)
-               .map { CoreScheduler.CoreSpec(it.id, topology.speedOf(it.id), topology.clusterMask(it.id)) }
-            statusCb.onStatus("INFO", "Load distribution: core-aware (affinity on)")
-            statusCb.onStatus("INFO", "Cores: " +
-               coreSpecs.joinToString { "cpu${it.coreId}×%.2f".format(it.speed) })
-            coroutineScope {
-               CoreScheduler.run(fileQueue.indices.toList(), { fileSizes[it] }, coreSpecs) { i, mask ->
-                  convertOne(i, mask)
-               }
-            }
-         } else {
-            if (smartDistribution) {
-               statusCb.onStatus("INFO", "Load distribution: baseline (no heterogeneity/affinity)")
-            }
-            val sem = Semaphore(concurrency)
-            coroutineScope {
-               fileQueue.indices.map { i ->
-                  async { sem.withPermit { convertOne(i, null) } }
-               }.awaitAll()
-            }
+         val sem = Semaphore(concurrency)
+         coroutineScope {
+            fileQueue.indices.map { i ->
+               async { sem.withPermit { convertOne(i) } }
+            }.awaitAll()
          }
 
          // All files are unpacked: pin the overall bar to 100% (throttling can
@@ -850,10 +816,10 @@ class MainViewModel : ViewModel() {
    }
 
    fun startFolderConversion(context: android.content.Context) =
-      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+      runFolderStyleConversion(context) { structure, concurrency, progressCallback, statusCallback, fileEventCallback ->
          FolderProcessor.processFolder(
-            context, structure, verifyKey, outputFolderUri, concurrency,
-            smartDistribution, progressCallback, statusCallback, fileEventCallback
+            context, structure, outputFolderUri, concurrency,
+            progressCallback, statusCallback, fileEventCallback
          )
       }
 
@@ -865,10 +831,10 @@ class MainViewModel : ViewModel() {
     * built by [rebuildCombinedStructure].
     */
    fun startCombinedConversion(context: android.content.Context) =
-      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+      runFolderStyleConversion(context) { structure, concurrency, progressCallback, statusCallback, fileEventCallback ->
          FolderProcessor.processCombined(
-            context, structure, verifyKey, outputFolderUri, concurrency,
-            smartDistribution, progressCallback, statusCallback, fileEventCallback
+            context, structure, outputFolderUri, concurrency,
+            progressCallback, statusCallback, fileEventCallback
          )
       }
 
@@ -882,7 +848,6 @@ class MainViewModel : ViewModel() {
       context: android.content.Context,
       process: suspend (
          structure: FolderStructure,
-         verifyKey: ByteArray?,
          concurrency: Int,
          progressCallback: (FolderProgressUpdate) -> Unit,
          statusCallback: NszConverter.StatusCallback,
@@ -913,7 +878,6 @@ class MainViewModel : ViewModel() {
       val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
       // Configure CNMT verification once for the whole run (see startBatchConversion).
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
-      val verifyKey = if (verificationEnabled) headerKey else null
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -929,13 +893,12 @@ class MainViewModel : ViewModel() {
          }
       }
 
-      val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
+      val concurrency = resolveConcurrency(decompressionThreads, countAllFiles(structure.allFiles))
 
       viewModelScope.launch {
          try {
             val result = process(
                structure,
-               verifyKey,
                concurrency,
                { update ->
                   folderOverallProgress = update.overallProgress
