@@ -42,14 +42,13 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.androNSZ.R
+import com.androNSZ.data.SettingsRepository
 import com.androNSZ.model.LogEntry
+import com.androNSZ.util.LogFiles
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
 @Composable
 fun StatusLogPanel(statusLog: List<LogEntry>) {
@@ -156,15 +155,18 @@ fun StatusLogPanel(statusLog: List<LogEntry>) {
 
 /**
  * Writes the current on-screen log to nsz_screen_log.txt in the app's external
- * files dir, overwriting any previous snapshot. Returns the absolute path.
+ * files dir. The previous snapshot is kept as nsz_screen_log.prev.txt. Returns the
+ * absolute path.
+ *
+ * The snapshot belongs to the run already on screen, so it is stamped with
+ * [SettingsRepository.lastRunId] — it must not allocate a new run number.
  */
 private fun writeScreenLog(context: Context, log: List<LogEntry>): String {
-   val file = File(context.getExternalFilesDir(null), "nsz_screen_log.txt")
-   val timestamp = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())
+   val file = File(context.getExternalFilesDir(null), LogFiles.SCREEN_LOG)
+   LogFiles.rotate(file)
+   val runId = SettingsRepository.getInstance(context).lastRunId()
    file.printWriter().use { w ->
-      w.println("=== AndroNSZ Screen Log ===")
-      w.println("Saved: $timestamp")
-      w.println()
+      w.print(LogFiles.banner(runId, "On-screen log snapshot", "screen-snapshot"))
       for (entry in log) {
          w.println("[${entry.tag}] ${entry.message}")
       }

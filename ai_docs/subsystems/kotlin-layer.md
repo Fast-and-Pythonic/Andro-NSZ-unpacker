@@ -135,7 +135,15 @@ the verdict is `NOT_CHECKED`.
   temp-output+copy); the verify verdict comes from the engine's inline `VERIFIED`/`CORRUPTED`
   tags (non-fatal — output kept). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
   `TempFileManager` (`cacheDir`, `andronsz_<UUID>_<name>.<ext>`), `FolderLogWriter`
-  (thread-safe log writing under a `Mutex`).
+  (thread-safe log writing under a `Mutex`; **truncates and rotates** on construction, one
+  instance per run — A16b).
+- **util/LogFiles.kt** — the logging invariant in one place: `rotate(file)` (current →
+  `*.prev.*`, older dropped), `prevOf(file)`, and `banner(runId, kind, mode)` — the shared
+  header carrying the run number and a short description of all four sinks. Used by
+  `NszConverter.openJobDebugLog`, `FolderLogWriter` and `StatusLogPanel.writeScreenLog`.
+  Run numbers come from `SettingsRepository.nextRunId()` and are allocated once per job in
+  `startBatchConversion`, `runFolderStyleConversion` and `scanFolderInto`; the screen
+  snapshot uses `lastRunId()` instead of allocating.
 
 ## Data flow (brief)
 

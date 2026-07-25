@@ -455,12 +455,14 @@ class MainViewModel : ViewModel() {
       crossinline scan: suspend (NszConverter.StatusCallback) -> FolderStructure
    ) {
       viewModelScope.launch {
+         // A scan is its own run: it gets its own number and rotates the folder log.
+         val runId = SettingsRepository.getInstance(context).nextRunId()
+         val writer = FolderLogWriter(context, runId, "folder-scan")
+         folderLogWriter = writer
+         folderLogPath = writer.logFilePath
          try {
             statusMessage = context.getString(R.string.status_scanning_folder)
             statusLog.clear()
-
-            folderLogWriter = FolderLogWriter(context)
-            folderLogPath = folderLogWriter?.logFilePath
 
             val statusCb = object : NszConverter.StatusCallback {
                override fun onStatus(tag: String, msg: String) {
@@ -480,10 +482,15 @@ class MainViewModel : ViewModel() {
             statusMessage = null
          } catch (e: Exception) {
             statusMessage = context.getString(R.string.error_scan_failed, e.message ?: "")
-            viewModelScope.launch(Dispatchers.IO) {
-               folderLogWriter?.writeLog("ERROR", context.getString(R.string.error_scan_failed, e.message ?: ""))
-               folderLogWriter?.close()
+            withContext(NonCancellable + Dispatchers.IO) {
+               runCatching { writer.writeLog("ERROR", context.getString(R.string.error_scan_failed, e.message ?: "")) }
             }
+         } finally {
+            // Close on every path. This used to happen only on error, so a
+            // successful scan leaked its writer and the conversion below then held
+            // the same file open a second time.
+            folderLogWriter = null
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { writer.close() } }
          }
       }
    }
@@ -670,7 +677,8 @@ class MainViewModel : ViewModel() {
       // Native debug log: one per batch, closed when the job completes below.
       // Opening it per file truncated the shared log for every started file and
       // let the first finished file close it for all the others.
-      NszConverter.openJobDebugLog(context)
+      val runId = SettingsRepository.getInstance(context).nextRunId()
+      NszConverter.openJobDebugLog(context, runId, "queue (${fileQueue.size} files)")
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -881,7 +889,12 @@ class MainViewModel : ViewModel() {
       buildFolderFileEntries(structure)
       startTimer()
 
-      folderLogWriter = FolderLogWriter(context)
+      // One run number for the whole run: both this Kotlin log and the native one
+      // below carry it, which is what ties their two files together.
+      val runId = SettingsRepository.getInstance(context).nextRunId()
+      val runMode = if (conversionMode is ConversionMode.Combined) "combined" else "folder"
+      val runLabel = "$runMode (${countAllFiles(structure.allFiles)} files)"
+      folderLogWriter = FolderLogWriter(context, runId, runLabel)
       folderLogPath = folderLogWriter?.logFilePath
 
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
@@ -891,7 +904,7 @@ class MainViewModel : ViewModel() {
       // Native debug log for the whole run, closed in the finally below. Folder and
       // combined mode never opened it before (FolderProcessor calls native directly),
       // so these modes had no native diagnostics at all — only logcat.
-      NszConverter.openJobDebugLog(context)
+      NszConverter.openJobDebugLog(context, runId, runLabel)
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {

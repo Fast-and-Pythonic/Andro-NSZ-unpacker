@@ -300,7 +300,7 @@ int main(int argc, char **argv)
       output = generated_output;
    }
 
-   if (debug_log) dbg_open(debug_log);
+   if (debug_log) dbg_open(debug_log, NULL);
 
    fprintf(stderr, "Mode:   %s\n", mode_name(mode));
    fprintf(stderr, "Verify: %s\n", cli.verify ? "yes" : "no");

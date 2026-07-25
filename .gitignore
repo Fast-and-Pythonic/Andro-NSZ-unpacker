@@ -23,6 +23,10 @@ local.properties
 .claude/
 nsz_debug.log
 nsz_folder_debug.log
+nsz_screen_log.txt
+# Rotated previous-run copies of the above (see util/LogFiles.kt).
+*.prev.log
+*.prev.txt
 problems.txt
 .idea/deploymentTargetSelector.xml
 .kotlin/

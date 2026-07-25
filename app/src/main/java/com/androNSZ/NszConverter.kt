@@ -10,6 +10,7 @@ import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
 import com.androNSZ.model.VerifyStatus
+import com.androNSZ.util.LogFiles
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.queryFileName
@@ -43,8 +44,13 @@ object NszConverter {
         statusCallback: StatusCallback?
     ): Int
 
+    /**
+     * Opens (or force-closes, when [path] is null) the native debug log. [banner]
+     * is optional header text written before the engine's own header lines — the
+     * run number and logging rules, see [openJobDebugLog]. Prefer that wrapper.
+     */
     @JvmStatic
-    external fun nativeSetDebugLog(path: String?)
+    external fun nativeSetDebugLog(path: String?, banner: String?)
 
     @JvmStatic
     external fun nativeCloseDebugLog()
@@ -93,19 +99,24 @@ object NszConverter {
 
     /**
      * Opens the native engine's debug log for one whole job (queue, folder or
-     * combined) and returns its path.
+     * combined) and returns its path. [runId] and [mode] go into the header so the
+     * file identifies the run it belongs to (see [LogFiles]).
      *
      * Deliberately per job, not per file: the log has a single fixed path, so a
      * per-file open truncated it for every file of a parallel batch and the first
      * file to finish closed it for all the others, leaving them with logcat only.
      * The native side reference counts (see nsz_debug.h), so an extra open is
      * harmless — but every call must still be paired with [closeJobDebugLog].
+     *
+     * Rotation happens here rather than natively: the engine truncates on open, so
+     * the previous run has to be moved aside first.
      */
     @JvmStatic
-    fun openJobDebugLog(context: Context): String {
-        val logFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
+    fun openJobDebugLog(context: Context, runId: Int, mode: String): String {
+        val logFile = File(context.getExternalFilesDir(null), LogFiles.NATIVE_LOG)
+        LogFiles.rotate(logFile)
         lastDebugLogPath = logFile.absolutePath
-        nativeSetDebugLog(logFile.absolutePath)
+        nativeSetDebugLog(logFile.absolutePath, LogFiles.banner(runId, "Native engine log", mode))
         return logFile.absolutePath
     }
 

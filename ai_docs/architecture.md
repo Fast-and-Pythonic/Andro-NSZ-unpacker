@@ -358,13 +358,41 @@ modes produced no native log whatsoever.
   never reopens — a differing path is logged and ignored), and only the last close writes
   the footer and `fclose`s. `dbg_open(NULL)` still force-closes. This makes the bug class
   unrepeatable: no future per-file open can truncate or close another conversion's log.
-- Kept `"w"` (truncate once per job, so the file is exactly "the last run"), unlike the
-  Kotlin `FolderLogWriter`, which appends — the native log is a high-volume per-NCA trace
-  with no rotation.
+- Kept `"w"` (truncate once per job, so the file is exactly "the last run").
 - Also fixed in passing: `s_start_time` was read outside the mutex in `dbg_log`/`dbg_hex`;
   the elapsed-ms computation now happens under the same lock that writes it.
 **Consequences:** a 4-file parallel batch produced a single 224 k-line log containing all
 four conversions, with ~2.8 k lines written *after* the first file finished (previously the
 cut-off point); folder mode now yields a full log (280 k lines, 5 conversions) where it had
-none. The three other sinks are untouched: `FolderLogWriter` (`nsz_folder_debug.log`),
-`nsz_screen_log.txt`, logcat.
+none.
+
+### A16b: one file = one run, plus one previous (2026-07-26)
+**Context:** three further problems remained. `nsz_folder_debug.log` opened in **append**
+mode and was never truncated, so it grew without bound and stacked unlabelled banners from
+every past run. No log carried any identity, so a log left over from an earlier run was
+indistinguishable from the current one — during an adb session I did read a stale log as if
+it were fresh. And the four sinks' differing semantics had to be re-derived from the code
+every time.
+**Decision:** a single invariant, implemented once in
+[LogFiles.kt](../app/src/main/java/com/androNSZ/util/LogFiles.kt) and reused by all three
+file sinks: **one file = exactly one run**. Starting a run rotates the current file to
+`<name>.prev.<ext>` (dropping the older `.prev`) and writes the new one from scratch, so at
+most two generations ever exist and nothing accumulates.
+- **Run numbers.** `SettingsRepository.nextRunId()` (SharedPreferences, `@Synchronized` +
+  `commit()` — a folder scan and the conversion after it ask back-to-back, and a lost update
+  would hand out the same number) stamps every header. The *same* run number in
+  `nsz_debug.log` and `nsz_folder_debug.log` means the same run. The screen snapshot uses
+  `lastRunId()` — it belongs to the run already on screen and must not allocate a new one.
+- **Self-describing headers.** `LogFiles.banner()` writes run number, timestamp, mode
+  (queue / folder / combined / folder-scan / screen-snapshot), app version, and a short
+  "how logging works here" block naming all four sinks — so a log explains the scheme
+  without reading any code.
+- **JNI:** the native header is written by C on open, before Kotlin could append anything,
+  so `nativeSetDebugLog(path, banner)` / `dbg_open(path, banner)` gained a nullable banner
+  argument (the only JNI signature change here; the CLI passes `NULL`). Rotation happens on
+  the Kotlin side *before* the open, because the engine truncates.
+- Also fixed: `scanFolderInto` created a `FolderLogWriter` and closed it **only on the error
+  path**, so a successful scan leaked its writer and the conversion then held the same file
+  open a second time, with two independent `Mutex`es. It now closes on every path.
+**Consequences:** logs stay bounded at two generations each, and `Run #` makes a stale log
+obvious at a glance. logcat is untouched (never rotated, still receives every native line).

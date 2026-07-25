@@ -209,15 +209,22 @@ Java_com_androNSZ_NszConverter_nativeConvertXcz(
     return (jint)result;
 }
 
-/* ---------- JNI: setDebugLog ---------- */
+/* ---------- JNI: setDebugLog ----------
+ * j_banner is optional header text written before the engine's own header lines
+ * (the run number + logging rules, built by util/LogFiles.kt). */
 JNIEXPORT void JNICALL
 Java_com_androNSZ_NszConverter_nativeSetDebugLog(
-        JNIEnv *env, jclass clazz, jstring j_path)
+        JNIEnv *env, jclass clazz, jstring j_path, jstring j_banner)
 {
     (void)clazz;
-    if (j_path == NULL) { dbg_open(NULL); return; }
-    const char *path = (*env)->GetStringUTFChars(env, j_path, NULL);
-    dbg_open(path);
+    if (j_path == NULL) { dbg_open(NULL, NULL); return; }
+
+    const char *path   = (*env)->GetStringUTFChars(env, j_path, NULL);
+    const char *banner = j_banner ? (*env)->GetStringUTFChars(env, j_banner, NULL) : NULL;
+
+    dbg_open(path, banner);
+
+    if (banner) (*env)->ReleaseStringUTFChars(env, j_banner, banner);
     (*env)->ReleaseStringUTFChars(env, j_path, path);
 }
 

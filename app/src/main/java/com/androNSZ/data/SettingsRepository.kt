@@ -46,6 +46,9 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val SHOW_UPDATE_BANNER_KEY = "show_update_banner"
       private const val LAST_UPDATE_CHECK_KEY = "last_update_check_ms"
       private const val HIDDEN_BANNER_VERSION_KEY = "hidden_banner_version"
+      // Monotonic counter stamped into every log file's header, so a log can be
+      // told apart from the previous run's at a glance (see util/LogFiles).
+      private const val RUN_COUNTER_KEY = "run_counter"
       // The last known available release, cached so the main-screen banner
       // survives app restarts (and the once-a-day check throttle).
       private const val AVAILABLE_VERSION_KEY = "available_update_version"
@@ -138,6 +141,24 @@ class SettingsRepository private constructor(private val context: Context) {
    fun saveLastUpdateCheckMillis(millis: Long) {
       langPrefs.edit().putLong(LAST_UPDATE_CHECK_KEY, millis).apply()
    }
+
+   /**
+    * Allocates the next run number, stamped into every log file's header so one
+    * run's logs can never be mistaken for the previous run's.
+    *
+    * `commit()` rather than `apply()`, and `@Synchronized`: a folder scan and the
+    * conversion that follows it ask for a number back-to-back, and a lost update
+    * would hand both the same one.
+    */
+   @Synchronized
+   fun nextRunId(): Int {
+      val next = langPrefs.getInt(RUN_COUNTER_KEY, 0) + 1
+      langPrefs.edit().putInt(RUN_COUNTER_KEY, next).commit()
+      return next
+   }
+
+   /** The most recently allocated run number, without allocating a new one. */
+   fun lastRunId(): Int = langPrefs.getInt(RUN_COUNTER_KEY, 0)
 
    // Version whose banner the user tapped "Hide" on; the main-screen banner stays
    // hidden for it (a newer version un-hides it). The menu notification ignores this.

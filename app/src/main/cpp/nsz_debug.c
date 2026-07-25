@@ -69,11 +69,11 @@ static void dbg_close_locked(void)
     s_path[0] = '\0';
 }
 
-void dbg_open(const char *path)
+void dbg_open(const char *path, const char *banner)
 {
     pthread_mutex_lock(&s_mtx);
 
-    /* dbg_open(NULL) keeps its historical meaning: shut the session down
+    /* dbg_open(NULL, …) keeps its historical meaning: shut the session down
      * whatever the refcount — this is what nativeSetDebugLog(null) maps to. */
     if (!path || !path[0]) {
         dbg_close_locked();
@@ -105,8 +105,10 @@ void dbg_open(const char *path)
     snprintf(s_path, sizeof s_path, "%s", path);
     clock_gettime(CLOCK_MONOTONIC, &s_start_time);
 
+    /* Caller-supplied banner first (run number + logging rules from the Kotlin
+     * layer), then the details only this side knows. */
+    if (banner && banner[0]) fprintf(s_fp, "%s", banner);
     fprintf(s_fp,
-            "=== AndroNSZ Debug Log ===\n"
             "Log path : %s\n"
             "Format   : [elapsed ms] message\n\n",
             path);

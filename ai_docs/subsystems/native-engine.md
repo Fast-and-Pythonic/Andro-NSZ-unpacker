@@ -22,7 +22,7 @@ Python reference nicoboss/nsz.
 | `aes_xts.c` | AES-128-XTS for decrypting the NCA header (0x200 sectors, IEEE 1619) |
 | `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
 | `nca_cnmt.c` | CNMT verification: extract full expected NCA hashes from the input's META NCA (`CnmtHashSet`); global config `nca_verify_config_set`. See [../architecture.md](../architecture.md) A12 |
-| `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps. Open/close are refcounted so parallel conversions sharing the one log file can't truncate or close it under each other (A16) |
+| `nsz_debug.c` | `dbg_open(path, banner)/close/log/hex` — log to file + logcat, millisecond timestamps. Open/close are refcounted so parallel conversions sharing the one log file can't truncate or close it under each other; the caller's `banner` (run number + rules) is written first (A16) |
 | `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
 ## Dependency graph (C)
@@ -90,7 +90,7 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 | `nativeConvert(input, output, progressCb, statusCb): Int` | NSZ → NSP |
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
 | `nativeSetVerification(enabled, headerKey, keyAreaKeys)` | Set CNMT verification config once before a batch (global, read-only during conversion — [../gotchas.md](../gotchas.md) G11) |
-| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log. **Reference counted and opened once per job**, not per file — see [../architecture.md](../architecture.md) A16. Kotlin wraps them as `NszConverter.openJobDebugLog/closeJobDebugLog`; `nativeSetDebugLog(null)` force-closes |
+| `nativeSetDebugLog(path, banner)` / `nativeCloseDebugLog()` | Debug log. **Reference counted and opened once per job**, not per file — see [../architecture.md](../architecture.md) A16. `banner` is optional header text (run number + logging rules, built by `util/LogFiles.kt`) printed before the engine's own header lines; only the outermost open writes it. Kotlin wraps them as `NszConverter.openJobDebugLog/closeJobDebugLog`; `nativeSetDebugLog(null, null)` force-closes |
 | `nativeCancel()` | Cancellation request (bumps the global cancel epoch — cancels every in-flight conversion; see A15) |
 | `nativeErrorString(code): String` | Error code → text |
 

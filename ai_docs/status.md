@@ -89,6 +89,23 @@
 
 ## Decision log
 
+- 2026-07-26 — **logs: one file = one run, plus one previous**
+  ([architecture.md](architecture.md) A16b, [gotchas.md](gotchas.md) G07). Three fixes in one
+  pass. (1) **Accumulation:** `nsz_folder_debug.log` opened in append mode and was never
+  truncated — it grew without bound and stacked unlabelled banners from every past run. All
+  three file sinks now rotate on start (`<name>.prev.<ext>`, older dropped) via the new
+  `util/LogFiles.kt`, so at most two generations exist. (2) **Identity:** every header now
+  carries `Run : #N` from `SettingsRepository.nextRunId()` (`@Synchronized` + `commit()`,
+  because a folder scan and the conversion after it allocate back-to-back); the same number
+  in the native and the Kotlin log means the same run, and the screen snapshot stamps
+  `lastRunId()` without allocating. This exists because a stale log was once read as the
+  current one after a GUI test silently failed to start. (3) **Self-description:** the shared
+  banner lists all four sinks and the rotation rule, so a log explains the scheme without
+  reading code. JNI: `nativeSetDebugLog(path, banner)` / `dbg_open(path, banner)` gained a
+  nullable banner argument (the native header is written by C on open, so Kotlin could not
+  prepend it otherwise); the CLI passes `NULL`. Also fixed: `scanFolderInto` closed its
+  `FolderLogWriter` only on the error path, so a successful scan leaked the writer and the
+  conversion held the same file open a second time. New `LogFilesTest` (5 tests).
 - 2026-07-26 — **cleanup: dead verifier deleted, native debug log fixed**
   ([architecture.md](architecture.md) A12/A16). (1) `nca_verifier.c`/`.h`, the
   `nativeVerifyNsp` JNI entry point and its Kotlin `external fun` are **deleted**. Checked

@@ -100,11 +100,12 @@ calloc/fread when the count is 0.
 **Fix:** [hfs0.c](../app/src/main/cpp/hfs0.c) `hfs0_parse_stream` — allow 0, allocate and
 read entries only when `file_count > 0` (the rest of the parse: the loop runs 0 times,
 `free(NULL)` is safe). Came from PR #6 (manx98).
-**Diagnosis (for next time):** `nsz_debug.log` is still truncated once per job (`"w"`), so a
-desktop copy goes stale — but since 2026-07-26 it is opened once per job and refcounted
-(A16), so it now contains *all* files of a parallel run and folder mode produces one too.
-The "Save on-screen log" button (`nsz_screen_log.txt`) and `adb logcat` remain the quickest
-cross-checks; logcat receives every `DBG` even when no log file is open.
+**Diagnosis (for next time):** every log file now starts with a header carrying `Run : #N`
+(A16b) — **check it before trusting a log**. One file = one run; the previous run is kept as
+`*.prev.*` and anything older is gone. The same `Run #` in `nsz_debug.log` and
+`nsz_folder_debug.log` means the same run. This exists because a stale log was once read as
+if it were the current one after a GUI test silently failed to start. `adb logcat` remains
+the quickest cross-check and receives every `DBG` even when no log file is open.
 
 ## G08: `Flow.catch` in batch mode masks a failure as "Done"
 **Symptom:** in "files" mode a failed XCZ→XCI showed a green "Done", with "Processed 1 of

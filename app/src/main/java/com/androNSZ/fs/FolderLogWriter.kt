@@ -1,6 +1,7 @@
 package com.androNSZ.fs
 
 import android.content.Context
+import com.androNSZ.util.LogFiles
 import java.io.File
 import java.io.FileWriter
 import java.io.PrintWriter
@@ -10,7 +11,15 @@ import java.util.Locale
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
-class FolderLogWriter(context: Context) {
+/**
+ * Kotlin-side status log for folder scans and folder/combined conversions.
+ *
+ * One instance per run: the file is rotated and truncated on construction, so it
+ * holds exactly this run (the previous one stays as `*.prev.log`). It used to open
+ * in append mode and was never truncated, which let it grow without bound and
+ * stack unlabelled banners from every past run. See [LogFiles].
+ */
+class FolderLogWriter(context: Context, runId: Int, mode: String) {
 
     private val logFile: File
     private val writer: PrintWriter
@@ -22,18 +31,11 @@ class FolderLogWriter(context: Context) {
 
     init {
         val externalFilesDir = context.getExternalFilesDir(null)
-        logFile = File(externalFilesDir, "nsz_folder_debug.log")
+        logFile = File(externalFilesDir, LogFiles.FOLDER_LOG)
+        LogFiles.rotate(logFile)
 
-        writer = PrintWriter(FileWriter(logFile, true), true)
-
-        val header = """
-            ========================================
-            AndroNSZ Folder Processing Log
-            Started: ${dateFormat.format(Date())}
-            ========================================
-            
-        """.trimIndent()
-        writer.println(header)
+        writer = PrintWriter(FileWriter(logFile, false), true)
+        writer.print(LogFiles.banner(runId, "Folder processing log", mode))
         writer.flush()
     }
 
