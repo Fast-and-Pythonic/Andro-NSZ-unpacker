@@ -120,7 +120,10 @@ A build is not enough for runtime logic. Check on a device/emulator. Example
 2. Confirm that `Original_unpacked` is created.
 3. Run again → `Original_unpacked_2` should appear (only if the first already exists).
 
-To verify a change to the running app — see the `/verify` and `/run` skills.
+To verify a change to the running app — see the `/verify` and `/run` skills. For
+driving the GUI over `adb shell input tap` (menus, pickers) — see
+[gotchas.md](gotchas.md) **G19** for the dump-locate-tap-verify methodology; blind
+coordinates and prefix text matches are a known trap.
 
 ## Git
 

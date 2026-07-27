@@ -57,35 +57,94 @@ IO` with an active `inputPfd`, `NszConverter` copies the input to cache
 the retry is almost free.
 **Consequences:** reliability across all providers at the cost of a rare retry.
 
-## A07: Batch/folder parallelism = a fixed 4 (queue and folder modes)
+## A07: Batch/folder parallelism — three sources for the thread count
 **Context:** in multi-file mode files convert in parallel. The shared resource is
-**storage write bandwidth** (A15), not CPU.
-**Decision:** `AUTO_CONCURRENCY = (availableProcessors() − 1).coerceIn(1, 4)`
-(≥8 cores → 4, 6 → 4, 4 → 3, 2 → 1). `resolveConcurrency(override, queueSize)` returns a
-plain `Int`, clamped to the queue size; a Settings slider (`decompression_threads`,
-1..cores) pins any value. We control only the *number* of workers, never core placement
+**storage write bandwidth** (A15), not CPU. So the best thread count is a property of
+*this phone's flash*, not of the app: the knee sat at ~4–8 on the one device it was ever
+measured on (SM8735 + UFS), but a budget eMMC can plateau at 2 while UFS 4.0 keeps
+scaling. A single constant cannot be right everywhere, which is what this decision
+replaces.
+
+**Only the aggregate counts.** With several files unpacking at once, per-file speed is
+not an optimisation target — it is just the ceiling divided by N. Per-file matters only
+when unpacking a *single* file, where parallelism does not apply at all. This is a
+correction of an earlier reading (see History) and it is load-bearing for everything
+below.
+
+**Decision — `ThreadMode` (`model/ThreadMode.kt`), persisted in `SettingsRepository`:**
+- `MANUAL` — the slider on the thread-count screen (`decompression_threads`, 0 = unset).
+- `HALF` — half the cores. **The default.**
+- `CALIBRATED` — the value found by the real-file test (`calibrated_threads`, 0 = never
+  run), which applies to the next job by itself.
+
+`resolveConcurrency(mode, manualN, calibratedN, cores, queueSize)` is a **pure** function
+(unit-tested in `ResolveConcurrencyTest`); any source with nothing to say falls back to
+`halfConcurrency(cores) = (cores / 2).coerceAtLeast(1)`, and the result is always clamped
+to the queue size. We control only the *number* of threads, never core placement
 (placement control was tried and regressed — A13, deleted).
-**Why 4, and why not adaptive:** measured aggregate throughput rises with the worker
-count up to ~4 and then flattens, **at every wear level of the flash** — fresh
-400/695/1013/1079 MB/s at N=1/2/4/6; worn 279/534/716 at N=1/2/4 (A15). Two conclusions:
-- Past 4, aggregate gains ≈nothing while per-file speed keeps falling (a fixed ceiling
-  divided by N). At 4, per-file is ~250 MB/s; at 7 it was ~115–140.
-- **Fewer workers never improve aggregate at any wear level**, so the optimum does not
-  drift and there is nothing for a runtime controller to discover.
-**Rejected: adaptive hill-climbing.** A full controller was built and measured on device
-(2026-07-25): `AdaptivePolicy` + `AdaptiveGate`, sampling aggregate MB/s and probing the
-worker count up/down with hysteresis. It was **deleted**, because its premise is false
-per the second bullet above — shedding can only lose throughput. Measured cost while it
-existed: starting at 2 and ramping cost ~7 % aggregate on a short 4-file batch (674 vs
-720 MB/s) because the run spent much of its life under-parallelized. If you are tempted
-to re-add it: the only thing lowering N buys is *per-file* latency, which is a user
-preference — that is what the slider is for, and it needs no measurement loop.
-**Consequences:** trivial `Semaphore(concurrency)` in both `MainViewModel.startBatchConversion`
-and `FolderProcessor.executePlan`. Per-file progress is in `activeFileProgress`.
+
+**One fallback for every unset source, deliberately.** A slider left at 0, a test never
+run and the default mode all resolve to the same number. The alternative — a different
+fallback per mode — makes "unset" mean different things depending on where the user
+happens to be standing, which is impossible to explain and easy to mis-measure against.
+
+**Why half rather than `cores − 1`:** on the reference device every count from 2 to 8
+landed within ~10 % of each other on aggregate throughput, so the exact value matters far
+less than not starving the rest of the phone during a long job. The old `coerceIn(1, 4)`
+cap is gone for a different reason: it was justified by protecting *per-file* speed, a
+criterion that does not apply in parallel mode. There is no longer a rule that the count
+must stop below `cores` — the test sweeps up to `cores` and may legitimately return it.
+The one unexplained observation (N=8 at 464 MB/s against 887 at N=4, on a badly worn
+flash) is why calibration exists, not a reason to cap the default.
+
+**Calibration measures whole conversions** (`util/RealFileBenchmark`): a level of N runs N
+*complete* unpacks of one user-picked file in parallel, timed end to end, output deleted,
+then the next level. The sweep goes 1→cores and then back cores→1, so flash drift cancels
+instead of favouring whichever level ran first (**G18**).
+
+Running whole conversions is not just simplicity. The earlier version cut each level short
+once a gigabyte of output had appeared and derived speed from progress counters; it had
+two defects that biased the *ranking*, not merely the scale — the clock was stopped after
+cancelling and deleting the output, and only the first level ever paid for a cold page
+cache. Whole runs remove the machinery those defects lived in. Cross-check on device
+(2026-07-28): a single-threaded run measured **391 MB/s** against the CLI's 400 (A15).
+
+**Rejected: adaptive hill-climbing from below.** A controller was built and measured on
+device (2026-07-25): `AdaptivePolicy` + `AdaptiveGate`, sampling aggregate MB/s and
+probing the count up/down with hysteresis. It was **deleted**. It started low and ramped
+up, which cost ~7 % aggregate on a short 4-file batch (674 vs 720 MB/s) because the run
+spent much of its life under-parallelized, and it could *shed* threads, which cannot raise
+the aggregate. **Do not reintroduce a bottom-up or reactive-to-a-dip controller.**
+
+**Also deleted: searching during a real job.** `AdaptiveWorkerSearch` + `ThreadMode.ADAPTIVE`
+(2026-07-26 → 2026-07-27) stepped the count down mid-job, comparing equal-byte blocks. It
+was sound in method — it started at the maximum and only stepped down — but needed tens of
+GB of output before it could say anything, so on ordinary jobs it only ever logged "not
+enough data". The count no longer changes mid-job, which is why the pool is now built at
+exactly what it will use. A stored `ADAPTIVE` migrates to `HALF`.
+
+**Also deleted: the synthetic write test.** `util/WriteBenchmark` + `nativeBenchWrite`
+measured parallel writes with no NSZ input at all. Two reasons it went: it could not see
+the producer side, so it systematically under-counted (it picked 6 where the real-file
+test picked 8 on the same device), and it was the kind of benchmark that is easy to get
+subtly wrong — it spent a day measuring the page cache instead of the flash (**G20**).
+
+**Consequences:** both start sites go through `util/WorkerPool` (they used to spell out
+the same `Semaphore(concurrency)` separately). Per-file progress is still in
+`activeFileProgress`.
+
+**Telemetry:** every job writes `nsz_throughput.csv` at 10 Hz (`util/ThroughputRecorder`,
+A16b rotation rules); `util/ThroughputAnalysis` scores the calibration levels. The CSV is
+now diagnostics only — its `level_tag` column is always empty since nothing tags samples
+mid-job. Read [gotchas.md](gotchas.md) **G18** before drawing any conclusion from a
+throughput number.
+
 **History:** `(…/2 − 1).coerceIn(1, 3)` → `(…/2).coerceAtLeast(1)` (2026-07-08) →
-`(… − 1).coerceAtLeast(1)` (2026-07-24, on a wrong "CPU-bound" reading; 7 workers on this
-device — **regressed per-file badly for zero aggregate gain**) → adaptive (2026-07-25,
-rejected same day) → `(… − 1).coerceIn(1, 4)`.
+`(… − 1).coerceAtLeast(1)` (2026-07-24, on a wrong "CPU-bound" reading) → adaptive from
+below (2026-07-25, rejected same day) → `(… − 1).coerceIn(1, 4)` (2026-07-25, justified by
+per-file speed) → MANUAL/ADAPTIVE/CALIBRATED with `cores − 1` as the fallback (2026-07-26,
+after that justification was retracted) → MANUAL/**HALF**/CALIBRATED, one measurement
+instead of two, whole-run sweep (2026-07-28).
 NB: parallelism is per-file, so it only helps a queue of several files. A single large
 solid file is one zstd stream and cannot be parallelized; see A15 for what was tried.
 **Load distribution (LPT) — rejected:** dispatching largest-first over the fair
@@ -264,6 +323,17 @@ UFS storage), one 2.88 GB-output NSZ, N processes in parallel. See
 | → FUSE (`/sdcard`) | 467 | 737 | 1053 | 1008 | — |
 | → raw UFS, **Step-6 disabled** | — | 548 | 451 | 477 | — |
 
+⚠️ **This table is one device** (SM8735 + UFS), and the write rows are one wear state.
+Nothing in it generalises to other storage: the knee's *position* is exactly what differs
+between an eMMC budget phone and UFS 4.0. Treat it as the reference measurement that the
+methodology was validated against, not as the app's tuning. The app now measures the
+device instead — A07, and the real-file test in `util/RealFileBenchmark`.
+
+**Cross-check, 2026-07-28 (same device).** The in-app test, rewritten to time whole
+conversions, measured **391 MB/s** at one thread against the 400 in the N=1 row above —
+the two agree within 2 %, which is what says the in-app timing is sound. The same run
+peaked at ~1150–1190 MB/s from 4 threads up, again on internal storage.
+
 Conclusions, each of which contradicted a prior belief:
 1. **Decompression is not the ceiling.** It scales to ~2375 MB/s; writing caps at
    ~1000–1080 MB/s (N≈4 knee) and **degrades to ~450–500 MB/s under sustained load** —
@@ -291,8 +361,9 @@ ceiling measured by the CLI (~1013 MB/s at N=4). On a *worn* flash the same run 
 alongside a number (G17).
 
 **Decisions:**
-- **Fixed parallelism of 4** (replaces the `cores − 1` step, which regressed per-file speed
-  for zero aggregate gain); an adaptive controller was built and rejected — see A07.
+- **Fixed parallelism of 4** — *superseded 2026-07-26.* It was justified by per-file speed,
+  a criterion that does not apply when several files unpack at once, and the cap was
+  measured on a single device. The worker count is now chosen per device: see A07.
 - **Verify post-pass removed** (the biggest single-file win: it re-read the whole output) —
   see A12.
 - The verify gate on the concurrency slider was removed — see A07.
@@ -385,8 +456,11 @@ most two generations ever exist and nothing accumulates.
   `lastRunId()` — it belongs to the run already on screen and must not allocate a new one.
 - **Self-describing headers.** `LogFiles.banner()` writes run number, timestamp, mode
   (queue / folder / combined / folder-scan / screen-snapshot), app version, and a short
-  "how logging works here" block naming all four sinks — so a log explains the scheme
-  without reading any code.
+  "how logging works here" block naming every sink — so a log explains the scheme
+  without reading any code. `nsz_throughput.csv` (A07 telemetry) is a fifth sink under the
+  same rules; it takes the banner through `LogFiles.commentedBanner()`, which prefixes each
+  line with `#` so the file stays machine-readable, and its first uncommented line is the
+  column header.
 - **JNI:** the native header is written by C on open, before Kotlin could append anything,
   so `nativeSetDebugLog(path, banner)` / `dbg_open(path, banner)` gained a nullable banner
   argument (the only JNI signature change here; the CLI passes `NULL`). Rotation happens on

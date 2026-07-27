@@ -49,7 +49,7 @@ AndroNSZ/
         ├── model/                # data classes and sealed state classes
         ├── nut/                  # KeysManager / KeysParser (prod.keys)
         ├── fs/                   # folder scanners (SAF + raw FS), FolderProcessor, temp, logs
-        ├── util/                 # FileUtils/FormatUtils, StoragePermission (all-files access)
+        ├── util/                 # FileUtils/FormatUtils, StoragePermission, logs, parallelism (A07)
         ├── ui/                   # screen/ (incl. FilePickerScreen) + conversion/ + components/ + theme/
         └── viewmodel/            # MainViewModel — all state and logic
 ```
@@ -64,9 +64,12 @@ Per-module details — in [subsystems/kotlin-layer.md](subsystems/kotlin-layer.m
 - Hardware AES-CTR and SHA-256 (ARMv8 crypto extensions) with a software fallback.
 - No-copy input reading via `fd:N` with a temp-copy fallback for FUSE providers.
 - Async output writing (`async_writer`) with page-cache pacing, zstd built with `-O3`, ThinLTO.
-- Batch/folder parallelism fixed at `min(cores − 1, 4)` — unpacking is **write-bound** and
-  the storage saturates at ~4 parallel files ([architecture.md](architecture.md) A07/A15).
-  A Settings slider can pin any count (fewer = faster individual files).
+- Batch/folder parallelism defaults to **half the cores** and can be **measured per
+  device**: unpacking is **write-bound**, so where the storage saturates differs from phone
+  to phone ([architecture.md](architecture.md) A07/A15). A dedicated settings screen offers
+  three sources — a manual slider, the half-cores default, or a test that unpacks a
+  user-picked file at every thread count — plus 10 Hz throughput telemetry in
+  `nsz_throughput.csv`.
 - EN/RU localization, in-app language selection, output folder selection (SAF).
 - SHA-256 verification of every unpacked NCA, computed inline during decompression
   (non-fatal, no output re-read — see [architecture.md](architecture.md) A12; needs
