@@ -17,13 +17,15 @@ import java.util.Locale
  *
  * Sinks: `nsz_debug.log` (native engine trace), `nsz_folder_debug.log` (Kotlin
  * status lines for folder/combined runs and folder scans), `nsz_screen_log.txt`
- * (manual snapshot of the on-screen log), plus logcat, which is never rotated.
+ * (manual snapshot of the on-screen log), `nsz_throughput.csv` (aggregate
+ * throughput telemetry), plus logcat, which is never rotated.
  */
 object LogFiles {
 
    const val NATIVE_LOG = "nsz_debug.log"
    const val FOLDER_LOG = "nsz_folder_debug.log"
    const val SCREEN_LOG = "nsz_screen_log.txt"
+   const val THROUGHPUT_CSV = "nsz_throughput.csv"
 
    /** `nsz_debug.log` -> `nsz_debug.prev.log` (extension preserved). */
    fun prevOf(file: File): File {
@@ -82,8 +84,19 @@ object LogFiles {
          appendLine("* $NATIVE_LOG        - native engine trace, [elapsed ms] since this run started")
          appendLine("* $FOLDER_LOG - Kotlin status lines: folder/combined runs and folder scans")
          appendLine("* $SCREEN_LOG   - manual snapshot of the on-screen log (Save button)")
+         appendLine("* $THROUGHPUT_CSV  - aggregate throughput samples, 10 Hz (see ThroughputRecorder)")
          appendLine("* logcat (tag AndroNSZ) gets every native line even when no file log is open.")
          appendLine()
       }
    }
+
+   /**
+    * The same [banner], turned into `#` comment lines so it can head a CSV
+    * without making the file unparseable. Blank lines become a bare `#` — a
+    * trailing space there would show up as data in some readers.
+    */
+   fun commentedBanner(runId: Int, kind: String, mode: String): String =
+      banner(runId, kind, mode)
+         .lineSequence()
+         .joinToString("\n") { if (it.isEmpty()) "#" else "# $it" }
 }

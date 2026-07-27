@@ -11,14 +11,14 @@ import com.androNSZ.NszConverter
 import com.androNSZ.model.*
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
+import com.androNSZ.util.ThroughputRecorder
+import com.androNSZ.util.WorkerPool
 import com.androNSZ.util.getUriSize
 import com.androNSZ.util.resolveToFilePath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -44,9 +44,11 @@ object FolderProcessor {
       context: Context,
       structure: FolderStructure,
       outputBaseUri: Uri?,
-      // How many files to convert in parallel, resolved by the caller
-      // (MainViewModel.resolveConcurrency).
-      concurrency: Int,
+      // The gate deciding how many files convert at once, built by the caller
+      // (MainViewModel.resolveConcurrency); it may resize itself mid-run.
+      pool: WorkerPool,
+      // Aggregate throughput telemetry for this run, null when it couldn't be opened.
+      recorder: ThroughputRecorder?,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
       // Per-file lifecycle updates for the "files to unpack" list (NSZ/XCZ only).
@@ -56,7 +58,7 @@ object FolderProcessor {
       statusCallback?.onStatus("INFO", "Total files in folder: ${structure.allFiles.size}")
       statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
       statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
-      statusCallback?.onStatus("INFO", "Parallelism: $concurrency")
+      statusCallback?.onStatus("INFO", "Parallelism: ${pool.target}")
 
       val outputFolderName = generateOutputFolderName(context, structure.rootUri, outputBaseUri)
       statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
@@ -83,7 +85,8 @@ object FolderProcessor {
          context = context,
          plan = plan,
          structure = structure,
-         concurrency = concurrency,
+         pool = pool,
+         recorder = recorder,
          resultUri = outputFolderUri,
          progressCallback = progressCallback,
          statusCallback = statusCallback,
@@ -106,7 +109,8 @@ object FolderProcessor {
       context: Context,
       plan: List<WorkItem>,
       structure: FolderStructure,
-      concurrency: Int,
+      pool: WorkerPool,
+      recorder: ThroughputRecorder?,
       resultUri: Uri,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
@@ -133,6 +137,11 @@ object FolderProcessor {
          fun emit() {
             val total = fileTotals.sum().coerceAtLeast(1L)
             val done = perFileDone.sum().coerceAtMost(total)
+            // Aggregate telemetry is fed from here rather than from the throttled
+            // update below: the recorder samples on its own clock and wants the
+            // freshest byte count, not a display-paced one.
+            recorder?.setBytes(done)
+            recorder?.setFilesRemaining(plan.size - processed.get())
             overallThrottler.sample(done, total)?.let { lastOverall = it }
             val snapshot = active.entries.sortedBy { it.key }.map { it.value }
             progressCallback(
@@ -262,10 +271,9 @@ object FolderProcessor {
             }
          }
 
-         val sem = Semaphore(concurrency)
          coroutineScope {
             plan.indices.map { i ->
-               async { sem.withPermit { processOne(i) } }
+               async { pool.withWorker { processOne(i) } }
             }.awaitAll()
          }
 
@@ -376,7 +384,8 @@ object FolderProcessor {
       context: Context,
       structure: FolderStructure,
       outputBaseUri: Uri?,
-      concurrency: Int,
+      pool: WorkerPool,
+      recorder: ThroughputRecorder?,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
       fileEventCallback: ((FolderFileEvent) -> Unit)? = null
@@ -386,7 +395,7 @@ object FolderProcessor {
       statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
       statusCallback?.onStatus("INFO", "XCZ files to convert: ${structure.xczFiles.size}")
       statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
-      statusCallback?.onStatus("INFO", "Parallelism: $concurrency")
+      statusCallback?.onStatus("INFO", "Parallelism: ${pool.target}")
 
       // Resolve the output base. SAF → the tree's root document uri; otherwise the
       // public Downloads folder as a file:// uri (the app holds all-files access,
@@ -413,7 +422,8 @@ object FolderProcessor {
          context = context,
          plan = plan,
          structure = structure,
-         concurrency = concurrency,
+         pool = pool,
+         recorder = recorder,
          resultUri = baseUri,
          progressCallback = progressCallback,
          statusCallback = statusCallback,

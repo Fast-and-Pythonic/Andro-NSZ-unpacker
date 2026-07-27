@@ -12,6 +12,8 @@ import com.androNSZ.model.PickerMode
 import com.androNSZ.model.Screen
 import com.androNSZ.ui.components.UpdateDialog
 import com.androNSZ.viewmodel.MainViewModel
+import com.androNSZ.viewmodel.halfConcurrency
+import com.androNSZ.viewmodel.resolveConcurrency
 
 @Composable
 fun AndroNSZApp(vm: MainViewModel) {
@@ -43,6 +45,15 @@ fun AndroNSZApp(vm: MainViewModel) {
       ActivityResultContracts.OpenDocumentTree()
    ) { uri ->
       if (uri != null) vm.saveOutputFolder(context, uri)
+   }
+
+   // Source file for the Settings speed test's optional real-file pass. SAF rather
+   // than the in-app picker (A14): it is a one-off pick from a settings screen, and
+   // the engine reads content:// inputs through a descriptor anyway.
+   val realBenchPicker = rememberLauncherForActivityResult(
+      ActivityResultContracts.OpenDocument()
+   ) { uri ->
+      if (uri != null) vm.startRealFileBenchmark(context, uri)
    }
    
    val screen = vm.currentScreen
@@ -118,11 +129,38 @@ fun AndroNSZApp(vm: MainViewModel) {
             onAccentColorChange = { vm.saveAccentColor(context, it) },
             currentVerification = vm.verificationEnabled,
             onVerificationChange = { vm.saveVerificationEnabled(context, it) },
+            currentThreadMode = vm.threadMode,
+            // Queue size 1 would clamp the summary to 1; the honest answer to "how
+            // many will it use" is what a job with enough files gets.
+            currentThreads = resolveConcurrency(
+               vm.threadMode,
+               vm.decompressionThreads,
+               vm.calibratedThreads,
+               Runtime.getRuntime().availableProcessors(),
+               Runtime.getRuntime().availableProcessors()
+            ),
+            onOpenThreadSettings = { vm.navigateTo(Screen.ThreadSettings) },
+            currentShowUpdateBanner = vm.showUpdateBanner,
+            onShowUpdateBannerChange = { vm.saveShowUpdateBanner(context, it) },
+            onBack = { vm.navigateBack() }
+         )
+      }
+      Screen.ThreadSettings -> {
+         ThreadSettingsScreen(
+            currentThreadMode = vm.threadMode,
+            onThreadModeChange = { vm.saveThreadMode(context, it) },
             currentDecompressionThreads = vm.decompressionThreads,
             maxThreads = Runtime.getRuntime().availableProcessors(),
             onDecompressionThreadsChange = { vm.saveDecompressionThreads(context, it) },
-            currentShowUpdateBanner = vm.showUpdateBanner,
-            onShowUpdateBannerChange = { vm.saveShowUpdateBanner(context, it) },
+            calibratedThreads = vm.calibratedThreads,
+            halfThreads = halfConcurrency(Runtime.getRuntime().availableProcessors()),
+            benchRunning = vm.benchRunning,
+            benchLevel = vm.benchLevel,
+            benchSummary = vm.benchSummary,
+            benchFailed = vm.benchFailed,
+            benchEnabled = !vm.isConverting,
+            onRunBenchmark = { realBenchPicker.launch(arrayOf("*/*")) },
+            onCancelBenchmark = { vm.cancelBenchmark() },
             onBack = { vm.navigateBack() }
          )
       }

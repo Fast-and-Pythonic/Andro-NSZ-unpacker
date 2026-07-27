@@ -14,6 +14,8 @@ import com.androNSZ.model.AccentMode
 import com.androNSZ.model.ReleaseInfo
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
+import com.androNSZ.model.ThreadMode
+import com.androNSZ.util.BenchSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -42,6 +44,10 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val ACCENT_COLOR_KEY = "accent_color"
       private const val VERIFICATION_KEY = "verification_enabled"
       private const val DECOMPRESSION_THREADS_KEY = "decompression_threads"
+      private const val THREAD_MODE_KEY = "thread_mode"
+      private const val CALIBRATED_THREADS_KEY = "calibrated_threads"
+      private const val CALIBRATED_AT_KEY = "calibrated_at_ms"
+      private const val BENCH_SUMMARY_KEY = "bench_summary"
       private const val COMPACT_CARD_NAMES_KEY = "compact_card_names"
       private const val SHOW_UPDATE_BANNER_KEY = "show_update_banner"
       private const val LAST_UPDATE_CHECK_KEY = "last_update_check_ms"
@@ -110,13 +116,57 @@ class SettingsRepository private constructor(private val context: Context) {
       langPrefs.edit().putBoolean(VERIFICATION_KEY, enabled).apply()
    }
 
-   // Override for the decompression parallelism (number of files converted at
-   // once). 0 = auto (the core-adaptive AUTO_CONCURRENCY). See MainViewModel.
-   // Read synchronously at job start.
+   // The MANUAL-mode worker count (number of files converted at once). 0 = fall
+   // back to the core heuristic. Only consulted in ThreadMode.MANUAL; see
+   // MainViewModel.resolveConcurrency. Read synchronously at job start.
    fun getDecompressionThreads(): Int = langPrefs.getInt(DECOMPRESSION_THREADS_KEY, 0)
 
    fun saveDecompressionThreads(count: Int) {
       langPrefs.edit().putInt(DECOMPRESSION_THREADS_KEY, count).apply()
+   }
+
+   // Where the worker count comes from. Default CALIBRATED: before the speed test
+   // has ever been run it behaves as the plain core heuristic, and afterwards the
+   // measured value applies without the user having to switch anything.
+   // HALF is both the default and the landing spot for anything unrecognised, which
+   // is what silently migrates the removed ADAPTIVE mode on an app update.
+   fun getThreadMode(): ThreadMode {
+      val stored = langPrefs.getString(THREAD_MODE_KEY, ThreadMode.HALF.name)
+         ?: ThreadMode.HALF.name
+      return try {
+         ThreadMode.valueOf(stored)
+      } catch (e: IllegalArgumentException) {
+         ThreadMode.HALF
+      }
+   }
+
+   fun saveThreadMode(mode: ThreadMode) {
+      langPrefs.edit().putString(THREAD_MODE_KEY, mode.name).apply()
+   }
+
+   // Worker count found by the Settings speed test, 0 = never calibrated. Stored
+   // with its timestamp because the result ages: it is a property of the storage,
+   // and a flash that has filled up behaves differently from a fresh one.
+   fun getCalibratedThreads(): Int = langPrefs.getInt(CALIBRATED_THREADS_KEY, 0)
+
+   fun getCalibratedAtMillis(): Long = langPrefs.getLong(CALIBRATED_AT_KEY, 0L)
+
+   fun saveCalibratedThreads(count: Int, atMillis: Long = System.currentTimeMillis()) {
+      langPrefs.edit()
+         .putInt(CALIBRATED_THREADS_KEY, count)
+         .putLong(CALIBRATED_AT_KEY, atMillis)
+         .apply()
+   }
+
+   // Per-level numbers behind the calibrated value, so the verdict stays checkable
+   // rather than being a bare count. Null until the test has completed once.
+   fun getBenchSummary(): BenchSummary? {
+      val raw = langPrefs.getString(BENCH_SUMMARY_KEY, null) ?: return null
+      return BenchSummary.decode(raw)
+   }
+
+   fun saveBenchSummary(summary: BenchSummary) {
+      langPrefs.edit().putString(BENCH_SUMMARY_KEY, summary.encode()).apply()
    }
 
    // GUI: render each file card's name on a single line and show its extension

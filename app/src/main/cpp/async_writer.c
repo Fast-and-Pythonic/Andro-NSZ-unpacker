@@ -21,9 +21,19 @@
  * off a round earlier (never the most recent one, which may not be on disk yet).
  * All best-effort: FUSE-backed outputs return EINVAL, which we ignore.
  *
- * NB: this drops output pages that a subsequent SHA-256 verification pass would
- * re-read from storage — a deliberate trade of a little read I/O for a bounded
- * dirty-page footprint. Measure before keeping it (see plan Step 6).
+ * NB: **load-bearing, do not remove.** It shipped labelled "experimental, probably
+ * revert"; measurement then showed parallel writes *collapse* without it (451 vs
+ * 1013 MB/s at 4 writers — architecture.md A15). The original worry, that DONTNEED
+ * would penalise a verification pass re-reading the output, is moot: that pass is
+ * gone (A12).
+ *
+ * NB: SYNC_FILE_RANGE_WRITE only *queues* writeback; it never waits, so data is not
+ * on storage when the last fwrite returns. That is what this path wants — but any
+ * benchmark built on it must force the data out before stopping its clock, or it
+ * times the page cache instead of the flash (measured: 1.8 GB/s against 897 MB/s
+ * durable). A synthetic write bench that got this wrong lived here until 2026-07-27;
+ * the surviving test measures whole real conversions, where the kernel's dirty-page
+ * throttling forces the average back down to the true rate.
  */
 #define AW_DROP_INTERVAL (64 * 1024 * 1024)
 
