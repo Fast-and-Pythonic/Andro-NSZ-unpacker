@@ -9,17 +9,16 @@ import android.provider.DocumentsContract
 import android.provider.MediaStore
 import com.androNSZ.NszConverter
 import com.androNSZ.model.*
-import com.androNSZ.util.CpuTopology
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
+import com.androNSZ.util.ThroughputRecorder
+import com.androNSZ.util.WorkerPool
 import com.androNSZ.util.getUriSize
 import com.androNSZ.util.resolveToFilePath
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.concurrent.atomic.AtomicInteger
@@ -44,16 +43,12 @@ object FolderProcessor {
    suspend fun processFolder(
       context: Context,
       structure: FolderStructure,
-      headerKey: ByteArray?,
       outputBaseUri: Uri?,
-      // How many files to convert in parallel. Resolved by the caller
-      // (MainViewModel.resolveConcurrency): core-adaptive 1..3 by default, or an
-      // experimental override when verification is off.
-      concurrency: Int,
-      // Enable the core-aware scheduler (heavy files → fast cores, pinned) when the
-      // CPU is heterogeneous and affinity works; else a natural-order baseline. See
-      // MainViewModel.smartDistribution and CoreScheduler.
-      smartDistribution: Boolean,
+      // The gate deciding how many files convert at once, built by the caller
+      // (MainViewModel.resolveConcurrency); it may resize itself mid-run.
+      pool: WorkerPool,
+      // Aggregate throughput telemetry for this run, null when it couldn't be opened.
+      recorder: ThroughputRecorder?,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
       // Per-file lifecycle updates for the "files to unpack" list (NSZ/XCZ only).
@@ -63,7 +58,7 @@ object FolderProcessor {
       statusCallback?.onStatus("INFO", "Total files in folder: ${structure.allFiles.size}")
       statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
       statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
-      statusCallback?.onStatus("INFO", "Parallelism: $concurrency")
+      statusCallback?.onStatus("INFO", "Parallelism: ${pool.target}")
 
       val outputFolderName = generateOutputFolderName(context, structure.rootUri, outputBaseUri)
       statusCallback?.onStatus("FOLDER", "Creating output folder: $outputFolderName")
@@ -90,9 +85,8 @@ object FolderProcessor {
          context = context,
          plan = plan,
          structure = structure,
-         headerKey = headerKey,
-         concurrency = concurrency,
-         smartDistribution = smartDistribution,
+         pool = pool,
+         recorder = recorder,
          resultUri = outputFolderUri,
          progressCallback = progressCallback,
          statusCallback = statusCallback,
@@ -115,9 +109,8 @@ object FolderProcessor {
       context: Context,
       plan: List<WorkItem>,
       structure: FolderStructure,
-      headerKey: ByteArray?,
-      concurrency: Int,
-      smartDistribution: Boolean,
+      pool: WorkerPool,
+      recorder: ThroughputRecorder?,
       resultUri: Uri,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
@@ -144,6 +137,11 @@ object FolderProcessor {
          fun emit() {
             val total = fileTotals.sum().coerceAtLeast(1L)
             val done = perFileDone.sum().coerceAtMost(total)
+            // Aggregate telemetry is fed from here rather than from the throttled
+            // update below: the recorder samples on its own clock and wants the
+            // freshest byte count, not a display-paced one.
+            recorder?.setBytes(done)
+            recorder?.setFilesRemaining(plan.size - processed.get())
             overallThrottler.sample(done, total)?.let { lastOverall = it }
             val snapshot = active.entries.sortedBy { it.key }.map { it.value }
             progressCallback(
@@ -156,10 +154,8 @@ object FolderProcessor {
             )
          }
 
-         // Phase 2: process the work items. One WorkItem's processing, shared by the
-         // core-aware scheduler and the baseline path. [affinityMask] pins the native
-         // decompress to a CPU cluster (null = no pinning).
-         suspend fun processOne(i: Int, affinityMask: Long?) {
+         // Phase 2: process one WorkItem, run under the Semaphore below.
+         suspend fun processOne(i: Int) {
             val item = plan[i]
             val fileSizeMB = item.size / 1024.0 / 1024.0
             val startTime = System.currentTimeMillis()
@@ -181,7 +177,7 @@ object FolderProcessor {
 
                   val verify = convertDirect(
                      context, item.sourceUri, item.destParentUri, item.destRelativePath,
-                     outputName, item.isXcz, headerKey, affinityMask,
+                     outputName, item.isXcz,
                      { done, total ->
                         fileThrottler.sample(done, total)?.let { p ->
                            synchronized(lock) {
@@ -275,32 +271,10 @@ object FolderProcessor {
             }
          }
 
-         // Core-aware scheduling only helps on a heterogeneous CPU with working
-         // affinity; otherwise it degrades to order-only, which measured *worse* than
-         // the baseline — so fall back to a natural-order semaphore in that case.
-         val topology = CpuTopology.detect()
-         val coreAware = smartDistribution && topology.isHeterogeneous &&
-            NszConverter.affinitySupported()
-         if (coreAware) {
-            val coreSpecs = topology.cores.sortedByDescending { it.capacity }
-               .take(concurrency)
-               .map { CoreScheduler.CoreSpec(it.id, topology.speedOf(it.id), topology.clusterMask(it.id)) }
-            statusCallback?.onStatus("INFO", "Load distribution: core-aware (affinity on)")
-            coroutineScope {
-               CoreScheduler.run(plan.indices.toList(), { plan[it].size }, coreSpecs) { i, mask ->
-                  processOne(i, mask)
-               }
-            }
-         } else {
-            if (smartDistribution) {
-               statusCallback?.onStatus("INFO", "Load distribution: baseline (no heterogeneity/affinity)")
-            }
-            val sem = Semaphore(concurrency)
-            coroutineScope {
-               plan.indices.map { i ->
-                  async { sem.withPermit { processOne(i, null) } }
-               }.awaitAll()
-            }
+         coroutineScope {
+            plan.indices.map { i ->
+               async { pool.withWorker { processOne(i) } }
+            }.awaitAll()
          }
 
          val totalTimeMs = System.currentTimeMillis() - processingStartTime
@@ -409,10 +383,9 @@ object FolderProcessor {
    suspend fun processCombined(
       context: Context,
       structure: FolderStructure,
-      headerKey: ByteArray?,
       outputBaseUri: Uri?,
-      concurrency: Int,
-      smartDistribution: Boolean,
+      pool: WorkerPool,
+      recorder: ThroughputRecorder?,
       progressCallback: (FolderProgressUpdate) -> Unit,
       statusCallback: NszConverter.StatusCallback?,
       fileEventCallback: ((FolderFileEvent) -> Unit)? = null
@@ -422,7 +395,7 @@ object FolderProcessor {
       statusCallback?.onStatus("INFO", "NSZ files to convert: ${structure.nszFiles.size}")
       statusCallback?.onStatus("INFO", "XCZ files to convert: ${structure.xczFiles.size}")
       statusCallback?.onStatus("INFO", "Total size: %.2f MB".format(structure.totalSize / 1024.0 / 1024.0))
-      statusCallback?.onStatus("INFO", "Parallelism: $concurrency")
+      statusCallback?.onStatus("INFO", "Parallelism: ${pool.target}")
 
       // Resolve the output base. SAF → the tree's root document uri; otherwise the
       // public Downloads folder as a file:// uri (the app holds all-files access,
@@ -449,9 +422,8 @@ object FolderProcessor {
          context = context,
          plan = plan,
          structure = structure,
-         headerKey = headerKey,
-         concurrency = concurrency,
-         smartDistribution = smartDistribution,
+         pool = pool,
+         recorder = recorder,
          resultUri = baseUri,
          progressCallback = progressCallback,
          statusCallback = statusCallback,
@@ -565,10 +537,12 @@ object FolderProcessor {
     * descriptor (no temp-output + copy step), reading the source through its
     * descriptor with `fd:N` (no input copy). [isXcz] selects XCZ → XCI
     * (`nativeConvertXcz`) over NSZ → NSP (`nativeConvert`). Mirrors
-    * [NszConverter.convert], including the FUSE temp-copy fallback. NSP output is
-    * verified via SHA-256 when [headerKey] is present, but verification is
-    * non-fatal: a failure is logged as a warning and the output is kept (mirrors
-    * single-file mode). XCI verification is not yet implemented and is skipped.
+    * [NszConverter.convert], including the FUSE temp-copy fallback. The verify
+    * verdict is derived from the engine's inline hashing tags (VERIFIED/CORRUPTED)
+    * emitted during decompression — no separate output re-read pass (which was
+    * expensive on write-bound storage and stole bandwidth from parallel writes).
+    * A mismatch is non-fatal: the output is kept. Verification runs only when it
+    * was enabled globally via nativeSetVerification.
     * Throws [NszConversionException] only on an actual conversion failure.
     */
    private fun convertDirect(
@@ -578,8 +552,6 @@ object FolderProcessor {
       destRelativePath: String?,
       outputName: String,
       isXcz: Boolean,
-      headerKey: ByteArray?,
-      affinityMask: Long?,
       onProgress: (Long, Long) -> Unit,
       statusCallback: NszConverter.StatusCallback?
    ): VerifyStatus {
@@ -590,8 +562,9 @@ object FolderProcessor {
       var inputPfd: ParcelFileDescriptor? = null
       var resolvedInput: ResolvedInputFile? = null
       var mediaStorePending = false
-      // Verification outcome (non-fatal check). Stays NOT_CHECKED for XCZ/no key.
-      var verify = VerifyStatus.NOT_CHECKED
+      // Verify verdict from the engine's inline hashing tags (see below).
+      var sawVerified = false
+      var sawCorrupted = false
 
       try {
          // --- output target: a real fd we hand to native to write into ---
@@ -650,32 +623,35 @@ object FolderProcessor {
             override fun onProgress(done: Long, total: Long) = onProgress(done, total)
          }
 
-         fun runNative(input: String): Int =
-            if (isXcz) NszConverter.nativeConvertXcz(input, outputPath, cb, statusCallback)
-            else       NszConverter.nativeConvert(input, outputPath, cb, statusCallback)
-
-         // Pin the decompression to the assigned CPU cluster (the async_writer
-         // thread spawned by native inherits it); null = no pinning. Reset in the
-         // finally so the pooled IO thread isn't left pinned.
-         if (affinityMask != null) NszConverter.nativeSetThreadAffinity(affinityMask)
-         var result: Int
-         try {
-            result = runNative(inputPath)
-
-            // FUSE fallback: a descriptor whose /proc/self/fd path can't be re-opened
-            // by native code surfaces as an input/parse error. Retry with a temp copy.
-            if (result != NszConverter.OK && inputPfd != null &&
-               (result == NszConverter.ERR_OPEN_INPUT || result == NszConverter.ERR_INVALID_PFS0 ||
-                  result == NszConverter.ERR_INVALID_NCZ || result == NszConverter.ERR_IO)) {
-               statusCallback?.onStatus(tag, "Direct read failed (code $result), copying to cache and retrying: $outputName")
-               runCatching { inputPfd?.close() }
-               inputPfd = null
-               val r = resolveToFilePath(context, sourceUri, statusCallback)
-               resolvedInput = r
-               result = runNative(r.file.absolutePath)
+         // Intercept the engine's inline verify tags, forwarding all status
+         // through unchanged (mirrors NszConverter.VerifyTracker).
+         val trackCb = object : NszConverter.StatusCallback {
+            override fun onStatus(t: String, msg: String) {
+               when (t) {
+                  "VERIFIED" -> sawVerified = true
+                  "CORRUPTED" -> sawCorrupted = true
+               }
+               statusCallback?.onStatus(t, msg)
             }
-         } finally {
-            if (affinityMask != null) NszConverter.nativeClearThreadAffinity()
+         }
+
+         fun runNative(input: String): Int =
+            if (isXcz) NszConverter.nativeConvertXcz(input, outputPath, cb, trackCb)
+            else       NszConverter.nativeConvert(input, outputPath, cb, trackCb)
+
+         var result = runNative(inputPath)
+
+         // FUSE fallback: a descriptor whose /proc/self/fd path can't be re-opened
+         // by native code surfaces as an input/parse error. Retry with a temp copy.
+         if (result != NszConverter.OK && inputPfd != null &&
+            (result == NszConverter.ERR_OPEN_INPUT || result == NszConverter.ERR_INVALID_PFS0 ||
+               result == NszConverter.ERR_INVALID_NCZ || result == NszConverter.ERR_IO)) {
+            statusCallback?.onStatus(tag, "Direct read failed (code $result), copying to cache and retrying: $outputName")
+            runCatching { inputPfd?.close() }
+            inputPfd = null
+            val r = resolveToFilePath(context, sourceUri, statusCallback)
+            resolvedInput = r
+            result = runNative(r.file.absolutePath)
          }
 
          if (result != NszConverter.OK) {
@@ -683,51 +659,11 @@ object FolderProcessor {
          }
 
          // The output is fully written. Close the write descriptor now so the
-         // file is committed to storage before we reopen it to verify. Reopening
-         // a FUSE-backed scoped-storage file for read while its write handle is
-         // still open can race under parallel conversions — the fresh read handle
-         // may observe uncommitted data, surfacing as a bogus "cannot parse NSP
-         // container". Closing the writer first forces the provider to flush.
+         // file is committed/flushed before we mark it not-pending. (This also
+         // preserved the old reopen-to-verify from racing on FUSE; the verify
+         // re-read is gone, but flushing before finalize is still correct.)
          runCatching { outPfd?.close() }
          outPfd = null
-
-         // Verification is free (hardware SHA-256) but a weak, non-fatal check: a
-         // failure is reported as a warning and never discards the output (mirrors
-         // single-file mode). It runs against a freshly opened read descriptor so
-         // it always sees committed data. XCI verification is not implemented yet.
-         if (!isXcz && headerKey != null) {
-            var verifyPfd: ParcelFileDescriptor? = null
-            try {
-               val df = destFile
-               val du = destUri
-               val verifyPath: String? = when {
-                  df != null -> df.absolutePath
-                  du != null -> {
-                     verifyPfd = context.contentResolver.openFileDescriptor(du, "r")
-                     verifyPfd?.let { "/proc/self/fd/${it.fd}" }
-                  }
-                  else -> null
-               }
-               if (verifyPath == null) {
-                  statusCallback?.onStatus("WARN", "Verification skipped (cannot reopen output): $outputName")
-               } else {
-                  val verifyError = NszConverter.nativeVerifyNsp(verifyPath, headerKey)
-                  if (verifyError != null) {
-                     verify = VerifyStatus.FAILED
-                     statusCallback?.onStatus("WARN", "Verification warning (output kept) for $outputName: $verifyError")
-                  } else {
-                     verify = VerifyStatus.CHECKED
-                     statusCallback?.onStatus(tag, "Verified: $outputName")
-                  }
-               }
-            } catch (e: Exception) {
-               statusCallback?.onStatus("WARN", "Verification error (output kept) for $outputName: ${e.message}")
-            } finally {
-               runCatching { verifyPfd?.close() }
-            }
-         } else if (!isXcz) {
-            statusCallback?.onStatus(tag, "Verification skipped (no header key): $outputName")
-         }
 
          if (mediaStorePending && destUri != null) {
             context.contentResolver.update(
@@ -747,7 +683,13 @@ object FolderProcessor {
          resolvedInput?.deleteIfTemp(statusCallback)
       }
 
-      return verify
+      // Verify verdict from the engine's inline hashing tags — no output re-read.
+      // NOT_CHECKED when verification is off or nothing was hashed.
+      return when {
+         sawCorrupted -> VerifyStatus.FAILED
+         sawVerified -> VerifyStatus.CHECKED
+         else -> VerifyStatus.NOT_CHECKED
+      }
    }
 
    private fun createOutputFolder(context: Context, name: String): Uri? {

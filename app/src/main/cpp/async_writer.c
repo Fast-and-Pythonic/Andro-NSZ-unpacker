@@ -1,8 +1,41 @@
+/* sync_file_range() is a GNU/bionic extension gated behind _GNU_SOURCE, which
+ * must be defined before any system header (incl. those pulled in below). */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
+
 #include "async_writer.h"
 
 #include <stdlib.h>
 #include <string.h>
 #include <pthread.h>
+#if defined(__linux__)
+#include <fcntl.h>
+#endif
+
+/*
+ * Page-cache relief interval. With several files writing in parallel, tens of
+ * MB/s each of dirty pages can pile up and trigger writeback stalls / kswapd
+ * pressure. Every AW_DROP_INTERVAL bytes the writer kicks off async writeback
+ * for the just-written region and drops from the page cache the region it kicked
+ * off a round earlier (never the most recent one, which may not be on disk yet).
+ * All best-effort: FUSE-backed outputs return EINVAL, which we ignore.
+ *
+ * NB: **load-bearing, do not remove.** It shipped labelled "experimental, probably
+ * revert"; measurement then showed parallel writes *collapse* without it (451 vs
+ * 1013 MB/s at 4 writers — architecture.md A15). The original worry, that DONTNEED
+ * would penalise a verification pass re-reading the output, is moot: that pass is
+ * gone (A12).
+ *
+ * NB: SYNC_FILE_RANGE_WRITE only *queues* writeback; it never waits, so data is not
+ * on storage when the last fwrite returns. That is what this path wants — but any
+ * benchmark built on it must force the data out before stopping its clock, or it
+ * times the page cache instead of the flash (measured: 1.8 GB/s against 897 MB/s
+ * durable). A synthetic write bench that got this wrong lived here until 2026-07-27;
+ * the surviving test measures whole real conversions, where the kernel's dirty-page
+ * throttling forces the average back down to the true rate.
+ */
+#define AW_DROP_INTERVAL (64 * 1024 * 1024)
 
 struct AsyncWriter {
     FILE      *out;
@@ -29,7 +62,35 @@ struct AsyncWriter {
     int        io_error;
     pthread_t  thread;
     int        thread_ok;
+
+    /* Page-cache relief (writer thread only; see AW_DROP_INTERVAL). */
+    int        out_fd;             /* fileno(out), or -1 if unavailable */
+    long long  io_written;         /* total bytes fwritten so far */
+    long long  io_synced;          /* bytes already handed to writeback */
+    long long  io_dropped;         /* bytes already dropped from the cache */
 };
+
+/* Kick off writeback for freshly written data and drop the cache behind it.
+ * Compile with -DAW_NO_CACHE_RELIEF to disable (benchmark A/B for Step 6). */
+static void aw_relieve_cache(AsyncWriter *aw)
+{
+#if defined(__linux__) && !defined(AW_NO_CACHE_RELIEF)
+    if (aw->out_fd < 0) return;
+    while (aw->io_written - aw->io_synced >= AW_DROP_INTERVAL) {
+        sync_file_range(aw->out_fd, (off_t)aw->io_synced, AW_DROP_INTERVAL,
+                        SYNC_FILE_RANGE_WRITE);
+        if (aw->io_synced > aw->io_dropped) {
+            posix_fadvise(aw->out_fd, (off_t)aw->io_dropped,
+                          (off_t)(aw->io_synced - aw->io_dropped),
+                          POSIX_FADV_DONTNEED);
+            aw->io_dropped = aw->io_synced;
+        }
+        aw->io_synced += AW_DROP_INTERVAL;
+    }
+#else
+    (void)aw;
+#endif
+}
 
 /* Map a buffer pointer back to its index (n is small). */
 static int aw_index_of(AsyncWriter *aw, const uint8_t *buf)
@@ -63,8 +124,10 @@ static void *aw_thread_main(void *arg)
         if (!aw->io_error && len > 0) {
             if (fwrite(aw->bufs[idx], 1, len, aw->out) != len) {
                 aw->io_error = 1;
-            } else if (aw->sha) {
-                sha256_update(aw->sha, aw->bufs[idx], len);
+            } else {
+                if (aw->sha) sha256_update(aw->sha, aw->bufs[idx], len);
+                aw->io_written += (long long)len;
+                aw_relieve_cache(aw);
             }
         }
 
@@ -88,6 +151,7 @@ AsyncWriter *aw_start(FILE *out_fp, Sha256Ctx *sha_ctx,
     aw->sha      = sha_ctx;
     aw->buf_size = buf_size;
     aw->n        = num_buffers;
+    aw->out_fd   = out_fp ? fileno(out_fp) : -1;
 
     aw->bufs     = calloc(num_buffers, sizeof(uint8_t *));
     aw->job_idx  = calloc(num_buffers, sizeof(int));

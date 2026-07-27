@@ -10,6 +10,7 @@ import com.androNSZ.model.CancelledException
 import com.androNSZ.model.ConversionProgress
 import com.androNSZ.model.NszConversionException
 import com.androNSZ.model.VerifyStatus
+import com.androNSZ.util.LogFiles
 import com.androNSZ.util.ProgressThrottler
 import com.androNSZ.util.ResolvedInputFile
 import com.androNSZ.util.queryFileName
@@ -43,8 +44,13 @@ object NszConverter {
         statusCallback: StatusCallback?
     ): Int
 
+    /**
+     * Opens (or force-closes, when [path] is null) the native debug log. [banner]
+     * is optional header text written before the engine's own header lines — the
+     * run number and logging rules, see [openJobDebugLog]. Prefer that wrapper.
+     */
     @JvmStatic
-    external fun nativeSetDebugLog(path: String?)
+    external fun nativeSetDebugLog(path: String?, banner: String?)
 
     @JvmStatic
     external fun nativeCloseDebugLog()
@@ -54,9 +60,6 @@ object NszConverter {
 
     @JvmStatic
     external fun nativeErrorString(errorCode: Int): String
-
-    @JvmStatic
-    external fun nativeVerifyNsp(nspPath: String, headerKey: ByteArray): String?
 
     /**
      * Configure CNMT verification once before a batch/folder job. Read-only in
@@ -70,20 +73,6 @@ object NszConverter {
         headerKey: ByteArray?,
         keyAreaKeys: ByteArray?
     )
-
-    /**
-     * Pin the CURRENT thread to the CPU cluster in [mask] (bit i = CPU i), so the
-     * core-aware scheduler keeps a conversion on the intended big/little cores.
-     * Must be called on the same thread that then runs [nativeConvert]. Returns 0
-     * on success or a negative errno (e.g. EPERM on kernels that forbid it — the
-     * caller falls back to no pinning). See [ioPinned].
-     */
-    @JvmStatic
-    external fun nativeSetThreadAffinity(mask: Long): Int
-
-    /** Restore the affinity saved by the last [nativeSetThreadAffinity] on this thread. */
-    @JvmStatic
-    external fun nativeClearThreadAffinity()
 
     interface ProgressCallback {
         fun onProgress(done: Long, total: Long)
@@ -104,44 +93,88 @@ object NszConverter {
     const val ERR_CANCELLED = -8
     const val ERR_HASH_MISMATCH = -9
 
+    /** Path of the native debug log opened by [openJobDebugLog]. */
     var lastDebugLogPath: String? = null
         private set
 
-    var lastVerifyError: String? = null
-        private set
+    /**
+     * Opens the native engine's debug log for one whole job (queue, folder or
+     * combined) and returns its path. [runId] and [mode] go into the header so the
+     * file identifies the run it belongs to (see [LogFiles]).
+     *
+     * Deliberately per job, not per file: the log has a single fixed path, so a
+     * per-file open truncated it for every file of a parallel batch and the first
+     * file to finish closed it for all the others, leaving them with logcat only.
+     * The native side reference counts (see nsz_debug.h), so an extra open is
+     * harmless — but every call must still be paired with [closeJobDebugLog].
+     *
+     * Rotation happens here rather than natively: the engine truncates on open, so
+     * the previous run has to be moved aside first.
+     */
+    @JvmStatic
+    fun openJobDebugLog(context: Context, runId: Int, mode: String): String {
+        val logFile = File(context.getExternalFilesDir(null), LogFiles.NATIVE_LOG)
+        LogFiles.rotate(logFile)
+        lastDebugLogPath = logFile.absolutePath
+        nativeSetDebugLog(logFile.absolutePath, LogFiles.banner(runId, "Native engine log", mode))
+        return logFile.absolutePath
+    }
 
-    var lastVerifySkipped: Boolean = false
-        private set
+    /** Drops this job's reference to the native debug log (see [openJobDebugLog]). */
+    @JvmStatic
+    fun closeJobDebugLog() = nativeCloseDebugLog()
+
+    /**
+     * Derives the per-file verify verdict from the inline hashing tags the engine
+     * emits during decompression (`VERIFIED` / `CORRUPTED`), forwarding every
+     * status through unchanged. This replaces the old post-conversion
+     * `nativeVerifyNsp` pass, which re-read the entire output file — expensive on
+     * write-bound storage. Each conversion uses its own tracker, so parallel
+     * files never race. Tags arrive on the native conversion thread before the
+     * blocking `nativeConvert` returns; `@Volatile` guards the cross-thread read.
+     */
+    private class VerifyTracker(private val delegate: StatusCallback?) : StatusCallback {
+        @Volatile var sawVerified = false
+        @Volatile var sawCorrupted = false
+        override fun onStatus(tag: String, msg: String) {
+            when (tag) {
+                "VERIFIED" -> sawVerified = true
+                "CORRUPTED" -> sawCorrupted = true
+            }
+            delegate?.onStatus(tag, msg)
+        }
+        val verdict: VerifyStatus
+            get() = when {
+                sawCorrupted -> VerifyStatus.FAILED
+                sawVerified -> VerifyStatus.CHECKED
+                else -> VerifyStatus.NOT_CHECKED
+            }
+    }
 
     fun convert(
         context: Context,
         inputUri: Uri,
-        headerKey: ByteArray?,
         outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
-        affinityMask: Long? = null,
-        // Invoked once with the verification outcome. Captured per-call so the
-        // queue can label the card without racing on the shared lastVerify* fields
-        // under parallel conversions.
+        // Invoked once with the verification outcome, derived from the engine's
+        // inline hashing tags (see [VerifyTracker]). Captured per-call so the
+        // queue can label the card without racing under parallel conversions.
         onVerified: (VerifyStatus) -> Unit = {},
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
         val outputName = originalFileName.substringBeforeLast('.') + ".nsp"
 
-        val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
         var pfd: ParcelFileDescriptor? = null
         var inputPfd: ParcelFileDescriptor? = null
         var resolvedInput: ResolvedInputFile? = null
 
-        lastDebugLogPath = debugLogFile.absolutePath
-        lastVerifyError = null
-        lastVerifySkipped = false
+        val tracker = VerifyTracker(statusCallback)
 
+        // NB: the native debug log is opened once per job by the caller
+        // (see [openJobDebugLog]), not here — see that function for why.
         try {
-            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
-
             // Resolve the input to a native path. Prefer reading the source
             // directly through its file descriptor (no copy); fall back to a
             // temp-file copy only when the provider returns a non-seekable fd.
@@ -185,8 +218,8 @@ object NszConverter {
                 }
             }
 
-            var result = ioPinned(affinityMask) {
-                nativeConvert(inputPath, nativePath, cb, statusCallback)
+            var result = withContext(Dispatchers.IO) {
+                nativeConvert(inputPath, nativePath, cb, tracker)
             }
 
             // Some content providers (e.g. FUSE-backed scoped storage) hand out
@@ -202,22 +235,14 @@ object NszConverter {
                 inputPfd = null
                 val r = withContext(Dispatchers.IO) { resolveToFilePath(context, inputUri, statusCallback) }
                 resolvedInput = r
-                result = ioPinned(affinityMask) {
-                    nativeConvert(r.file.absolutePath, nativePath, cb, statusCallback)
+                result = withContext(Dispatchers.IO) {
+                    nativeConvert(r.file.absolutePath, nativePath, cb, tracker)
                 }
             }
 
-            var verify = VerifyStatus.NOT_CHECKED
-            if (result == 0 && headerKey != null) {
-                val err = withContext(Dispatchers.IO) { nativeVerifyNsp(nativePath, headerKey) }
-                lastVerifyError = err
-                lastVerifySkipped = false
-                verify = if (err == null) VerifyStatus.CHECKED else VerifyStatus.FAILED
-            } else if (result == 0) {
-                lastVerifyError = null
-                lastVerifySkipped = true
-            }
-            if (result == 0) onVerified(verify)
+            // Verify verdict comes from the engine's inline hashing tags (no
+            // separate output re-read). NOT_CHECKED when verification is off.
+            if (result == 0) onVerified(tracker.verdict)
 
             when (result) {
                 OK -> {
@@ -238,7 +263,6 @@ object NszConverter {
             close(e)
         } finally {
             withContext(Dispatchers.IO) {
-                runCatching { nativeCloseDebugLog() }
                 runCatching { pfd?.close() }
                 runCatching { inputPfd?.close() }
                 resolvedInput?.deleteIfTemp()
@@ -251,28 +275,26 @@ object NszConverter {
     fun convertXcz(
         context: Context,
         inputUri: Uri,
-        headerKey: ByteArray?,
         outputBaseUri: Uri? = null,
         statusCallback: StatusCallback? = null,
-        affinityMask: Long? = null,
+        onVerified: (VerifyStatus) -> Unit = {},
     ): Flow<ConversionProgress> = callbackFlow {
 
         val originalFileName = queryFileName(context, inputUri)
         val outputName = originalFileName.substringBeforeLast('.') + ".xci"
 
-        val debugLogFile = File(context.getExternalFilesDir(null), "nsz_debug.log")
         var outputUri: Uri? = null
         var pfd: ParcelFileDescriptor? = null
         var inputPfd: ParcelFileDescriptor? = null
         var resolvedInput: ResolvedInputFile? = null
 
-        lastDebugLogPath = debugLogFile.absolutePath
-        lastVerifyError = null
-        lastVerifySkipped = true  // XCI verification not implemented yet
+        // XCZ hashes NCAs inline per HFS0 partition (secure partition carries the
+        // META), so the verdict comes from the same VERIFIED/CORRUPTED tags.
+        val tracker = VerifyTracker(statusCallback)
 
+        // NB: the native debug log is opened once per job by the caller
+        // (see [openJobDebugLog]), not here.
         try {
-            withContext(Dispatchers.IO) { nativeSetDebugLog(debugLogFile.absolutePath) }
-
             // Resolve the input to a native path. Prefer reading the source
             // directly through its file descriptor (no copy); fall back to a
             // temp-file copy only when the provider returns a non-seekable fd.
@@ -313,8 +335,8 @@ object NszConverter {
                 }
             }
 
-            var result = ioPinned(affinityMask) {
-                nativeConvertXcz(inputPath, nativePath, cb, statusCallback)
+            var result = withContext(Dispatchers.IO) {
+                nativeConvertXcz(inputPath, nativePath, cb, tracker)
             }
 
             // FUSE fallback: a descriptor whose /proc/self/fd path can't be
@@ -328,10 +350,12 @@ object NszConverter {
                 inputPfd = null
                 val r = withContext(Dispatchers.IO) { resolveToFilePath(context, inputUri, statusCallback) }
                 resolvedInput = r
-                result = ioPinned(affinityMask) {
-                    nativeConvertXcz(r.file.absolutePath, nativePath, cb, statusCallback)
+                result = withContext(Dispatchers.IO) {
+                    nativeConvertXcz(r.file.absolutePath, nativePath, cb, tracker)
                 }
             }
+
+            if (result == 0) onVerified(tracker.verdict)
 
             when (result) {
                 OK -> {
@@ -352,7 +376,6 @@ object NszConverter {
             close(e)
         } finally {
             withContext(Dispatchers.IO) {
-                runCatching { nativeCloseDebugLog() }
                 runCatching { pfd?.close() }
                 runCatching { inputPfd?.close() }
                 resolvedInput?.deleteIfTemp()
@@ -363,35 +386,6 @@ object NszConverter {
     }
 
     fun cancel() = nativeCancel()
-
-    /**
-     * Probe whether thread affinity is usable on this device (some OEM kernels
-     * return EPERM). Sets and clears a trivial mask on an IO thread; true if the
-     * kernel accepted it. The core-aware scheduler falls back to no pinning when
-     * this is false.
-     */
-    suspend fun affinitySupported(): Boolean = withContext(Dispatchers.IO) {
-        val rc = nativeSetThreadAffinity(1L)  // CPU 0 always exists
-        if (rc == 0) nativeClearThreadAffinity()
-        rc == 0
-    }
-
-    /**
-     * Run [block] (a native convert call) on the IO dispatcher, pinned to the
-     * [affinityMask] CPU cluster for its duration. The async_writer thread spawned
-     * by native inherits this affinity. `null` = no pinning (homogeneous CPU or
-     * affinity unsupported). Affinity is reset afterwards so the pooled IO thread
-     * isn't left pinned for later work.
-     */
-    private suspend fun <T> ioPinned(affinityMask: Long?, block: () -> T): T =
-        withContext(Dispatchers.IO) {
-            if (affinityMask != null) nativeSetThreadAffinity(affinityMask)
-            try {
-                block()
-            } finally {
-                if (affinityMask != null) nativeClearThreadAffinity()
-            }
-        }
 
     private fun createOutputUri(context: Context, outputBaseUri: Uri?, outputName: String): Uri {
         if (outputBaseUri != null) {

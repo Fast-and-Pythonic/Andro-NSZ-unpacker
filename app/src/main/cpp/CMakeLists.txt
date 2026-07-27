@@ -50,12 +50,11 @@ add_library(${CMAKE_PROJECT_NAME} SHARED
     async_writer.c
     ncz_decompress.c
     ncz_engine.c
-    nca_verifier.c
     nca_cnmt.c
 )
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Android")
-    target_sources(${CMAKE_PROJECT_NAME} PRIVATE jni_bridge.c cpu_affinity.c)
+    target_sources(${CMAKE_PROJECT_NAME} PRIVATE jni_bridge.c)
 endif()
 
 target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE

@@ -1,4 +1,4 @@
-# Status (updated: 2026-07-08)
+# Status (updated: 2026-07-28)
 
 ## Working
 
@@ -6,13 +6,17 @@
   NSZ→NSP (debugged) and XCZ→XCI (**tested on a device 2026-07-01, both modes**,
   after the empty-partition fix — [gotchas.md](gotchas.md) G07).
 - Folder mode moved to the "new" pipeline (like the file queue): no-copy `fd:N`
-  input, writing the result straight into the destination descriptor, parallelism
-  via `FOLDER_CONCURRENCY`, NSP verify, a GUI bar per active file.
+  input, writing the result straight into the destination descriptor, parallel
+  unpacking, inline NSP verify, a GUI bar per active file.
 - The perf pipeline in `stable`: hardware AES-CTR + SHA-256 with a software
-  fallback, no-copy input via `fd:N`, async writer, zstd `-O3`, ThinLTO,
-  core-adaptive batch parallelism (`BATCH_CONCURRENCY` 1..3). Result: 2 GB ~7 s.
-- NCA SHA-256 verify — **non-fatal** (mismatch → `WARN`, output kept, not deleted).
-  The filename check is an approximation, see [architecture.md](architecture.md) A12.
+  fallback, no-copy input via `fd:N`, async writer + page-cache pacing, input
+  zstd `-O3`, ThinLTO. Unpacking is **write-bound** — see A15 for the measured
+  ceilings. The thread count is chosen per device (A07): the default is half the
+  cores, and a real-file test can measure the device instead. Thread settings live
+  on their own screen.
+- NCA SHA-256 verify — **non-fatal** (mismatch → `WARN` + `CORRUPTED` tag, output kept,
+  not deleted), computed inline during decompression with no output re-read; the
+  filename check is a fallback approximation. See [architecture.md](architecture.md) A12.
 - Output to a chosen folder (SAF tree / file uri) — in all modes, with a fallback
   to Downloads (`NszConverter.createOutputUri`).
 - **Custom in-app file picker** (split-screen, browses the raw filesystem via
@@ -45,6 +49,29 @@
   them. Only when keys are missing / the META NCA can't be parsed does it fall back to
   the (non-authoritative) filename content-id check, marked `VERIFIED … (by name)`. A
   mismatch stays non-fatal in both modes — never return `NCZ_ERR_HASH_MISMATCH` here.
+  The per-file UI verdict rides on the `VERIFIED`/`CORRUPTED` status tags (there is no
+  output re-read pass any more) — renaming those tags silently breaks the file cards.
+- **Unpacking is write-bound, and the ceiling drifts** (A15, G17). Benchmark fresh vs
+  sustained separately — the flash slows ~2× once its SLC cache is exhausted. The knee's
+  *position* is device-specific, and the measured table in A15 is one phone in one wear
+  state; don't treat its numbers as the app's tuning.
+- **Any comparison of thread counts is biased by measurement order** (G18). Sweep the
+  levels once each way, give every level identical work, score within rounds, and require
+  a ≥5 % margin. Reversing the schedule must not change the verdict — that check is the
+  cheapest way to catch a broken method.
+- **A write benchmark that doesn't force durability measures the page cache** (G20), and
+  the amount of I/O it forces can itself depend on the parameter under comparison — which
+  corrupts the *ranking*, not just the scale. Sanity-check any new measurement against a
+  real job and a single-stream `dd conv=fsync` before believing it.
+- **The real-file test writes a lot.** A full sweep is `2 × Σ(1..cores)` complete unpacks
+  of the chosen file — 72 on an 8-core phone, i.e. ~70–145 GB at the recommended 1–2 GB
+  source. That is deliberate (it is what makes the numbers trustworthy) but it wears the
+  flash hard, so don't run it casually or benchmark anything else right after.
+- **Only the aggregate matters in parallel mode** (A07). Per-file speed is the ceiling
+  divided by N; it is a target only when unpacking a *single* file. An earlier cap of 4
+  workers was justified by per-file speed and had to be retracted.
+- **`async_writer`'s `sync_file_range`/`FADV_DONTNEED` pacing is load-bearing.** It looks
+  like a removable "experiment" but disabling it collapses parallel writes ~2.2×.
 - **Writing folder results straight into a SAF descriptor.** Folder mode writes output
   via `/proc/self/fd` into an arbitrary folder (not just Downloads). On rare firmwares
   FUSE failures are possible — input has a temp fallback, output does not.
@@ -62,6 +89,11 @@
 - **Combined picker mode** (mark files + folders together in one pass) and then
   dropping the two separate modes — the picker is built mode-scoped for now (A14).
 - **Multi-folder selection** in folder mode — the folder pipeline is single-root.
+- **Generating a synthetic NSZ for the thread-count test**, so it needs no file from the
+  user. Deferred because the build ships only the zstd *decompressor*; producing a valid
+  NSZ needs a compressor plus key material. Since the synthetic write test was deleted
+  (A07), this is the only route left to a zero-input calibration — worth revisiting if the
+  "pick a 1–2 GB file" step proves to be a barrier.
 - **Picker row-spacing tuning control** — the gear menu's two live spacing fields are a
   temporary aid; once good values are found, hardcode them and remove the fields/menu.
 - **Block-level parallelism in C** — branch `block-parallel-wip` (commit `aa7cf73`).
@@ -79,6 +111,149 @@
 
 ## Decision log
 
+- 2026-07-28 — **one measurement instead of two, and half the cores as the default**
+  ([architecture.md](architecture.md) A07 rewritten again; [gotchas.md](gotchas.md) **G20**
+  new, G18 amended). Verifying the 2026-07-26 work on device turned into a rework.
+  **Deleted: the synthetic write test** (`util/WriteBenchmark` + `nativeBenchWrite`). It
+  measured writes with no NSZ input, which was its appeal, but it cannot see the producer
+  side and so systematically under-counts — it picked 6 where the real-file test picked 8
+  on the same phone. It also spent a day measuring the page cache rather than the flash
+  (G20), which is the sharper argument: a synthetic benchmark has to be *argued* correct,
+  while a whole real run is correct by construction.
+  **Deleted: searching during a real job** (`util/AdaptiveWorkerSearch` +
+  `ThreadMode.ADAPTIVE`). The method was sound but needed tens of GB of output before it
+  could reach a verdict, so on ordinary jobs it only ever logged "not enough data". A
+  stored `ADAPTIVE` migrates silently to `HALF`. The analysis that only it called
+  (`eligibleRuns`, `blockStats`, `nextLevelToProbe`, `blockTag`) went with it;
+  `nsz_throughput.csv` stays as diagnostics with `level_tag` now always empty.
+  **Default is now `HALF`** = `cores / 2`, and the same value is the fallback for *every*
+  unset source, so "not set" cannot mean different things in different modes. `cores − 1`
+  is gone: on the reference device everything from 2 to 8 sat within ~10 % on aggregate,
+  so the value matters less than leaving the phone usable during a long job. `CALIBRATED`
+  may now return `cores` — the "leave the UI a core" rule was dropped along with it.
+  **The test now runs whole conversions** — N complete unpacks in parallel, timed end to
+  end, 1→cores then cores→1. The cut-short version had two defects that biased the
+  *ranking*: its clock stopped after cancelling and deleting the output, and only the
+  first level ever paid for a cold page cache. Both are structural, and running whole jobs
+  removes the machinery they lived in rather than patching them. On-device cross-check:
+  one thread measured 391 MB/s against the CLI's 400 (A15).
+  UI: thread settings moved to their own screen behind a summary line; long descriptions
+  collapse to one line (`ui/components/ExpandableDescription`); "workers" became "threads"
+  with proper Russian plurals. Code identifiers (`WorkerPool`, `target_workers`) kept.
+  `WorkerPool` lost `resize()` and its ballast permits — the count is fixed for a job's
+  lifetime now, so that machinery had no caller left and the class is a fixed-size
+  `Semaphore` plus the telemetry callback.
+  Still deferred: generating a synthetic NSZ so the test needs no user file (the build has
+  only the zstd decompressor).
+
+- 2026-07-26 — **worker count is measured per device, not hardcoded**
+  *(largely superseded 2026-07-28 — see the entry above; the reasoning below is why the
+  hardcoded cap went away, which still holds.)*
+  ([architecture.md](architecture.md) A07 rewritten, A15 annotated;
+  [gotchas.md](gotchas.md) **G18** new). The cap of 4 workers came from one phone
+  (SM8735 + UFS) and rested on protecting **per-file** speed. That justification was
+  retracted: in parallel mode per-file speed is just the ceiling divided by N, and only
+  the aggregate is a target — by aggregate, 6 workers beat 4 on that same device.
+  So the cap is gone (`autoConcurrency(cores) = (cores − 1).coerceAtLeast(1)`) and the
+  count now has three explicit sources (`model/ThreadMode`): `MANUAL` (slider),
+  `ADAPTIVE` (searched during a job), `CALIBRATED` (Settings speed test, **the default**,
+  falling back to the heuristic until the test is run). `resolveConcurrency` became a pure
+  function and is unit-tested.
+  New: `util/ThroughputRecorder` (10 Hz aggregate telemetry → `nsz_throughput.csv`, same
+  rotation rules as the other logs), `util/ThroughputAnalysis` (pure, 15 tests),
+  `util/WorkerPool` (the `Semaphore` pattern the two start sites duplicated, now resizable
+  via ballast permits — shrinking waits for a file to finish, never aborts one),
+  `util/AdaptiveWorkerSearch`, `util/WriteBenchmark` + `nativeBenchWrite`,
+  `util/RealFileBenchmark`.
+  **The methodological core, and the reason this took a plan rather than a patch:** flash
+  slows as it is written (1013 → ~716 MB/s at the same 4 workers), so measuring levels one
+  after another always crowns whichever went first. Every driver therefore interleaves
+  levels in equal-**byte** blocks and scores each level only against its own round; the
+  analysis counts only fully loaded windows, takes medians of 2 s windows, and needs a
+  ≥5 % margin (identical runs differ by 3–9 %). Searches run **top-down** so an
+  inconclusive one errs toward full parallelism. This is explicitly *not* a revival of the
+  `AdaptivePolicy`/`AdaptiveGate` controller deleted on 2026-07-25 — that one started low,
+  ramped up, and could shed workers.
+  `nativeBenchWrite` reuses `async_writer.c` (including its pacing) rather than a
+  simplified loop, because without the pacing parallel writes measure 2.2× slower and the
+  result would not transfer. Deferred, as planned: generating a synthetic NSZ so the
+  real-file test needs no user file (the build has only the zstd decompressor).
+  **Not yet verified on device** — see the plan's verification list.
+- 2026-07-26 — **logs: one file = one run, plus one previous**
+  ([architecture.md](architecture.md) A16b, [gotchas.md](gotchas.md) G07). Three fixes in one
+  pass. (1) **Accumulation:** `nsz_folder_debug.log` opened in append mode and was never
+  truncated — it grew without bound and stacked unlabelled banners from every past run. All
+  three file sinks now rotate on start (`<name>.prev.<ext>`, older dropped) via the new
+  `util/LogFiles.kt`, so at most two generations exist. (2) **Identity:** every header now
+  carries `Run : #N` from `SettingsRepository.nextRunId()` (`@Synchronized` + `commit()`,
+  because a folder scan and the conversion after it allocate back-to-back); the same number
+  in the native and the Kotlin log means the same run, and the screen snapshot stamps
+  `lastRunId()` without allocating. This exists because a stale log was once read as the
+  current one after a GUI test silently failed to start. (3) **Self-description:** the shared
+  banner lists all four sinks and the rotation rule, so a log explains the scheme without
+  reading code. JNI: `nativeSetDebugLog(path, banner)` / `dbg_open(path, banner)` gained a
+  nullable banner argument (the native header is written by C on open, so Kotlin could not
+  prepend it otherwise); the CLI passes `NULL`. Also fixed: `scanFolderInto` closed its
+  `FolderLogWriter` only on the error path, so a successful scan leaked the writer and the
+  conversion held the same file open a second time. New `LogFilesTest` (5 tests).
+- 2026-07-26 — **cleanup: dead verifier deleted, native debug log fixed**
+  ([architecture.md](architecture.md) A12/A16). (1) `nca_verifier.c`/`.h`, the
+  `nativeVerifyNsp` JNI entry point and its Kotlin `external fun` are **deleted**. Checked
+  against the reference first: nicoboss/nsz has **no** structural NCA verifier — its
+  verification is entirely CNMT-hash based and `nsz -D` enforces nothing, so our inline
+  check already matches it and the structural pass was a superset with no caller.
+  (2) The native debug log was opened **per file** on one fixed path with `fopen(..., "w")`:
+  every file of a parallel batch truncated it and the first to finish closed it for all the
+  others; folder/combined mode never opened it at all. Now opened **once per job**
+  (`NszConverter.openJobDebugLog/closeJobDebugLog`, called next to `nativeSetVerification`
+  in `startBatchConversion` and `runFolderStyleConversion`), closed via `invokeOnCompletion`
+  (batch) and the existing `finally` under `NonCancellable` (folder — which also stops a
+  cancelled scope from skipping temp cleanup). `dbg_open`/`dbg_close` are now **refcounted**,
+  so no future per-file open can truncate or close another conversion's log; the elapsed-ms
+  read of `s_start_time` moved under the mutex that writes it.
+  Verified on device: a 4-file parallel batch produced one 224 k-line log with all four
+  conversions and ~2.8 k lines written *after* the first file finished (the old cut-off
+  point); folder mode produced a 280 k-line log with all 5 conversions where it previously
+  produced none. Builds + tests green.
+- 2026-07-25 — **write-bound diagnosis; two features built, measured and rejected**
+  ([architecture.md](architecture.md) A15/A07/A12, [gotchas.md](gotchas.md) G17). An adb CLI
+  benchmark overturned the "CPU-bound" model: decompression scales to ~2375 MB/s
+  (→ `/dev/null`) while **writing** caps at ~1000–1080 MB/s and decays to ~450–500 under
+  sustained load (UFS SLC exhaustion, not thermal — CPU stayed ~50 °C). FUSE ≈ raw UFS, so the
+  output path is innocent. The `cores − 1` step from 2026-07-24 was therefore a regression
+  (per-file cut ~2×, no aggregate gain).
+  **Kept:** (1) `nativeVerifyNsp` post-pass **removed** — it re-read the entire output; the
+  per-file `VerifyStatus` now comes from the engine's inline `VERIFIED`/new `CORRUPTED` tags via
+  `NszConverter.VerifyTracker` (XCZ gets a real verdict for the first time; `headerKey` plumbing
+  dropped from `convert`/`convertXcz`/`convertDirect`). (2) Parallelism fixed at
+  `min(cores − 1, 4)`. (3) Step-6 fadvise/`sync_file_range` reclassified **load-bearing**
+  (2.2× on parallel writes — disabling it collapses them); 256 KiB chunk confirmed (1 MiB is
+  worse for writes).
+  **Rejected after measuring** (both worked correctly, both bought nothing — details and the
+  numbers in A07/A15, kept as "don't retry this" notes): an *adaptive* worker-count controller
+  (`AdaptivePolicy`/`AdaptiveGate`, hill-climb on aggregate MB/s) — its premise is false, since
+  fewer workers never raise aggregate at any wear level, and its ramp cost ~7 %; and a native
+  *input prefetch* pthread in `SolidReader` — reads are never the bottleneck and kernel
+  readahead already covers them.
+  **End state, measured in the app** (4 files × 2.7 GB out, fresh flash): aggregate
+  **967 MB/s**, per-file **242–254 MB/s**, all files `Checked`, 10.7 GB in 11 s — vs per-file
+  ~115–140 at the 7-worker starting point. Builds + 8 unit tests green; verified on device
+  (POCO/HyperOS, Android 16, SM8735).
+- 2026-07-24 — **parallel-decompression throughput pass** ([architecture.md](architecture.md)
+  A15) on branch `dev-parallel-files-2`. (1) `AUTO_CONCURRENCY` → `cores − 1` and the
+  Settings slider's verify-off gate removed (`resolveConcurrency(override)`); slider now
+  always shown. (2) Native solid path: `NCZ_CHUNK_SIZE` 64 KiB→256 KiB, `NCZ_WRITER_BUFFERS`
+  12, `NCZ_IN_BUF_SIZE` 1 MiB, input+output `FILE*` set to `_IONBF` (kills the stdio
+  double-copy), `copy_bytes` mallocs only what it copies. (3) Experimental page-cache
+  hygiene in `async_writer.c` (`sync_file_range`+`FADV_DONTNEED` every 64 MiB) +
+  `FADV_SEQUENTIAL` on input — measure-gated, note the verify-reread trade-off. (4)
+  Per-conversion cancel **epoch** (`g_cancel_epoch`) fixes the parallel un-cancel bug;
+  `ncz_decompress`/`copy_bytes`/`xcz_process_file` now take `int start_epoch`. (5) **Deleted**
+  the disabled core-aware scheduler (A13): `CoreScheduler.kt`, `CpuTopology.kt`,
+  `cpu_affinity.c/.h`, `nativeSetThreadAffinity/Clear`, `smart_distribution` pref + strings,
+  and their unit tests. Builds (both ABIs) + Kotlin + unit tests green; on-device speed
+  benchmark pending (user). **Deferred:** plan Step 7 (release the permit before
+  verify/finalize) and the shared-debug-log-per-batch cleanup.
 - 2026-07-08 — **custom in-app file picker** ([architecture.md](architecture.md) A14).
   Replaced the SAF input pickers with a split-screen picker that browses the raw
   filesystem (`java.io.File`) under `MANAGE_EXTERNAL_STORAGE`. Reason: SAF adds files one

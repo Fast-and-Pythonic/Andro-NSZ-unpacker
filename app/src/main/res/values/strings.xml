@@ -157,11 +157,39 @@
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
     <string name="settings_verification">Output verification</string>
     <string name="settings_verification_desc">Verify unpacked NCA hashes against the CNMT metadata. Nearly free; mismatches are reported as warnings, and the output is always kept.</string>
-    <string name="settings_decompression_threads">Decompression workers</string>
+    <string name="settings_decompression_threads">Unpacking threads</string>
     <string name="settings_threads_auto">Auto</string>
-    <string name="settings_decompression_threads_desc">Experimental: how many files to unpack in parallel (available only while verification is off). Auto adapts to the core count. This speeds up a queue or folder of several files, not a single large file.</string>
-    <string name="settings_smart_distribution">Smart core distribution</string>
-    <string name="settings_smart_distribution_desc">On big.LITTLE phones, put the largest files on the fast cores and small ones on the slow cores (pinned via CPU affinity), instead of letting a heavy file stall on a slow core. Speeds up a queue or folder of several files; falls back to standard scheduling when the CPU is uniform or affinity is unavailable.</string>
+    <string name="settings_decompression_threads_desc">How many files to unpack in parallel. This speeds up a queue or folder of several files, not a single large file.</string>
+    <string name="settings_thread_screen">Unpacking thread count</string>
+    <string name="settings_thread_screen_summary">%1$s — %2$s</string>
+    <string name="settings_thread_mode">Where the thread count comes from</string>
+    <string name="thread_mode_manual">Manual</string>
+    <string name="thread_mode_half">Half the cores (default)</string>
+    <string name="thread_mode_calibrated">From speed test</string>
+    <string name="settings_thread_mode_desc">Unpacking speed is limited by how fast the storage in this phone accepts writes, and the best thread count differs from device to device. Pick it yourself, or measure it with the real-file test.</string>
+    <string name="settings_speed_test_run">Run test</string>
+    <string name="settings_speed_test_cancel">Cancel</string>
+    <string name="settings_speed_test_starting">Starting the test…</string>
+    <string name="settings_speed_test_progress">Run %1$d of %2$d — %3$s, %4$s MB/s</string>
+    <string name="settings_speed_test_real">Real-file test</string>
+    <string name="settings_speed_test_real_desc">Fully unpacks one NSZ/XCZ you pick, over and over: first with a single thread, then two, up to the core count, then back down again. The output of each run is deleted immediately. Use a 1–2 GB file — the test then takes a couple of minutes, while a larger one drags it out and hammers the storage.</string>
+    <string name="settings_speed_test_suggest">The thread count has not been measured on this device yet. The test picks one to match your storage.</string>
+    <string name="settings_speed_test_failed">The test could not be completed.</string>
+    <string name="settings_speed_test_results">Measured: %1$s (%2$s)</string>
+    <string name="settings_speed_test_result_row">%1$d — %2$s MB/s, score %3$s</string>
+    <string name="settings_speed_test_result_row_noscore">%1$d — %2$s MB/s</string>
+    <string name="settings_speed_test_results_hint">Raw speed is what each run measured; the score compares runs within their own round, which is what the verdict used. Speeds from different tests are only comparable if the storage was equally rested.</string>
+    <string name="settings_calibrated_value">Measured by the test: %1$d</string>
+    <string name="settings_calibrated_none">Not measured yet — using half the cores (%1$d) for now.</string>
+
+    <plurals name="threads">
+        <item quantity="one">%d thread</item>
+        <item quantity="other">%d threads</item>
+    </plurals>
+    <plurals name="threads_half">
+        <item quantity="one">Half the cores in this device — %d thread.</item>
+        <item quantity="other">Half the cores in this device — %d threads.</item>
+    </plurals>
 
     <!-- About screen -->
     <string name="action_about_app">About the app</string>

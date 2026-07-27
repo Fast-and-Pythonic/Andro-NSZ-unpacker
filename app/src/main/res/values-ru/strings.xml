@@ -157,11 +157,43 @@
     <string name="accent_hex_label">Hex (#RRGGBB)</string>
     <string name="settings_verification">Проверка результата</string>
     <string name="settings_verification_desc">Сверять хеши распакованных NCA с метаданными CNMT. Почти бесплатно; несовпадения выводятся как предупреждения, а результат всегда сохраняется.</string>
-    <string name="settings_decompression_threads">Воркеры распаковки</string>
+    <string name="settings_decompression_threads">Потоки распаковки</string>
     <string name="settings_threads_auto">Авто</string>
-    <string name="settings_decompression_threads_desc">Экспериментально: сколько файлов распаковывать параллельно (доступно только при выключенной проверке). «Авто» подстраивается под число ядер. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
-    <string name="settings_smart_distribution">Умное распределение по ядрам</string>
-    <string name="settings_smart_distribution_desc">На big.LITTLE-телефонах крупные файлы идут на быстрые ядра, мелкие — на медленные (с привязкой к ядрам), вместо того чтобы тяжёлый файл застревал на слабом ядре. Ускоряет очередь или папку из нескольких файлов; при однородном CPU или недоступной привязке — обычное планирование.</string>
+    <string name="settings_decompression_threads_desc">Сколько файлов распаковывать параллельно. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
+    <string name="settings_thread_screen">Количество потоков распаковки</string>
+    <string name="settings_thread_screen_summary">%1$s — %2$s</string>
+    <string name="settings_thread_mode">Откуда берётся число потоков</string>
+    <string name="thread_mode_manual">Вручную</string>
+    <string name="thread_mode_half">Половина (дефолт)</string>
+    <string name="thread_mode_calibrated">Из теста скорости</string>
+    <string name="settings_thread_mode_desc">Скорость распаковки ограничена тем, как быстро накопитель этого телефона принимает запись, и оптимальное число потоков у разных устройств разное. Задайте его сами или измерьте тестом на реальном файле.</string>
+    <string name="settings_speed_test_run">Запустить тест</string>
+    <string name="settings_speed_test_cancel">Отменить</string>
+    <string name="settings_speed_test_starting">Тест запускается…</string>
+    <string name="settings_speed_test_progress">Прогон %1$d из %2$d — %3$s, %4$s МБ/с</string>
+    <string name="settings_speed_test_real">Тест на реальном файле</string>
+    <string name="settings_speed_test_real_desc">Полностью распаковывает выбранный NSZ/XCZ снова и снова: сначала в один поток, потом в два и так до числа ядер, затем в обратном порядке. Результат каждого прогона сразу удаляется. Берите файл на 1–2 ГБ: на нём тест занимает пару минут, а файл покрупнее затянет его надолго и сильно нагрузит накопитель.</string>
+    <string name="settings_speed_test_suggest">Число потоков ещё не измерялось на этом устройстве. Тест подберёт его под ваш накопитель.</string>
+    <string name="settings_speed_test_failed">Тест не удалось завершить.</string>
+    <string name="settings_speed_test_results">Измерено: %1$s (%2$s)</string>
+    <string name="settings_speed_test_result_row">%1$d — %2$s МБ/с, счёт %3$s</string>
+    <string name="settings_speed_test_result_row_noscore">%1$d — %2$s МБ/с</string>
+    <string name="settings_speed_test_results_hint">Скорость — это то, что показал сам прогон; счёт сравнивает прогоны внутри их раунда, и именно по нему принято решение. Скорости разных тестов сравнимы, только если накопитель был одинаково отдохнувшим.</string>
+    <string name="settings_calibrated_value">Измерено тестом: %1$d</string>
+    <string name="settings_calibrated_none">Ещё не измерено — пока используется половина ядер (%1$d).</string>
+
+    <plurals name="threads">
+        <item quantity="one">%d поток</item>
+        <item quantity="few">%d потока</item>
+        <item quantity="many">%d потоков</item>
+        <item quantity="other">%d потока</item>
+    </plurals>
+    <plurals name="threads_half">
+        <item quantity="one">Половина ядер этого устройства — %d поток.</item>
+        <item quantity="few">Половина ядер этого устройства — %d потока.</item>
+        <item quantity="many">Половина ядер этого устройства — %d потоков.</item>
+        <item quantity="other">Половина ядер этого устройства — %d потока.</item>
+    </plurals>
 
     <!-- About screen -->
     <string name="action_about_app">О приложении</string>

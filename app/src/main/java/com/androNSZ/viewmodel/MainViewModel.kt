@@ -14,18 +14,20 @@ import com.androNSZ.BuildConfig
 import com.androNSZ.R
 import com.androNSZ.NszConverter
 import com.androNSZ.data.SettingsRepository
-import com.androNSZ.fs.CoreScheduler
 import com.androNSZ.fs.FolderLogWriter
 import com.androNSZ.fs.FolderScanner
 import com.androNSZ.fs.FolderProcessor
 import com.androNSZ.fs.TempFileManager
-import com.androNSZ.util.CpuTopology
 import com.androNSZ.model.*
 import com.androNSZ.nut.KeysManager
 import com.androNSZ.nut.KeysParser
 import com.androNSZ.util.ApkInstaller
+import com.androNSZ.util.BenchSummary
 import com.androNSZ.util.ProgressThrottler
+import com.androNSZ.util.RealFileBenchmark
+import com.androNSZ.util.ThroughputRecorder
 import com.androNSZ.util.UpdateChecker
+import com.androNSZ.util.WorkerPool
 import com.androNSZ.util.getUriSize
 import java.io.File
 import kotlinx.coroutines.Dispatchers
@@ -36,36 +38,56 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlin.time.Duration.Companion.milliseconds
 import kotlinx.coroutines.flow.catch
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Semaphore
-import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * How many files to convert in parallel in batch mode.
+ * Half the cores: the default thread count, and the fallback whenever a mode has
+ * nothing to say.
  *
- * Each file occupies two CPU threads — the producer (zstd + AES decompress) and
- * the async writer (fwrite + SHA-256) — so `cores / 2` parallel files saturate
- * every core. We deliberately keep no cores reserved for system/GUI: measurement
- * showed the extra cores help throughput more than the reservation protects UI.
- *   8 cores -> 4,  6 -> 3,  <=2 -> 1.
+ * Unpacking is **write-bound** (architecture.md A15): the storage write path is the
+ * ceiling, so the best count is a property of the *device's flash*, not of this app —
+ * a budget eMMC plateaus around 2 while UFS keeps scaling. No constant is right
+ * everywhere, which is why [ThreadMode.CALIBRATED] exists; this is what to use until
+ * someone measures.
+ *
+ * Half rather than `cores - 1`: on the one device measured (SM8735 + UFS) everything
+ * from 2 to 8 landed within ~10 % of each other on aggregate throughput, so the exact
+ * value matters far less than not starving the rest of the phone during a long job.
+ * The one contrary observation (N=8 measuring 464 MB/s against 887 at N=4, on a badly
+ * worn flash) is a reason to measure per device, not a reason to pick a different
+ * constant.
  */
-private val AUTO_CONCURRENCY: Int =
-   (Runtime.getRuntime().availableProcessors() / 2).coerceAtLeast(1)
+fun halfConcurrency(cores: Int): Int = (cores / 2).coerceAtLeast(1)
 
 /**
- * Resolve how many files to convert in parallel for a job. Defaults to the
- * core-adaptive [AUTO_CONCURRENCY]. An experimental override (Settings) can raise
- * it up to the full core count (one file per core), but only when verification is
- * OFF — that gate keeps the core-adaptive default whenever CNMT verification runs.
- * `override == 0` means auto.
+ * How many files to convert in parallel, given where the count comes from
+ * ([mode]), the manual slider ([manualThreads], 0 = unset), the test's result
+ * ([calibratedThreads], 0 = never run), the device's [cores] and the number of files
+ * in the job ([queueSize]).
+ *
+ * Pure on purpose — it reads no globals, so every branch is unit-testable. Any source
+ * with nothing to say falls back to [halfConcurrency], so "unset" behaves identically
+ * however it arises: slider at 0, test never run, or the default mode.
  */
-fun resolveConcurrency(verificationEnabled: Boolean, override: Int): Int {
-   if (verificationEnabled) return AUTO_CONCURRENCY
-   val maxCores = Runtime.getRuntime().availableProcessors()
-   return if (override in 1..maxCores) override else AUTO_CONCURRENCY
+fun resolveConcurrency(
+   mode: ThreadMode,
+   manualThreads: Int,
+   calibratedThreads: Int,
+   cores: Int,
+   queueSize: Int
+): Int {
+   val safeCores = cores.coerceAtLeast(1)
+   val half = halfConcurrency(safeCores)
+   val n = when (mode) {
+      ThreadMode.MANUAL -> if (manualThreads in 1..safeCores) manualThreads else half
+      ThreadMode.HALF -> half
+      ThreadMode.CALIBRATED -> if (calibratedThreads in 1..safeCores) calibratedThreads else half
+   }
+   return n.coerceAtMost(queueSize.coerceAtLeast(1)).coerceAtLeast(1)
 }
 
 class MainViewModel : ViewModel() {
@@ -167,13 +189,23 @@ class MainViewModel : ViewModel() {
    var verificationEnabled by mutableStateOf(true)
    // GUI: compact (single-line) file card names + extension in the stats row.
    var compactCardNames by mutableStateOf(false)
-   // Experimental: 0 = auto (core-adaptive), else the number of parallel decompression
-   // workers to use (honored only when verification is off). See resolveConcurrency.
+   // Where the parallel-unpack thread count comes from, and the two values the
+   // non-MANUAL sources supply. See resolveConcurrency / model.ThreadMode.
+   var threadMode by mutableStateOf(ThreadMode.HALF)
+   // MANUAL slider: 0 = fall back to half the cores, else files unpacked at once.
    var decompressionThreads by mutableIntStateOf(0)
-   // Smart core distribution (core-aware scheduler + CPU affinity, A13) — a deferred
-   // experiment, disabled for release. Kept false so the conversion path always takes
-   // the plain Semaphore baseline; the setting is hidden from the UI.
-   var smartDistribution by mutableStateOf(false)
+   // Result of the real-file test, 0 = never run, plus when it was measured.
+   var calibratedThreads by mutableIntStateOf(0)
+   var calibratedAtMillis by mutableLongStateOf(0L)
+   // Real-file test (util/RealFileBenchmark): live per-level progress and the last
+   // outcome. benchFailed distinguishes "not run" from "ran and produced nothing".
+   var benchRunning by mutableStateOf(false)
+   var benchLevel by mutableStateOf<RealFileBenchmark.LevelResult?>(null)
+   var benchFailed by mutableStateOf(false)
+   // Numbers behind the last verdict. Survives a cancelled run and an app restart
+   // (persisted); only ever replaced by a newer completed run.
+   var benchSummary by mutableStateOf<BenchSummary?>(null)
+   private var benchJob: Job? = null
    // Whether the main-screen "update available" banner is shown. The update check
    // itself always runs regardless (so the overflow-menu notification stays
    // accurate) — only the banner is user-disableable.
@@ -227,7 +259,10 @@ class MainViewModel : ViewModel() {
       verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
       compactCardNames = SettingsRepository.getInstance(context).getCompactCardNames()
       decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
-      // smartDistribution stays off (disabled for release) — not loaded from prefs.
+      threadMode = SettingsRepository.getInstance(context).getThreadMode()
+      calibratedThreads = SettingsRepository.getInstance(context).getCalibratedThreads()
+      calibratedAtMillis = SettingsRepository.getInstance(context).getCalibratedAtMillis()
+      benchSummary = SettingsRepository.getInstance(context).getBenchSummary()
 
       val repo = SettingsRepository.getInstance(context)
       showUpdateBanner = repo.getShowUpdateBanner()
@@ -274,9 +309,66 @@ class MainViewModel : ViewModel() {
       SettingsRepository.getInstance(context).saveDecompressionThreads(count)
    }
 
-   fun saveSmartDistribution(context: android.content.Context, enabled: Boolean) {
-      smartDistribution = enabled
-      SettingsRepository.getInstance(context).saveSmartDistribution(enabled)
+   fun saveThreadMode(context: android.content.Context, mode: ThreadMode) {
+      threadMode = mode
+      SettingsRepository.getInstance(context).saveThreadMode(mode)
+   }
+
+   /**
+    * Runs the real-file test on the NSZ/XCZ the user picked (see [RealFileBenchmark])
+    * and stores its verdict as the CALIBRATED value.
+    *
+    * Deliberately does not switch [threadMode]: a user in MANUAL who is curious about
+    * the measurement should not have their choice silently overridden. They see the
+    * result and can switch when they want it applied.
+    *
+    * Blocked while a conversion is running, and conversions are blocked while it
+    * runs, because cancelling it stops *every* in-flight conversion (the cancel epoch
+    * is global — A15).
+    */
+   fun startRealFileBenchmark(context: android.content.Context, sourceUri: Uri) {
+      if (benchRunning || isConverting) return
+      benchRunning = true
+      benchFailed = false
+      benchLevel = null
+      benchJob = viewModelScope.launch {
+         val outcome = RealFileBenchmark.run(context, sourceUri) { level ->
+            viewModelScope.launch(Dispatchers.Main.immediate) { benchLevel = level }
+         }
+         if (outcome != null) {
+            calibratedThreads = outcome.knee
+            calibratedAtMillis = System.currentTimeMillis()
+            val summary = BenchSummary(
+               knee = outcome.knee,
+               levelMBps = outcome.levelMBps,
+               scores = outcome.scores,
+               atMillis = calibratedAtMillis
+            )
+            benchSummary = summary
+            SettingsRepository.getInstance(context).let {
+               it.saveCalibratedThreads(outcome.knee, calibratedAtMillis)
+               it.saveBenchSummary(summary)
+            }
+         } else {
+            benchFailed = true
+         }
+         benchRunning = false
+         benchLevel = null
+      }
+   }
+
+   /**
+    * Stops the test. Cancelling the coroutine is not enough on its own: a level is a
+    * set of whole conversions running in native code, which Kotlin cannot interrupt,
+    * so they would keep writing until they finished. [NszConverter.nativeCancel] bumps
+    * the global cancel epoch and stops them.
+    */
+   fun cancelBenchmark() {
+      runCatching { NszConverter.nativeCancel() }
+      benchJob?.cancel()
+      benchJob = null
+      benchRunning = false
+      benchLevel = null
    }
 
    fun saveShowUpdateBanner(context: android.content.Context, enabled: Boolean) {
@@ -460,12 +552,14 @@ class MainViewModel : ViewModel() {
       crossinline scan: suspend (NszConverter.StatusCallback) -> FolderStructure
    ) {
       viewModelScope.launch {
+         // A scan is its own run: it gets its own number and rotates the folder log.
+         val runId = SettingsRepository.getInstance(context).nextRunId()
+         val writer = FolderLogWriter(context, runId, "folder-scan")
+         folderLogWriter = writer
+         folderLogPath = writer.logFilePath
          try {
             statusMessage = context.getString(R.string.status_scanning_folder)
             statusLog.clear()
-
-            folderLogWriter = FolderLogWriter(context)
-            folderLogPath = folderLogWriter?.logFilePath
 
             val statusCb = object : NszConverter.StatusCallback {
                override fun onStatus(tag: String, msg: String) {
@@ -485,10 +579,15 @@ class MainViewModel : ViewModel() {
             statusMessage = null
          } catch (e: Exception) {
             statusMessage = context.getString(R.string.error_scan_failed, e.message ?: "")
-            viewModelScope.launch(Dispatchers.IO) {
-               folderLogWriter?.writeLog("ERROR", context.getString(R.string.error_scan_failed, e.message ?: ""))
-               folderLogWriter?.close()
+            withContext(NonCancellable + Dispatchers.IO) {
+               runCatching { writer.writeLog("ERROR", context.getString(R.string.error_scan_failed, e.message ?: "")) }
             }
+         } finally {
+            // Close on every path. This used to happen only on error, so a
+            // successful scan leaked its writer and the conversion below then held
+            // the same file open a second time.
+            folderLogWriter = null
+            withContext(NonCancellable + Dispatchers.IO) { runCatching { writer.close() } }
          }
       }
    }
@@ -652,6 +751,9 @@ class MainViewModel : ViewModel() {
 
    fun startBatchConversion(context: android.content.Context) {
       if (fileQueue.isEmpty()) return
+      // A running speed test saturates the write path, and the real-file variant
+      // cancels every in-flight conversion at each block boundary.
+      if (benchRunning) return
 
       isConverting = true
       currentFileIndex = 0
@@ -669,9 +771,14 @@ class MainViewModel : ViewModel() {
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
       val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
       // Configure CNMT verification once for the whole batch (read-only in native
-      // code while files convert). When disabled, skip the post-conversion check too.
+      // code while files convert). The per-file verdict then comes from the engine's
+      // inline VERIFIED/CORRUPTED tags — no separate output re-read pass.
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
-      val verifyKey = if (verificationEnabled) headerKey else null
+      // Native debug log: one per batch, closed when the job completes below.
+      // Opening it per file truncated the shared log for every started file and
+      // let the first finished file close it for all the others.
+      val runId = SettingsRepository.getInstance(context).nextRunId()
+      NszConverter.openJobDebugLog(context, runId, "queue (${fileQueue.size} files)")
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -703,30 +810,39 @@ class MainViewModel : ViewModel() {
 
          // The native work inside convert() runs on Dispatchers.IO, so concurrent
          // flows run on separate threads; we collect on Main to keep state writes safe.
-         val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
-         statusCb.onStatus(
-            "INFO",
-            "Parallelism: $concurrency (verification ${if (verificationEnabled) "on" else "off"})"
+         val cores = Runtime.getRuntime().availableProcessors()
+         val concurrency = resolveConcurrency(
+            threadMode, decompressionThreads, calibratedThreads, cores, fileQueue.size
          )
+         statusCb.onStatus("INFO", "Parallelism: $concurrency (${threadMode.name.lowercase()})")
+         val recorder = ThroughputRecorder.open(context, runId, "queue (${fileQueue.size} files)")
+         val pool = WorkerPool(concurrency) { target, active ->
+            recorder?.setTargetWorkers(target)
+            recorder?.setActiveWorkers(active)
+         }
+         recorder?.setTargetWorkers(pool.target)
+         recorder?.setFilesRemaining(fileQueue.size)
+         recorder?.start(this)
          val perFileDone = LongArray(fileQueue.size)
          val processed = AtomicInteger(0)
          val overallThrottler = ProgressThrottler()
 
          fun emitOverall() {
-            if (batchOverallProgress == null) return
             // fileTotals[i] starts as the compressed input size but is replaced by
             // the (larger) uncompressed total once a file's progress arrives. The
             // denominator must track the same units as perFileDone, otherwise the
             // bar fills to 100% before every file is unpacked.
             val total = fileTotals.sum().coerceAtLeast(1L)
             val done = perFileDone.sum().coerceAtMost(total)
+            // Telemetry tracks the aggregate even for a single file, where there is
+            // no overall bar to draw — hence before the early return.
+            recorder?.setBytes(done)
+            if (batchOverallProgress == null) return
             overallThrottler.sample(done, total)?.let { batchOverallProgress = it }
          }
 
-         // One file's conversion, shared by the core-aware scheduler and the
-         // baseline path. [mask] pins the native decompress to a CPU cluster
-         // (null = no pinning).
-         suspend fun convertOne(i: Int, mask: Long?) {
+         // One file's conversion, run under the Semaphore below.
+         suspend fun convertOne(i: Int) {
             val file = fileQueue[i]
             batchCurrentFileName = file.displayName
             fileQueue[i] = file.copy(
@@ -737,15 +853,15 @@ class MainViewModel : ViewModel() {
             )
             val fileStartMs = System.currentTimeMillis()
             // Captured by convert()'s onVerified below; local to this per-file
-            // coroutine, so it never races with other parallel conversions. XCZ
-            // stays NOT_CHECKED (XCI verification is not implemented).
+            // coroutine, so it never races with other parallel conversions. Both
+            // NSZ and XCZ now report a verdict from their inline hashing tags.
             var verifyStatus = VerifyStatus.NOT_CHECKED
             try {
                // XCZ → XCI, everything else → NSZ → NSP.
                val flow = if (file.displayName.endsWith(".xcz", ignoreCase = true)) {
-                  NszConverter.convertXcz(context, file.uri, verifyKey, outputFolderUri, statusCb, mask)
+                  NszConverter.convertXcz(context, file.uri, outputFolderUri, statusCb, onVerified = { verifyStatus = it })
                } else {
-                  NszConverter.convert(context, file.uri, verifyKey, outputFolderUri, statusCb, mask, onVerified = { verifyStatus = it })
+                  NszConverter.convert(context, file.uri, outputFolderUri, statusCb, onVerified = { verifyStatus = it })
                }
                // NB: no .catch here — a failure must propagate to the surrounding
                // try/catch so the file stays Failed. Swallowing it with .catch lets
@@ -777,38 +893,16 @@ class MainViewModel : ViewModel() {
                activeFileProgress.remove(i)
                perFileDone[i] = fileTotals[i]
                batchProcessedFiles = processed.incrementAndGet()
+               recorder?.setFilesRemaining(fileQueue.size - processed.get())
             }
          }
 
-         // Core-aware scheduling only helps on a heterogeneous CPU with working
-         // affinity; otherwise it degrades to order-only, which measured *worse*
-         // than the baseline — so fall back to natural order in that case.
-         val topology = CpuTopology.detect()
-         val coreAware = smartDistribution && topology.isHeterogeneous &&
-            NszConverter.affinitySupported()
-         if (coreAware) {
-            val coreSpecs = topology.cores.sortedByDescending { it.capacity }
-               .take(concurrency)
-               .map { CoreScheduler.CoreSpec(it.id, topology.speedOf(it.id), topology.clusterMask(it.id)) }
-            statusCb.onStatus("INFO", "Load distribution: core-aware (affinity on)")
-            statusCb.onStatus("INFO", "Cores: " +
-               coreSpecs.joinToString { "cpu${it.coreId}×%.2f".format(it.speed) })
-            coroutineScope {
-               CoreScheduler.run(fileQueue.indices.toList(), { fileSizes[it] }, coreSpecs) { i, mask ->
-                  convertOne(i, mask)
-               }
-            }
-         } else {
-            if (smartDistribution) {
-               statusCb.onStatus("INFO", "Load distribution: baseline (no heterogeneity/affinity)")
-            }
-            val sem = Semaphore(concurrency)
-            coroutineScope {
-               fileQueue.indices.map { i ->
-                  async { sem.withPermit { convertOne(i, null) } }
-               }.awaitAll()
-            }
+         coroutineScope {
+            fileQueue.indices.map { i ->
+               async { pool.withWorker { convertOne(i) } }
+            }.awaitAll()
          }
+         recorder?.stop()
 
          // All files are unpacked: pin the overall bar to 100% (throttling can
          // otherwise leave the last emit a hair below full).
@@ -846,14 +940,19 @@ class MainViewModel : ViewModel() {
             }
          }
          isSuccess = failed == 0 && completed == fileQueue.size
+      }.invokeOnCompletion {
+         // Fires on success, failure and cancellation alike. A one-liner here
+         // instead of wrapping the whole body in try/finally: closing the log is
+         // a quick fclose, and this keeps the batch body untouched.
+         runCatching { NszConverter.closeJobDebugLog() }
       }
    }
 
    fun startFolderConversion(context: android.content.Context) =
-      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+      runFolderStyleConversion(context) { structure, pool, recorder, progressCallback, statusCallback, fileEventCallback ->
          FolderProcessor.processFolder(
-            context, structure, verifyKey, outputFolderUri, concurrency,
-            smartDistribution, progressCallback, statusCallback, fileEventCallback
+            context, structure, outputFolderUri, pool, recorder,
+            progressCallback, statusCallback, fileEventCallback
          )
       }
 
@@ -865,10 +964,10 @@ class MainViewModel : ViewModel() {
     * built by [rebuildCombinedStructure].
     */
    fun startCombinedConversion(context: android.content.Context) =
-      runFolderStyleConversion(context) { structure, verifyKey, concurrency, progressCallback, statusCallback, fileEventCallback ->
+      runFolderStyleConversion(context) { structure, pool, recorder, progressCallback, statusCallback, fileEventCallback ->
          FolderProcessor.processCombined(
-            context, structure, verifyKey, outputFolderUri, concurrency,
-            smartDistribution, progressCallback, statusCallback, fileEventCallback
+            context, structure, outputFolderUri, pool, recorder,
+            progressCallback, statusCallback, fileEventCallback
          )
       }
 
@@ -882,14 +981,16 @@ class MainViewModel : ViewModel() {
       context: android.content.Context,
       process: suspend (
          structure: FolderStructure,
-         verifyKey: ByteArray?,
-         concurrency: Int,
+         pool: WorkerPool,
+         recorder: ThroughputRecorder?,
          progressCallback: (FolderProgressUpdate) -> Unit,
          statusCallback: NszConverter.StatusCallback,
          fileEventCallback: (FolderFileEvent) -> Unit
       ) -> Result<Pair<Uri, FolderConversionSummary>>
    ) {
       val structure = folderStructure ?: return
+      // See startBatchConversion: a speed test and a conversion must not overlap.
+      if (benchRunning) return
 
       isConverting = true
       statusLog.clear()
@@ -906,14 +1007,22 @@ class MainViewModel : ViewModel() {
       buildFolderFileEntries(structure)
       startTimer()
 
-      folderLogWriter = FolderLogWriter(context)
+      // One run number for the whole run: both this Kotlin log and the native one
+      // below carry it, which is what ties their two files together.
+      val runId = SettingsRepository.getInstance(context).nextRunId()
+      val runMode = if (conversionMode is ConversionMode.Combined) "combined" else "folder"
+      val runLabel = "$runMode (${countAllFiles(structure.allFiles)} files)"
+      folderLogWriter = FolderLogWriter(context, runId, runLabel)
       folderLogPath = folderLogWriter?.logFilePath
 
       val headerKey = KeysParser.parseHeaderKey(KeysManager.keysFile(context))
       val keyAreaKeys = KeysParser.parseKeyAreaKeys(KeysManager.keysFile(context))
       // Configure CNMT verification once for the whole run (see startBatchConversion).
       NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)
-      val verifyKey = if (verificationEnabled) headerKey else null
+      // Native debug log for the whole run, closed in the finally below. Folder and
+      // combined mode never opened it before (FolderProcessor calls native directly),
+      // so these modes had no native diagnostics at all — only logcat.
+      NszConverter.openJobDebugLog(context, runId, runLabel)
 
       val statusCb = object : NszConverter.StatusCallback {
          override fun onStatus(tag: String, msg: String) {
@@ -929,14 +1038,29 @@ class MainViewModel : ViewModel() {
          }
       }
 
-      val concurrency = resolveConcurrency(verificationEnabled, decompressionThreads)
+      val fileCount = countAllFiles(structure.allFiles)
+      val cores = Runtime.getRuntime().availableProcessors()
+      val concurrency = resolveConcurrency(
+         threadMode, decompressionThreads, calibratedThreads, cores, fileCount
+      )
+      // FolderProcessor logs the count itself, but not where it came from; without
+      // this line a log can't tell a calibrated 4 from a manually pinned one.
+      statusCb.onStatus("INFO", "Worker count source: ${threadMode.name.lowercase()}")
+      val recorder = ThroughputRecorder.open(context, runId, runLabel)
+      val pool = WorkerPool(concurrency) { target, active ->
+         recorder?.setTargetWorkers(target)
+         recorder?.setActiveWorkers(active)
+      }
+      recorder?.setTargetWorkers(pool.target)
+      recorder?.setFilesRemaining(fileCount)
 
       viewModelScope.launch {
+         recorder?.start(this)
          try {
             val result = process(
                structure,
-               verifyKey,
-               concurrency,
+               pool,
+               recorder,
                { update ->
                   folderOverallProgress = update.overallProgress
                   folderActiveFiles = update.activeFiles
@@ -999,7 +1123,13 @@ class MainViewModel : ViewModel() {
          } finally {
             folderActiveFiles = emptyList()
             stopTimer()
-            withContext(Dispatchers.IO) { TempFileManager.cleanupManagedCache(context) }
+            recorder?.stop()
+            // NonCancellable: if the scope was cancelled, a plain withContext would
+            // throw here and skip the cleanup entirely, leaking temp files.
+            withContext(NonCancellable + Dispatchers.IO) {
+               runCatching { NszConverter.closeJobDebugLog() }
+               TempFileManager.cleanupManagedCache(context)
+            }
          }
       }
    }

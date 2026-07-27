@@ -39,7 +39,6 @@ AndroNSZ/
     │   ├── pfs0.c / hfs0.c       # NSP/NSZ and XCI/XCZ containers
     │   ├── aes_ctr.c / aes_xts.c # AES-128 CTR (sections) and XTS (NCA header)
     │   ├── sha256.c              # SHA-256 (hardware + software)
-    │   ├── nca_verifier.c        # NCA verification inside a finished NSP
     │   ├── nsz_debug.c           # log to file + logcat
     │   └── nsz_types.h           # error codes, callback types
     └── java/com/androNSZ/        # === Kotlin layer ===
@@ -50,7 +49,7 @@ AndroNSZ/
         ├── model/                # data classes and sealed state classes
         ├── nut/                  # KeysManager / KeysParser (prod.keys)
         ├── fs/                   # folder scanners (SAF + raw FS), FolderProcessor, temp, logs
-        ├── util/                 # FileUtils/FormatUtils, StoragePermission (all-files access)
+        ├── util/                 # FileUtils/FormatUtils, StoragePermission, logs, parallelism (A07)
         ├── ui/                   # screen/ (incl. FilePickerScreen) + conversion/ + components/ + theme/
         └── viewmodel/            # MainViewModel — all state and logic
 ```
@@ -64,13 +63,17 @@ Per-module details — in [subsystems/kotlin-layer.md](subsystems/kotlin-layer.m
 - All three conversion modes (single file, queue, folder), NSZ→NSP and XCZ→XCI.
 - Hardware AES-CTR and SHA-256 (ARMv8 crypto extensions) with a software fallback.
 - No-copy input reading via `fd:N` with a temp-copy fallback for FUSE providers.
-- Async output writing (`async_writer`), zstd built with `-O3`, ThinLTO.
-- Core-adaptive batch/folder parallelism (`resolveConcurrency` → auto 1..3);
-  overridable up to the core count via a Settings slider when verification is off
-  (an experiment to measure core scaling — see [architecture.md](architecture.md) A07).
+- Async output writing (`async_writer`) with page-cache pacing, zstd built with `-O3`, ThinLTO.
+- Batch/folder parallelism defaults to **half the cores** and can be **measured per
+  device**: unpacking is **write-bound**, so where the storage saturates differs from phone
+  to phone ([architecture.md](architecture.md) A07/A15). A dedicated settings screen offers
+  three sources — a manual slider, the half-cores default, or a test that unpacks a
+  user-picked file at every thread count — plus 10 Hz throughput telemetry in
+  `nsz_throughput.csv`.
 - EN/RU localization, in-app language selection, output folder selection (SAF).
-- SHA-256 verification of the finished NCA/NSP (non-fatal — see
-  [architecture.md](architecture.md) A12; needs header_key in prod.keys).
+- SHA-256 verification of every unpacked NCA, computed inline during decompression
+  (non-fatal, no output re-read — see [architecture.md](architecture.md) A12; needs
+  header_key in prod.keys).
 
 **With caveats / deferred:** see [status.md](status.md).
 

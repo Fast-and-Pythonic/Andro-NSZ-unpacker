@@ -14,6 +14,8 @@ import com.androNSZ.model.AccentMode
 import com.androNSZ.model.ReleaseInfo
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
+import com.androNSZ.model.ThreadMode
+import com.androNSZ.util.BenchSummary
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
 
@@ -42,11 +44,17 @@ class SettingsRepository private constructor(private val context: Context) {
       private const val ACCENT_COLOR_KEY = "accent_color"
       private const val VERIFICATION_KEY = "verification_enabled"
       private const val DECOMPRESSION_THREADS_KEY = "decompression_threads"
-      private const val SMART_DISTRIBUTION_KEY = "smart_distribution"
+      private const val THREAD_MODE_KEY = "thread_mode"
+      private const val CALIBRATED_THREADS_KEY = "calibrated_threads"
+      private const val CALIBRATED_AT_KEY = "calibrated_at_ms"
+      private const val BENCH_SUMMARY_KEY = "bench_summary"
       private const val COMPACT_CARD_NAMES_KEY = "compact_card_names"
       private const val SHOW_UPDATE_BANNER_KEY = "show_update_banner"
       private const val LAST_UPDATE_CHECK_KEY = "last_update_check_ms"
       private const val HIDDEN_BANNER_VERSION_KEY = "hidden_banner_version"
+      // Monotonic counter stamped into every log file's header, so a log can be
+      // told apart from the previous run's at a glance (see util/LogFiles).
+      private const val RUN_COUNTER_KEY = "run_counter"
       // The last known available release, cached so the main-screen banner
       // survives app restarts (and the once-a-day check throttle).
       private const val AVAILABLE_VERSION_KEY = "available_update_version"
@@ -108,22 +116,57 @@ class SettingsRepository private constructor(private val context: Context) {
       langPrefs.edit().putBoolean(VERIFICATION_KEY, enabled).apply()
    }
 
-   // Experimental override for the decompression parallelism (number of files
-   // converted at once). 0 = auto (the core-adaptive 1..3 formula). Only honored
-   // when verification is OFF — see MainViewModel. Read synchronously at job start.
+   // The MANUAL-mode worker count (number of files converted at once). 0 = fall
+   // back to the core heuristic. Only consulted in ThreadMode.MANUAL; see
+   // MainViewModel.resolveConcurrency. Read synchronously at job start.
    fun getDecompressionThreads(): Int = langPrefs.getInt(DECOMPRESSION_THREADS_KEY, 0)
 
    fun saveDecompressionThreads(count: Int) {
       langPrefs.edit().putInt(DECOMPRESSION_THREADS_KEY, count).apply()
    }
 
-   // Smart load distribution: dispatch the largest files first (LPT), so a heavy
-   // file never trails the batch on a slow core. Default ON — it's strictly better;
-   // the toggle exists to A/B measure it (and will later also gate core affinity).
-   fun getSmartDistribution(): Boolean = langPrefs.getBoolean(SMART_DISTRIBUTION_KEY, true)
+   // Where the worker count comes from. Default CALIBRATED: before the speed test
+   // has ever been run it behaves as the plain core heuristic, and afterwards the
+   // measured value applies without the user having to switch anything.
+   // HALF is both the default and the landing spot for anything unrecognised, which
+   // is what silently migrates the removed ADAPTIVE mode on an app update.
+   fun getThreadMode(): ThreadMode {
+      val stored = langPrefs.getString(THREAD_MODE_KEY, ThreadMode.HALF.name)
+         ?: ThreadMode.HALF.name
+      return try {
+         ThreadMode.valueOf(stored)
+      } catch (e: IllegalArgumentException) {
+         ThreadMode.HALF
+      }
+   }
 
-   fun saveSmartDistribution(enabled: Boolean) {
-      langPrefs.edit().putBoolean(SMART_DISTRIBUTION_KEY, enabled).apply()
+   fun saveThreadMode(mode: ThreadMode) {
+      langPrefs.edit().putString(THREAD_MODE_KEY, mode.name).apply()
+   }
+
+   // Worker count found by the Settings speed test, 0 = never calibrated. Stored
+   // with its timestamp because the result ages: it is a property of the storage,
+   // and a flash that has filled up behaves differently from a fresh one.
+   fun getCalibratedThreads(): Int = langPrefs.getInt(CALIBRATED_THREADS_KEY, 0)
+
+   fun getCalibratedAtMillis(): Long = langPrefs.getLong(CALIBRATED_AT_KEY, 0L)
+
+   fun saveCalibratedThreads(count: Int, atMillis: Long = System.currentTimeMillis()) {
+      langPrefs.edit()
+         .putInt(CALIBRATED_THREADS_KEY, count)
+         .putLong(CALIBRATED_AT_KEY, atMillis)
+         .apply()
+   }
+
+   // Per-level numbers behind the calibrated value, so the verdict stays checkable
+   // rather than being a bare count. Null until the test has completed once.
+   fun getBenchSummary(): BenchSummary? {
+      val raw = langPrefs.getString(BENCH_SUMMARY_KEY, null) ?: return null
+      return BenchSummary.decode(raw)
+   }
+
+   fun saveBenchSummary(summary: BenchSummary) {
+      langPrefs.edit().putString(BENCH_SUMMARY_KEY, summary.encode()).apply()
    }
 
    // GUI: render each file card's name on a single line and show its extension
@@ -148,6 +191,24 @@ class SettingsRepository private constructor(private val context: Context) {
    fun saveLastUpdateCheckMillis(millis: Long) {
       langPrefs.edit().putLong(LAST_UPDATE_CHECK_KEY, millis).apply()
    }
+
+   /**
+    * Allocates the next run number, stamped into every log file's header so one
+    * run's logs can never be mistaken for the previous run's.
+    *
+    * `commit()` rather than `apply()`, and `@Synchronized`: a folder scan and the
+    * conversion that follows it ask for a number back-to-back, and a lost update
+    * would hand both the same one.
+    */
+   @Synchronized
+   fun nextRunId(): Int {
+      val next = langPrefs.getInt(RUN_COUNTER_KEY, 0) + 1
+      langPrefs.edit().putInt(RUN_COUNTER_KEY, next).commit()
+      return next
+   }
+
+   /** The most recently allocated run number, without allocating a new one. */
+   fun lastRunId(): Int = langPrefs.getInt(RUN_COUNTER_KEY, 0)
 
    // Version whose banner the user tapped "Hide" on; the main-screen banner stays
    // hidden for it (a newer version un-hides it). The menu notification ignores this.

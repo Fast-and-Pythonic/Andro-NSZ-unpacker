@@ -14,17 +14,15 @@ Python reference nicoboss/nsz.
 | `jni_bridge.c` | JNI entry points; string/callback marshaling; attaching the thread to the JVM |
 | `ncz_engine.c` | Orchestrator: `ncz_convert_nsz_to_nsp`, `ncz_convert_xcz_to_xci`, cancel, `ncz_error_string` |
 | `ncz.c` | NCZ header parser: sections (`NczSection`), blocks (`NczBlockHeader`), FakeSection (the gap between the NCA header and the first section) |
-| `ncz_decompress.c` | Decompression: `BlockReader` (block-wise zstd with a cache) and `SolidReader` (streaming `ZSTD_DStream`). AES-CTR only for crypto_type 3/4; FakeSection (type 1) — plaintext. Feeds SHA-256 |
+| `ncz_decompress.c` | Decompression: `BlockReader` (block-wise zstd with a cache) and `SolidReader` (streaming `ZSTD_DStream`). Solid input is read in `NCZ_IN_BUF_SIZE` (1 MiB) freads (a user-space prefetch thread was measured and rejected — A15); the write loop uses `NCZ_CHUNK_SIZE` (256 KiB) chunks + a `NCZ_WRITER_BUFFERS` async pool. AES-CTR only for crypto_type 3/4; FakeSection (type 1) — plaintext. Feeds SHA-256. See [../architecture.md](../architecture.md) A15 |
 | `async_writer.c` | Background write+hashing thread (see [../architecture.md](../architecture.md) A04) |
 | `pfs0.c` | PFS0 container (NSP/NSZ). Entry — 24 bytes. `pfs0_parse`, `pfs0_write_header` (.ncz→.nca, size recompute) |
 | `hfs0.c` | HFS0 container (XCI/XCZ). Entry — 64 bytes (SHA-256/`hashed_region_size` zeroed, as in the reference). Partition header aligned to `0x8000` (gap in `entry.offset` + zeros, raw strtab); `hfs0_parse_at(fp, offset)` — streaming parse of a nested partition; `hfs0_computed_header_size()` → `0x8000`. See [../architecture.md](../architecture.md) A11 |
 | `aes_ctr.c` | AES-128-CTR for NCA sections. Counter: `nonce[0:8] \|\| (offset>>4)` big-endian. Hardware + software (A02) |
 | `aes_xts.c` | AES-128-XTS for decrypting the NCA header (0x200 sectors, IEEE 1619) |
 | `sha256.c` | SHA-256: one-shot `sha256()` and streaming (`init/update/final`). Hardware + software (A03) |
-| `nca_verifier.c` | `nca_verify_nsp()`: AES-XTS of the header, "NCA3" magic check, SHA-256 of sections |
 | `nca_cnmt.c` | CNMT verification: extract full expected NCA hashes from the input's META NCA (`CnmtHashSet`); global config `nca_verify_config_set`. See [../architecture.md](../architecture.md) A12 |
-| `cpu_affinity.c` | Thread CPU affinity (`sched_setaffinity`) for the core-aware scheduler; pins the current thread to a big/little cluster mask and restores it. Android-only. See [../architecture.md](../architecture.md) A13 |
-| `nsz_debug.c` | `dbg_open/close/log/hex` — log to file + logcat, millisecond timestamps |
+| `nsz_debug.c` | `dbg_open(path, banner)/close/log/hex` — log to file + logcat, millisecond timestamps. Open/close are refcounted so parallel conversions sharing the one log file can't truncate or close it under each other; the caller's `banner` (run number + rules) is written first (A16) |
 | `nsz_types.h` | Error codes, callback types, constants (`NCA_HEADER_SIZE=0x4000`) |
 
 ## Dependency graph (C)
@@ -38,11 +36,6 @@ jni_bridge.c
          ├─ aes_ctr.c
          ├─ sha256.c
          └─ async_writer.c
-
-nca_verifier.c      (separate entry point via JNI)
- ├─ pfs0.c
- ├─ aes_xts.c
- └─ sha256.c
 
 nca_cnmt.c          (called by ncz_engine.c; config set via JNI)
  ├─ aes_xts.c        (NCA header)
@@ -96,11 +89,9 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 |---------------|-------------|
 | `nativeConvert(input, output, progressCb, statusCb): Int` | NSZ → NSP |
 | `nativeConvertXcz(input, output, progressCb, statusCb): Int` | XCZ → XCI |
-| `nativeVerifyNsp(nspPath, headerKey): String?` | NCA verification in an NSP (structural: section-header hashes) |
 | `nativeSetVerification(enabled, headerKey, keyAreaKeys)` | Set CNMT verification config once before a batch (global, read-only during conversion — [../gotchas.md](../gotchas.md) G11) |
-| `nativeSetThreadAffinity(mask): Int` / `nativeClearThreadAffinity()` | Pin/unpin the calling (IO) thread to a CPU cluster for the core-aware scheduler (A13). Returns 0 or -errno |
-| `nativeSetDebugLog(path)` / `nativeCloseDebugLog()` | Debug log |
-| `nativeCancel()` | Cancellation request |
+| `nativeSetDebugLog(path, banner)` / `nativeCloseDebugLog()` | Debug log. **Reference counted and opened once per job**, not per file — see [../architecture.md](../architecture.md) A16. `banner` is optional header text (run number + logging rules, built by `util/LogFiles.kt`) printed before the engine's own header lines; only the outermost open writes it. Kotlin wraps them as `NszConverter.openJobDebugLog/closeJobDebugLog`; `nativeSetDebugLog(null, null)` force-closes |
+| `nativeCancel()` | Cancellation request (bumps the global cancel epoch — cancels every in-flight conversion; see A15) |
 | `nativeErrorString(code): String` | Error code → text |
 
 `input` accepts a plain path, `"file://"`, or `"fd:N"` (no-copy, see
@@ -109,10 +100,16 @@ Signatures — in `NszConverter.kt` (`native*`) ↔ `jni_bridge.c`.
 **Callbacks:**
 - `ProgressCallback.onProgress(done, total)` — bytes of decompressed output.
 - `StatusCallback.onStatus(tag, msg)` — structured messages. Tags (native):
-  `OPEN`, `EXISTS`, `HEAD`, `VERIFY`, `NCA_HASH`, `VERIFIED`, `WARN`, `PATH`, `OK`,
-  `SUCCESS`, `CANCELLED`, `ERROR`. Kotlin additionally uses `FILE_START`, `FOLDER`,
+  `OPEN`, `EXISTS`, `HEAD`, `VERIFY`, `NCA_HASH`, `VERIFIED`, `CORRUPTED`, `WARN`, `PATH`,
+  `OK`, `SUCCESS`, `CANCELLED`, `ERROR`. Kotlin additionally uses `FILE_START`, `FOLDER`,
   `NSZ`, `INFO`. (`VERIFY` = a verification-mode summary line, e.g. "CNMT verification:
   N expected hashes".)
+- **`VERIFIED` / `CORRUPTED` are the verification contract.** They are emitted per NCA by
+  `report_hash_result` and are how the Kotlin layer derives each file's `VerifyStatus`
+  (there is no post-conversion re-read pass any more — [../architecture.md](../architecture.md)
+  A12). `CORRUPTED` accompanies the human-readable `WARN` on a mismatch and is **non-fatal**
+  (output kept). Don't rename or drop these tags without updating `NszConverter.VerifyTracker`
+  and `FolderProcessor.convertDirect`; the CLI's `--verify` exit status also keys off `CORRUPTED`.
 
 ## Error codes (`nsz_types.h`)
 

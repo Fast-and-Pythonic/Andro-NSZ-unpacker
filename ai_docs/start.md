@@ -31,12 +31,20 @@ via JNI. A port of the Python reference [nicoboss/nsz](https://github.com/nicobo
 
 ## 3 facts to know up front
 
-1. **Performance is already squeezed** and shipping in `stable`: hardware AES/SHA,
-   no-copy I/O via `fd:N`, an async writer, zstd `-O3`, core-adaptive batch
-   parallelism. Details and rationale — `architecture.md`. Don't "re-optimize" blindly.
-2. **Verification is non-fatal.** After conversion the NCA hash is compared, but a
-   mismatch only warns (`WARN`, output kept) — it no longer deletes the output. The
-   filename content-id is only half the NCA hash, so a mismatch isn't authoritative;
-   see `architecture.md` A12 and the verification roadmap in `status.md`.
+1. **Performance is already squeezed, and it is WRITE-bound.** Hardware AES/SHA, no-copy
+   I/O via `fd:N`, an async writer with page-cache pacing, zstd `-O3`. Measured on the
+   reference phone: decompression reaches ~2400 MB/s but the flash accepts only
+   ~1000 MB/s (and ~450 once its SLC cache is spent). How many files unpack in parallel is
+   therefore a property of the *device*, and the app can measure it (`architecture.md`
+   A07 — default half the cores, a manual slider, or a real-file test). Three rules that
+   are easy to get backwards: in parallel mode **only the aggregate matters**, never
+   per-file speed; any comparison of thread counts within one session is biased by
+   measurement order; and a write benchmark that does not force durability measures the
+   page cache, not the flash. Read `architecture.md` A15 + `gotchas.md` **G17, G18 and
+   G20** *before* touching anything perf-related.
+2. **Verification is non-fatal and inline.** Every unpacked NCA's SHA-256 is checked
+   against the CNMT *during* decompression (no output re-read); a mismatch only warns
+   (`WARN` + a `CORRUPTED` tag, output kept). The filename content-id fallback is only half
+   the NCA hash, so a mismatch there isn't authoritative; see `architecture.md` A12.
 3. **Branches:** `stable` (working), `dev`, `block-parallel-wip` (a deferred
    block-parallelism experiment in C — currently broken, see `status.md`).

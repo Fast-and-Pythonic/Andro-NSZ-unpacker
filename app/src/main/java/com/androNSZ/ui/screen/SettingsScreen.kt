@@ -16,14 +16,19 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import com.androNSZ.R
 import com.androNSZ.model.AccentMode
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
+import com.androNSZ.model.ThreadMode
 import com.androNSZ.ui.components.ColorWheelPicker
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
+import com.androNSZ.ui.components.ExpandableDescription
+import java.text.DateFormat
+import java.util.Date
 import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -41,9 +46,10 @@ fun SettingsScreen(
    onAccentColorChange: (Int) -> Unit,
    currentVerification: Boolean,
    onVerificationChange: (Boolean) -> Unit,
-   currentDecompressionThreads: Int,
-   maxThreads: Int,
-   onDecompressionThreadsChange: (Int) -> Unit,
+   currentThreadMode: ThreadMode,
+   // What a job would actually use right now, for the summary line under the button.
+   currentThreads: Int,
+   onOpenThreadSettings: () -> Unit,
    currentShowUpdateBanner: Boolean,
    onShowUpdateBannerChange: (Boolean) -> Unit,
    onBack: () -> Unit
@@ -439,44 +445,31 @@ fun SettingsScreen(
                      onCheckedChange = onVerificationChange
                   )
                }
-               Text(
-                  text = stringResource(R.string.settings_verification_desc),
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+               ExpandableDescription(stringResource(R.string.settings_verification_desc))
 
-               // Experimental decompression-parallelism control, only meaningful
-               // (and thus only shown) while verification is off.
-               if (!currentVerification) {
-                  Spacer(modifier = Modifier.height(4.dp))
-                  Row(
-                     modifier = Modifier.fillMaxWidth(),
-                     horizontalArrangement = Arrangement.SpaceBetween,
-                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-                  ) {
-                     Text(
-                        text = stringResource(R.string.settings_decompression_threads),
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                     )
-                     Text(
-                        text = if (currentDecompressionThreads <= 0) {
-                           stringResource(R.string.settings_threads_auto)
-                        } else {
-                           currentDecompressionThreads.toString()
-                        },
-                        style = MaterialTheme.typography.titleMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                     )
-                  }
-                  Slider(
-                     value = currentDecompressionThreads.coerceIn(0, maxThreads).toFloat(),
-                     onValueChange = { onDecompressionThreadsChange(it.roundToInt()) },
-                     valueRange = 0f..maxThreads.toFloat(),
-                     steps = (maxThreads - 1).coerceAtLeast(0)
-                  )
+               // Everything about parallel unpacking lives on its own screen: it is
+               // one setting to most users and a measurement rig to the rest, and
+               // mixing the two buried the rest of this screen.
+               Spacer(modifier = Modifier.height(4.dp))
+               Column(
+                  modifier = Modifier
+                     .fillMaxWidth()
+                     .clickable { onOpenThreadSettings() }
+               ) {
                   Text(
-                     text = stringResource(R.string.settings_decompression_threads_desc),
+                     text = stringResource(R.string.settings_thread_screen),
+                     style = MaterialTheme.typography.titleMedium,
+                     color = MaterialTheme.colorScheme.onSurfaceVariant
+                  )
+                  // Names the mode *and* what it currently yields — the mode alone
+                  // does not answer "so how many is that?", which is the question
+                  // someone opening this screen actually has.
+                  Text(
+                     text = stringResource(
+                        R.string.settings_thread_screen_summary,
+                        threadModeLabel(currentThreadMode),
+                        pluralStringResource(R.plurals.threads, currentThreads, currentThreads)
+                     ),
                      style = MaterialTheme.typography.bodySmall,
                      color = MaterialTheme.colorScheme.onSurfaceVariant
                   )
@@ -513,15 +506,19 @@ fun SettingsScreen(
                      onCheckedChange = onShowUpdateBannerChange
                   )
                }
-               Text(
-                  text = stringResource(R.string.settings_show_update_banner_desc),
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+               ExpandableDescription(stringResource(R.string.settings_show_update_banner_desc))
             }
          }
       }
    }
+}
+
+/** Localized label for a thread-count source. Shared with [ThreadSettingsScreen]. */
+@Composable
+fun threadModeLabel(mode: ThreadMode): String = when (mode) {
+   ThreadMode.MANUAL -> stringResource(R.string.thread_mode_manual)
+   ThreadMode.HALF -> stringResource(R.string.thread_mode_half)
+   ThreadMode.CALIBRATED -> stringResource(R.string.thread_mode_calibrated)
 }
 
 /** Format the RGB part of an ARGB color as `#RRGGBB`. */

@@ -9,7 +9,7 @@ hosts `AndroNSZApp`. State and orchestration — in `MainViewModel`.
 **screen stack** in `MainViewModel`: `_screenStack` (`mutableStateListOf`, starting
 at `Screen.ModeSelection`), `navigateTo(screen)` pushes, `navigateBack()` pops (not
 below one). Screens (`model/Screen.kt`): `ModeSelection`, `Conversion`, `About`,
-`Settings`, `FilePicker(mode)` (a data class carrying `PickerMode`).
+`Settings`, `ThreadSettings`, `FilePicker(mode)` (a data class carrying `PickerMode`).
 
 `MainActivity.attachBaseContext()` synchronously reads the language and wraps the
 context with the right `Locale` (per-app language, see
@@ -32,8 +32,14 @@ context with the right `Locale` (per-app language, see
 - **ConversionScreen.kt** — renders by `conversionMode`: `SingleFilesUI` (SingleFiles),
   `FolderModeUI` (FolderMode) or `CombinedModeUI` (Combined). The `None` branch is
   unreachable (on this screen) and empty — needed only for an exhaustive `when`.
-- **SettingsScreen.kt** — stats format (`StatsFormat`) and language
-  (System/English/Russian; change → `recreate()`).
+- **SettingsScreen.kt** — stats format (`StatsFormat`), language (System/English/Russian;
+  change → `recreate()`), verification toggle, update banner, and a button into
+  `ThreadSettings` whose subtitle is computed with the same `resolveConcurrency` a job
+  uses, so it cannot drift from reality.
+- **ThreadSettingsScreen.kt** — everything about parallel unpacking: the `ThreadMode`
+  dropdown, the manual slider, the real-file test with its per-level results table. Split
+  off because it serves two audiences — one number for most users, a measurement rig for
+  the rest.
 - **AboutScreen.kt** — app information.
 
 ## Conversion modes (`ui/conversion/`)
@@ -88,17 +94,21 @@ A singleton over `libAndroNSZ`. `convert()` (NSZ→NSP) and `convertXcz()` (XCZ�
    `/proc/self/fd/<fd>`.
 3. `nativeConvert`/`nativeConvertXcz`, progress is streamed via `callbackFlow`
    (throttling — A09).
-4. Verify via `nativeVerifyNsp` (if header_key is present). CNMT verification proper runs
-   **inside** the native engine and is configured once per job (see MainViewModel below);
-   it isn't a separate Kotlin call.
+4. Derive the verify verdict from the engine's **inline** hashing tags: a per-call
+   `VerifyTracker` (a `StatusCallback` decorator) watches for `VERIFIED` / `CORRUPTED`
+   and reports `VerifyStatus` via `onVerified`. There is **no** post-conversion
+   output re-read any more — that pass cost a full re-read of the output, which is
+   expensive on write-bound storage (A15), and was deleted along with `nca_verifier.c`.
+   Both `convert` and `convertXcz` report a verdict.
 5. Temp cleanup; on a FUSE failure — fall back to a temp copy and retry (G03).
 
 `startBatchConversion`/`startFolderConversion` in **MainViewModel** parse the keys
 (`KeysParser.parseHeaderKey` + `parseKeyAreaKeys`) and call
 `NszConverter.nativeSetVerification(verificationEnabled, headerKey, keyAreaKeys)` **once**
-before launching the job (global native config, read-only during conversion — G11). When
-the toggle is off, the post-conversion `nativeVerifyNsp` is skipped too (a null
-`verifyKey` is passed into `convert`/`convertXcz`).
+before launching the job (global native config, read-only during conversion — G11). That
+single call is the only place keys are passed; `convert`/`convertXcz`/`convertDirect` no
+longer take a `headerKey`/`verifyKey` parameter. With the toggle off nothing is hashed, so
+the verdict is `NOT_CHECKED`.
 
 ## Other modules
 
@@ -123,23 +133,47 @@ the toggle is off, the post-conversion `nativeVerifyNsp` is skipped too (a null
   `FolderProcessor` (NSZ→NSP, XCZ→XCI, everything else → copy; preserves structure,
   continues on errors). Since 2026-06-22 it mirrors the "new" file-mode pipeline: phase 1
   builds the output-folder tree and a flat `WorkItem` list; phase 2 runs files in parallel
-  via `Semaphore(FOLDER_CONCURRENCY)`. Phase 2 is factored into the private `executePlan`,
+  via the caller's `WorkerPool` (A07). Phase 2 is factored into the private `executePlan`,
   shared by `processFolder` (wraps everything in one `<name>_unpacked` folder) and
   `processCombined` (combined mode: plants the top level straight into the output base — no
   wrapper — appending `_unpacked` to a folder name only on collision). Input is read via `fd:N` (no-copy, FUSE fallback to
   temp), the result is written **straight** into the destination descriptor (no
-  temp-output+copy), verify via `nativeVerifyNsp` is enabled (a mismatch → the file is
-  marked failed). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
+  temp-output+copy); the verify verdict comes from the engine's inline `VERIFIED`/`CORRUPTED`
+  tags (non-fatal — output kept). Progress: a per-file `ProgressThrottler` → `FolderProgressUpdate.activeFiles`.
   `TempFileManager` (`cacheDir`, `andronsz_<UUID>_<name>.<ext>`), `FolderLogWriter`
-  (thread-safe log writing under a `Mutex`).
+  (thread-safe log writing under a `Mutex`; **truncates and rotates** on construction, one
+  instance per run — A16b).
+- **util/LogFiles.kt** — the logging invariant in one place: `rotate(file)` (current →
+  `*.prev.*`, older dropped), `prevOf(file)`, and `banner(runId, kind, mode)` — the shared
+  header carrying the run number and a short description of every sink (plus
+  `commentedBanner()`, the `#`-prefixed form `nsz_throughput.csv` uses). Used by
+  `NszConverter.openJobDebugLog`, `FolderLogWriter` and `StatusLogPanel.writeScreenLog`.
+  Run numbers come from `SettingsRepository.nextRunId()` and are allocated once per job in
+  `startBatchConversion`, `runFolderStyleConversion` and `scanFolderInto`; the screen
+  snapshot uses `lastRunId()` instead of allocating.
+- **Parallelism (A07).** `util/WorkerPool` is the single gate both start sites use: a
+  fixed-size `Semaphore` plus the (target, active) callback the telemetry needs. It was
+  resizable — created wide with the surplus held as ballast permits, narrowing by waiting
+  for a file to finish rather than aborting one — but that existed only for the in-job
+  search, and went with it (2026-07-28).
+  `util/ThroughputRecorder` samples the job's
+  **aggregate** byte counter at 10 Hz into `nsz_throughput.csv`; `util/ThroughputAnalysis`
+  is pure (no Android APIs, unit-tested) and scores the calibration levels.
+  `util/RealFileBenchmark` is the only measurement: it unpacks a user-picked file whole,
+  N times in parallel per level, sweeping 1→cores then back. **Before changing any of it,
+  read [gotchas.md](../gotchas.md) G18 and G20** — the rules there are not incidental, and
+  two of them were learned by getting this wrong.
+
+  The CSV is diagnostics only now; its `level_tag` column stays for format stability and
+  is always empty, because nothing tags samples mid-job any more.
 
 ## Data flow (brief)
 
-- **Queue:** add → `startBatchConversion` → up to `BATCH_CONCURRENCY` files in parallel
-  via a `Semaphore`, by extension `.xcz` → `NszConverter.convertXcz()`, otherwise
-  `NszConverter.convert()`; statuses Pending→Converting→Completed/Failed; overall progress
-  from the sum of `fileTotals`.
+- **Queue:** add → `startBatchConversion` → files in parallel via a `WorkerPool`
+  (`resolveConcurrency(mode, manualN, calibratedN, cores, queueSize)`, A07), by extension
+  `.xcz` → `NszConverter.convertXcz()`, otherwise `NszConverter.convert()`; statuses
+  Pending→Converting→Completed/Failed; overall progress from the sum of `fileTotals`.
 - **Folder:** `FolderScanner.scanFolder` → `FolderStructure` → `startFolderConversion` →
   `FolderProcessor.processFolder` (phase 1: folder tree + plan, phase 2: parallel unpacking
-  via a `Semaphore`) → `FolderConversionSummary` → the log is closed, temp is cleaned.
+  via the `WorkerPool`) → `FolderConversionSummary` → the log is closed, temp is cleaned.
   Progress is streamed via `FolderProgressUpdate` (overall bar + `activeFiles`).
