@@ -38,8 +38,10 @@
     <string name="picker_nothing_selected">Пока ничего не выбрано</string>
     <string name="picker_up">На уровень вверх</string>
     <string name="picker_empty_folder">Пустая папка</string>
-    <string name="picker_permission_rationale">Файловому менеджеру нужен доступ ко всем файлам, чтобы просматривать хранилище. Выдайте его на открывшемся экране настроек.</string>
+    <string name="picker_permission_rationale">Файловому менеджеру нужен доступ ко всем файлам, чтобы просматривать хранилище. Выдайте его на открывшемся экране настроек. Это специальное разрешение: его нет в обычном списке разрешений приложения, оно находится в «Настройки → Приложения → Специальные разрешения → Доступ ко всем файлам».</string>
     <string name="picker_permission_grant">Выдать доступ</string>
+    <string name="picker_permission_restart_rationale">Доступ ко всем файлам выдан, но приложению нужно перезапуститься, чтобы им воспользоваться: оно было запущено до выдачи разрешения.</string>
+    <string name="picker_permission_restart">Перезапустить</string>
     <string name="picker_gui_settings">Настройка GUI</string>
     <string name="picker_crosses_side">Сторона крестиков</string>
     <string name="picker_checkboxes_side">Сторона чекбоксов</string>

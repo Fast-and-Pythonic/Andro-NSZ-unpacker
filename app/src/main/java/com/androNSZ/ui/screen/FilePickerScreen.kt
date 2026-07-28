@@ -50,6 +50,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -72,7 +73,11 @@ import androidx.compose.ui.unit.dp
 import com.androNSZ.R
 import com.androNSZ.model.PickerMode
 import com.androNSZ.ui.components.AppDropdownMenuItem
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.androNSZ.ui.components.simpleVerticalScrollbar
+import com.androNSZ.util.AppRestart
 import com.androNSZ.util.StoragePermission
 import com.androNSZ.util.fmtBytes
 import kotlinx.coroutines.Dispatchers
@@ -97,6 +102,13 @@ private data class BrowserEntry(
 
 /** Criteria offered by the sort menus on both panes. */
 private enum class SortKey { NAME, SIZE, DATE, TYPE }
+
+/**
+ * How usable "All files access" is right now. [NeedsRestart] is the case where the
+ * permission is granted but the running process still has the old storage mount and
+ * only a restart can fix it (G21); [Checking] is the brief probe before we know.
+ */
+private enum class StorageAccess { Checking, Denied, NeedsRestart, Ready }
 
 /** Stat one filesystem entry into a [BrowserEntry]. Called off the main thread; the
  *  blocking stat syscalls (isDirectory/length/lastModified) must never run per row
@@ -151,11 +163,37 @@ fun FilePickerScreen(
    val rootPath = remember { Environment.getExternalStorageDirectory().absolutePath }
 
    var granted by remember { mutableStateOf(StoragePermission.isGranted()) }
+   var access by remember {
+      mutableStateOf(if (granted) StorageAccess.Checking else StorageAccess.Denied)
+   }
    val permLauncher = rememberLauncherForActivityResult(
       ActivityResultContracts.StartActivityForResult()
    ) {
       // The settings page returns no result code, so re-check the actual state.
       granted = StoragePermission.isGranted()
+   }
+
+   // The grant can arrive from anywhere — the settings page we opened, a page the
+   // user found by hand, a vendor prompt — so re-read it on every resume instead of
+   // trusting the launcher callback alone (G21).
+   val lifecycleOwner = LocalLifecycleOwner.current
+   DisposableEffect(lifecycleOwner) {
+      val observer = LifecycleEventObserver { _, event ->
+         if (event == Lifecycle.Event.ON_RESUME) granted = StoragePermission.isGranted()
+      }
+      lifecycleOwner.lifecycle.addObserver(observer)
+      onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+   }
+
+   // Granted isn't enough: a grant that lands while the app runs doesn't reach the
+   // process's storage mount, so probe an actual listing before browsing (G21).
+   LaunchedEffect(granted) {
+      access = when {
+         !granted -> StorageAccess.Denied
+         withContext(Dispatchers.IO) { StoragePermission.canBrowseStorage() } ->
+            StorageAccess.Ready
+         else -> StorageAccess.NeedsRestart
+      }
    }
 
    val title = when (mode) {
@@ -276,12 +314,27 @@ fun FilePickerScreen(
          )
       }
    ) { padding ->
-      if (!granted) {
-         PermissionGate(
-            modifier = Modifier.fillMaxSize().padding(padding),
-            onRequest = { permLauncher.launch(StoragePermission.settingsIntent(context)) }
-         )
-         return@Scaffold
+      when (access) {
+         StorageAccess.Checking -> return@Scaffold
+         StorageAccess.Denied -> {
+            PermissionGate(
+               modifier = Modifier.fillMaxSize().padding(padding),
+               message = stringResource(R.string.picker_permission_rationale),
+               action = stringResource(R.string.picker_permission_grant),
+               onAction = { StoragePermission.launchSettings(context, permLauncher) }
+            )
+            return@Scaffold
+         }
+         StorageAccess.NeedsRestart -> {
+            PermissionGate(
+               modifier = Modifier.fillMaxSize().padding(padding),
+               message = stringResource(R.string.picker_permission_restart_rationale),
+               action = stringResource(R.string.picker_permission_restart),
+               onAction = { AppRestart.restart(context) }
+            )
+            return@Scaffold
+         }
+         StorageAccess.Ready -> Unit
       }
 
       PickerContent(
@@ -782,20 +835,26 @@ private fun PaneResizeHandle(onDrag: (Float) -> Unit) {
    }
 }
 
+/** Full-screen stand-in for the browser while storage access isn't usable. */
 @Composable
-private fun PermissionGate(modifier: Modifier, onRequest: () -> Unit) {
+private fun PermissionGate(
+   modifier: Modifier,
+   message: String,
+   action: String,
+   onAction: () -> Unit
+) {
    Column(
       modifier = modifier.padding(24.dp),
       verticalArrangement = Arrangement.spacedBy(16.dp, Alignment.CenterVertically),
       horizontalAlignment = Alignment.CenterHorizontally
    ) {
       Text(
-         text = stringResource(R.string.picker_permission_rationale),
+         text = message,
          style = MaterialTheme.typography.bodyLarge,
          color = MaterialTheme.colorScheme.onSurfaceVariant
       )
-      Button(onClick = onRequest) {
-         Text(stringResource(R.string.picker_permission_grant))
+      Button(onClick = onAction) {
+         Text(action)
       }
    }
 }

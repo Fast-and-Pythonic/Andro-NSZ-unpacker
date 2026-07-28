@@ -38,8 +38,10 @@
     <string name="picker_nothing_selected">Nothing selected yet</string>
     <string name="picker_up">Up one level</string>
     <string name="picker_empty_folder">Empty folder</string>
-    <string name="picker_permission_rationale">The file picker needs access to all files to browse your storage. Grant it in the settings screen that opens.</string>
+    <string name="picker_permission_rationale">The file picker needs access to all files to browse your storage. Grant it in the settings screen that opens. This is a special permission: it is not in the app\'s usual permission list, but under Settings → Apps → Special app access → All files access.</string>
     <string name="picker_permission_grant">Grant access</string>
+    <string name="picker_permission_restart_rationale">Access to all files is granted, but the app has to restart to use it: it was started before the permission was given.</string>
+    <string name="picker_permission_restart">Restart app</string>
     <string name="picker_gui_settings">GUI settings</string>
     <string name="picker_crosses_side">Remove buttons side</string>
     <string name="picker_checkboxes_side">Checkboxes side</string>

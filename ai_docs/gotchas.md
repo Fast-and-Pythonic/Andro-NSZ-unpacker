@@ -439,3 +439,38 @@ benchmark is the fastest of the three, it is not measuring the flash.
 real pipeline managed 699. Fixed with `fdatasync`, then the whole synthetic test was
 deleted for an unrelated reason (A07) — the trap is recorded here because it belongs to
 the next benchmark, not to that code.
+
+## G21: "All files access" granted mid-session never reaches the running app
+**Symptom:** the user grants "All files access", returns to the app, and the file picker
+still shows the permission gate. Looking for the toggle afterwards, they don't find it in
+the app's permission list at all.
+**Root cause:** three separate things, which is why this looks unexplainable from inside
+the app:
+1. `MANAGE_EXTERNAL_STORAGE` is a **special** permission. It is not in the ordinary
+   per-app permission list — it lives under Settings → Apps → Special app access → All
+   files access. Nothing is broken when it is "missing"; the user is looking at the
+   wrong screen.
+2. The gate state was read once into a Compose `remember` and re-read only in the
+   settings-launcher callback. A grant that arrives by any other route (the user finds
+   the page by hand, a vendor prompt, `adb shell appops set`) never invalidates it.
+3. **The storage mount mode is inherited when the process is forked.** Stock Android
+   kills the app when the permission flips, so this is invisible there; HyperOS does
+   not, leaving a process where `Environment.isExternalStorageManager()` returns true
+   while `java.io.File` still cannot list the storage root. Only a restart fixes it.
+**Fix:** [StoragePermission.kt](../app/src/main/java/com/androNSZ/util/StoragePermission.kt)
+adds `canBrowseStorage()` — an actual listing of the storage root — as the *effective*
+check on top of `isGranted()`, plus a fallback chain of settings intents (per-app page →
+global list → app details) since not every skin has the per-app page.
+[FilePickerScreen.kt](../app/src/main/java/com/androNSZ/ui/screen/FilePickerScreen.kt)
+re-reads the permission on every `ON_RESUME` and, when granted but unusable, shows a
+"restart needed" gate wired to
+[AppRestart.kt](../app/src/main/java/com/androNSZ/util/AppRestart.kt).
+**How to spot (adb, read-only):**
+```
+adb shell appops get com.androNSZ MANAGE_EXTERNAL_STORAGE   # "allow" => the OS granted it
+adb shell ps -A -o PID,ETIME,NAME | grep androNSZ           # uptime > time since grant?
+```
+If the op says `allow` but the process is older than the grant, it is case 3, not a bug in
+the check.
+**History:** found 2026-07-28 on POCO / HyperOS OS3.0 (Android 16), uid op `allow` for
+10 minutes against a 50-minute-old process.

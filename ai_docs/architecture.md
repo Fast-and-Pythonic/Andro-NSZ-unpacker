@@ -309,7 +309,10 @@ only (the pipeline is single-root). A combined files+folders mode, and later dro
 two old modes, are deferred. Output-folder and prod.keys pickers stay on SAF (write/keys).
 **Consequences:** free navigation + multi-select; `file://` inputs skip the fd/temp path.
 Trap: `file://` needs explicit handling in the name/size helpers (see
-[gotchas.md](gotchas.md) G13).
+[gotchas.md](gotchas.md) G13). Second trap: the permission gate must re-check on resume
+and treat "granted" as insufficient — a grant that arrives while the app runs doesn't
+reach the process's storage mount, and the per-app settings page isn't on every skin, so
+`StoragePermission` keeps a fallback chain of intents (see [gotchas.md](gotchas.md) G21).
 
 ## A15: Throughput pass + the write-bound diagnosis (solid mode, 2026-07-24/25)
 **Context:** with several files converting at once, zstd *looked* dominant and the
