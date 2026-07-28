@@ -32,14 +32,30 @@ context with the right `Locale` (per-app language, see
 - **ConversionScreen.kt** — renders by `conversionMode`: `SingleFilesUI` (SingleFiles),
   `FolderModeUI` (FolderMode) or `CombinedModeUI` (Combined). The `None` branch is
   unreachable (on this screen) and empty — needed only for an exhaustive `when`.
-- **SettingsScreen.kt** — stats format (`StatsFormat`), language (System/English/Russian;
-  change → `recreate()`), verification toggle, update banner, and a button into
-  `ThreadSettings` whose subtitle is computed with the same `resolveConcurrency` a job
-  uses, so it cannot drift from reality.
-- **ThreadSettingsScreen.kt** — everything about parallel unpacking: the `ThreadMode`
-  dropdown, the manual slider, the real-file test with its per-level results table. Split
-  off because it serves two audiences — one number for most users, a measurement rig for
-  the rest.
+- **SettingsScreen.kt** — a grouped list (no cards) built from `ui/components/SettingsItem.kt`:
+  section headers, 56 dp rows with the value in a compact dropdown pill on the right,
+  dividers between sections, and a footer with the version and a GitHub link. Sections:
+  *Appearance* (language — change → `recreate()`; theme; accent mode + the always-visible
+  `AccentPresetRow`), *Unpacking* (a row into `ThreadSettings`, stats format `StatsFormat`),
+  *Updates* (update banner). The `ThreadSettings` subtitle is computed with the same
+  `resolveConcurrency` a job uses, so it cannot drift from reality.
+  Accent: the first swatch is `DefaultAccent` and means `AccentMode.DEFAULT`, the rest set
+  `CUSTOM` + that color; in `SYSTEM` mode nothing is marked. The color wheel and the hex
+  field are gone (`ui/components/ColorWheelPicker.kt` is now unused).
+  The **verification switch is commented out** — CNMT verification is now always on:
+  `MainViewModel.loadSettings` pins `verificationEnabled = true` and writes it back, so a
+  device where it was once turned off does not stay unverified with no control to fix it.
+  The parameters and strings are kept, so restoring the row is one uncomment away.
+- **ThreadSettingsScreen.kt** — everything about parallel unpacking, in the same section
+  grid as Settings. Opens with a `primaryContainer` card holding the number a job would use
+  right now (via `resolveConcurrency`) and one line saying where it came from; then a radio
+  group (`SettingsRadioRow`) for the `ThreadMode`, with the manual slider unfolding under
+  its own option; then the real-file test with a bordered results table (threads / MB/s /
+  score, the chosen level tinted). While the test runs the card becomes a live progress
+  (`RealFileBenchmark.Progress`, 5 ticks a second: the level *in flight*, its running
+  speed, "run N of M", a determinate bar — display only, the verdict is still end-to-end)
+  with a Cancel button, the mode rows are disabled, and the test section is hidden. Split off the main screen because it serves two audiences — one number for most
+  users, a measurement rig for the rest.
 - **AboutScreen.kt** — app information.
 
 ## Conversion modes (`ui/conversion/`)

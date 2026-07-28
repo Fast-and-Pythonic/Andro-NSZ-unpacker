@@ -1,35 +1,52 @@
 package com.androNSZ.ui.screen
 
+import android.content.Intent
 import androidx.activity.compose.BackHandler
-import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ArrowBack
-import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Code
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.core.net.toUri
+import com.androNSZ.BuildConfig
 import com.androNSZ.R
 import com.androNSZ.model.AccentMode
 import com.androNSZ.model.StatsFormat
 import com.androNSZ.model.ThemeMode
 import com.androNSZ.model.ThreadMode
-import com.androNSZ.ui.components.ColorWheelPicker
+import com.androNSZ.ui.components.AccentPresetRow
 import com.androNSZ.ui.components.CompactCenterAlignedTopAppBar
-import com.androNSZ.ui.components.ExpandableDescription
-import java.text.DateFormat
-import java.util.Date
-import kotlin.math.roundToInt
+import com.androNSZ.ui.components.SettingsDivider
+import com.androNSZ.ui.components.SettingsDropdownRow
+import com.androNSZ.ui.components.SettingsNavRow
+import com.androNSZ.ui.components.SettingsSectionHeader
+import com.androNSZ.ui.components.SettingsSwitchRow
+import com.androNSZ.ui.theme.DefaultAccent
+
+/** Where the "GitHub" link in the footer goes. Same repository as [AboutScreen]. */
+private const val REPO_URL = "https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker"
+
+/**
+ * The accent palette. The first entry is the app's own accent — picking it means
+ * AccentMode.DEFAULT, picking any other means a manual color.
+ */
+private val AccentPresets: List<Int> = listOf(
+   DefaultAccent.toArgb(),
+   0xFF6650A4.toInt(), 0xFF1565C0.toInt(), 0xFF00897B.toInt(),
+   0xFF2E7D32.toInt(), 0xFFEF6C00.toInt(), 0xFFC62828.toInt()
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -75,462 +92,188 @@ fun SettingsScreen(
          )
       }
    ) { padding ->
+      // The 16 dp side padding belongs to the rows, not to this column: the section
+      // dividers are meant to run the full width of the screen.
       Column(
          modifier = Modifier
             .fillMaxSize()
             .padding(padding)
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-         verticalArrangement = Arrangement.spacedBy(16.dp)
+            .padding(top = 16.dp)
       ) {
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-               Text(
-                  text = stringResource(R.string.settings_stats_format),
-                  style = MaterialTheme.typography.titleMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+         SettingsSectionHeader(stringResource(R.string.settings_section_appearance))
 
-               var expanded by remember { mutableStateOf(false) }
+         SettingsDropdownRow(
+            title = stringResource(R.string.settings_language),
+            options = listOf(
+               "system" to stringResource(R.string.language_system),
+               "en"     to stringResource(R.string.language_english),
+               "ru"     to stringResource(R.string.language_russian),
+            ),
+            selected = currentLanguage,
+            onSelect = onLanguageChange
+         )
 
-               ExposedDropdownMenuBox(
-                  expanded = expanded,
-                  onExpandedChange = { expanded = !expanded }
-               ) {
-                  OutlinedTextField(
-                     value = when (currentFormat) {
-                        StatsFormat.COMPACT -> stringResource(R.string.stats_format_compact)
-                        StatsFormat.COMPACT2 -> stringResource(R.string.stats_format_compact2)
-                        StatsFormat.COMPACT3 -> stringResource(R.string.stats_format_compact3)
-                        StatsFormat.DETAILED -> stringResource(R.string.stats_format_detailed)
-                     },
-                     onValueChange = {},
-                     readOnly = true,
-                     trailingIcon = {
-                        Icon(
-                           imageVector = Icons.Filled.ArrowDropDown,
-                           contentDescription = null
-                        )
-                     },
-                     modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                     colors = OutlinedTextFieldDefaults.colors()
-                  )
+         SettingsDropdownRow(
+            title = stringResource(R.string.settings_theme),
+            options = listOf(
+               ThemeMode.SYSTEM to stringResource(R.string.theme_system),
+               ThemeMode.LIGHT  to stringResource(R.string.theme_light),
+               ThemeMode.DARK   to stringResource(R.string.theme_dark),
+            ),
+            selected = currentTheme,
+            onSelect = onThemeChange
+         )
 
-                  ExposedDropdownMenu(
-                     expanded = expanded,
-                     onDismissRequest = { expanded = false }
-                  ) {
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.stats_format_compact)) },
-                        onClick = {
-                           onFormatChange(StatsFormat.COMPACT)
-                           expanded = false
-                        }
-                     )
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.stats_format_compact2)) },
-                        onClick = {
-                           onFormatChange(StatsFormat.COMPACT2)
-                           expanded = false
-                        }
-                     )
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.stats_format_compact3)) },
-                        onClick = {
-                           onFormatChange(StatsFormat.COMPACT3)
-                           expanded = false
-                        }
-                     )
-                     DropdownMenuItem(
-                        text = { Text(stringResource(R.string.stats_format_detailed)) },
-                        onClick = {
-                           onFormatChange(StatsFormat.DETAILED)
-                           expanded = false
-                        }
-                     )
-                  }
+         SettingsDropdownRow(
+            title = stringResource(R.string.settings_accent),
+            subtitle = when (currentAccentMode) {
+               AccentMode.DEFAULT -> stringResource(R.string.accent_default_desc)
+               AccentMode.SYSTEM -> stringResource(R.string.accent_system_desc)
+               AccentMode.CUSTOM -> stringResource(R.string.accent_custom_desc)
+            },
+            options = listOf(
+               AccentMode.DEFAULT to stringResource(R.string.accent_default),
+               AccentMode.SYSTEM to stringResource(R.string.accent_system),
+               AccentMode.CUSTOM to stringResource(R.string.accent_custom),
+            ),
+            selected = currentAccentMode,
+            onSelect = onAccentModeChange
+         )
+
+         // The palette stays visible in every mode: it is both the picker and the
+         // answer to "which color is the app using right now". In the system mode the
+         // accent comes from the wallpaper, so nothing here is marked.
+         AccentPresetRow(
+            presets = AccentPresets,
+            selected = when (currentAccentMode) {
+               AccentMode.DEFAULT -> AccentPresets.first()
+               AccentMode.CUSTOM -> currentAccentColor
+               AccentMode.SYSTEM -> null
+            },
+            onSelect = { argb ->
+               if (argb == AccentPresets.first()) {
+                  onAccentModeChange(AccentMode.DEFAULT)
+               } else {
+                  // Color first, so the theme never recomposes with the mode already
+                  // switched but the old color still stored.
+                  onAccentColorChange(argb)
+                  onAccentModeChange(AccentMode.CUSTOM)
                }
             }
-         }
+         )
 
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-               Text(
-                  text = stringResource(R.string.settings_language),
-                  style = MaterialTheme.typography.titleMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+         SettingsDivider()
 
-               var langExpanded by remember { mutableStateOf(false) }
+         SettingsSectionHeader(stringResource(R.string.settings_section_unpacking))
 
-               val languages = listOf(
-                  "system" to stringResource(R.string.language_system),
-                  "en"     to stringResource(R.string.language_english),
-                  "ru"     to stringResource(R.string.language_russian),
-               )
+         // Output verification is always on (MainViewModel.loadSettings pins it), so the
+         // switch has nothing to offer. Kept here, and kept wired through the parameters
+         // above, so bringing the choice back is one uncomment away.
+         //
+         // SettingsSwitchRow(
+         //    title = stringResource(R.string.settings_verification),
+         //    subtitle = stringResource(R.string.settings_verification_summary),
+         //    checked = currentVerification,
+         //    onCheckedChange = onVerificationChange
+         // )
 
-               ExposedDropdownMenuBox(
-                  expanded = langExpanded,
-                  onExpandedChange = { langExpanded = !langExpanded }
-               ) {
-                  OutlinedTextField(
-                     value = languages.firstOrNull { it.first == currentLanguage }?.second
-                        ?: stringResource(R.string.language_system),
-                     onValueChange = {},
-                     readOnly = true,
-                     trailingIcon = {
-                        Icon(
-                           imageVector = Icons.Filled.ArrowDropDown,
-                           contentDescription = null
-                        )
-                     },
-                     modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                     colors = OutlinedTextFieldDefaults.colors()
-                  )
+         // Everything about parallel unpacking lives on its own screen: it is one
+         // setting to most users and a measurement rig to the rest, and mixing the two
+         // buried the rest of this screen.
+         SettingsNavRow(
+            title = stringResource(R.string.settings_thread_screen),
+            // Names the mode *and* what it currently yields — the mode alone does not
+            // answer "so how many is that?", which is the question someone opening this
+            // screen actually has.
+            subtitle = stringResource(
+               R.string.settings_thread_screen_summary,
+               threadModeLabel(currentThreadMode),
+               pluralStringResource(R.plurals.threads, currentThreads, currentThreads)
+            ),
+            onClick = onOpenThreadSettings
+         )
 
-                  ExposedDropdownMenu(
-                     expanded = langExpanded,
-                     onDismissRequest = { langExpanded = false }
-                  ) {
-                     languages.forEach { (code, label) ->
-                        DropdownMenuItem(
-                           text = { Text(label) },
-                           onClick = {
-                              onLanguageChange(code)
-                              langExpanded = false
-                           }
-                        )
-                     }
-                  }
-               }
-            }
-         }
+         SettingsDropdownRow(
+            title = stringResource(R.string.settings_stats_format),
+            options = listOf(
+               StatsFormat.COMPACT to stringResource(R.string.stats_format_compact),
+               StatsFormat.COMPACT2 to stringResource(R.string.stats_format_compact2),
+               StatsFormat.COMPACT3 to stringResource(R.string.stats_format_compact3),
+               StatsFormat.DETAILED to stringResource(R.string.stats_format_detailed),
+            ),
+            selected = currentFormat,
+            onSelect = onFormatChange
+         )
 
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-               Text(
-                  text = stringResource(R.string.settings_theme),
-                  style = MaterialTheme.typography.titleMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
+         SettingsDivider()
 
-               var themeExpanded by remember { mutableStateOf(false) }
+         SettingsSectionHeader(stringResource(R.string.settings_section_updates))
 
-               val themes = listOf(
-                  ThemeMode.SYSTEM to stringResource(R.string.theme_system),
-                  ThemeMode.LIGHT  to stringResource(R.string.theme_light),
-                  ThemeMode.DARK   to stringResource(R.string.theme_dark),
-               )
+         SettingsSwitchRow(
+            title = stringResource(R.string.settings_show_update_banner),
+            subtitle = stringResource(R.string.settings_show_update_banner_summary),
+            checked = currentShowUpdateBanner,
+            onCheckedChange = onShowUpdateBannerChange
+         )
 
-               ExposedDropdownMenuBox(
-                  expanded = themeExpanded,
-                  onExpandedChange = { themeExpanded = !themeExpanded }
-               ) {
-                  OutlinedTextField(
-                     value = themes.firstOrNull { it.first == currentTheme }?.second
-                        ?: stringResource(R.string.theme_system),
-                     onValueChange = {},
-                     readOnly = true,
-                     trailingIcon = {
-                        Icon(
-                           imageVector = Icons.Filled.ArrowDropDown,
-                           contentDescription = null
-                        )
-                     },
-                     modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                     colors = OutlinedTextFieldDefaults.colors()
-                  )
-
-                  ExposedDropdownMenu(
-                     expanded = themeExpanded,
-                     onDismissRequest = { themeExpanded = false }
-                  ) {
-                     themes.forEach { (mode, label) ->
-                        DropdownMenuItem(
-                           text = { Text(label) },
-                           onClick = {
-                              onThemeChange(mode)
-                              themeExpanded = false
-                           }
-                        )
-                     }
-                  }
-               }
-            }
-         }
-
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-               Text(
-                  text = stringResource(R.string.settings_accent),
-                  style = MaterialTheme.typography.titleMedium,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-               )
-
-               var accentExpanded by remember { mutableStateOf(false) }
-
-               val accentModes = listOf(
-                  AccentMode.DEFAULT to stringResource(R.string.accent_default),
-                  AccentMode.SYSTEM to stringResource(R.string.accent_system),
-                  AccentMode.CUSTOM to stringResource(R.string.accent_custom),
-               )
-
-               ExposedDropdownMenuBox(
-                  expanded = accentExpanded,
-                  onExpandedChange = { accentExpanded = !accentExpanded }
-               ) {
-                  OutlinedTextField(
-                     value = accentModes.firstOrNull { it.first == currentAccentMode }?.second
-                        ?: stringResource(R.string.accent_default),
-                     onValueChange = {},
-                     readOnly = true,
-                     trailingIcon = {
-                        Icon(
-                           imageVector = Icons.Filled.ArrowDropDown,
-                           contentDescription = null
-                        )
-                     },
-                     modifier = Modifier
-                        .fillMaxWidth()
-                        .menuAnchor(),
-                     colors = OutlinedTextFieldDefaults.colors()
-                  )
-
-                  ExposedDropdownMenu(
-                     expanded = accentExpanded,
-                     onDismissRequest = { accentExpanded = false }
-                  ) {
-                     accentModes.forEach { (mode, label) ->
-                        DropdownMenuItem(
-                           text = { Text(label) },
-                           onClick = {
-                              onAccentModeChange(mode)
-                              accentExpanded = false
-                           }
-                        )
-                     }
-                  }
-               }
-
-               // Manual color controls: a color wheel, preset swatches, a hex field.
-               if (currentAccentMode == AccentMode.CUSTOM) {
-                  ColorWheelPicker(
-                     color = currentAccentColor,
-                     onColorChange = onAccentColorChange,
-                     modifier = Modifier.fillMaxWidth()
-                  )
-
-                  val presets = listOf(
-                     0xFF6650A4, 0xFF1565C0, 0xFF00897B,
-                     0xFF2E7D32, 0xFFEF6C00, 0xFFC62828
-                  ).map { it.toInt() }
-
-                  Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                     presets.forEach { argb ->
-                        val selected = argb == currentAccentColor
-                        Box(
-                           modifier = Modifier
-                              .size(36.dp)
-                              .clip(CircleShape)
-                              .background(Color(argb))
-                              .border(
-                                 width = if (selected) 3.dp else 1.dp,
-                                 color = if (selected) MaterialTheme.colorScheme.onSurface
-                                         else MaterialTheme.colorScheme.outline,
-                                 shape = CircleShape
-                              )
-                              .clickable { onAccentColorChange(argb) }
-                        )
-                     }
-                  }
-
-                  var hexText by remember(currentAccentColor) {
-                     mutableStateOf(argbToHex(currentAccentColor))
-                  }
-                  OutlinedTextField(
-                     value = hexText,
-                     onValueChange = { input ->
-                        hexText = input
-                        parseHexColor(input)?.let { onAccentColorChange(it) }
-                     },
-                     label = { Text(stringResource(R.string.accent_hex_label)) },
-                     singleLine = true,
-                     leadingIcon = {
-                        Box(
-                           modifier = Modifier
-                              .size(24.dp)
-                              .clip(CircleShape)
-                              .background(Color(currentAccentColor))
-                        )
-                     },
-                     modifier = Modifier.fillMaxWidth(),
-                     colors = OutlinedTextFieldDefaults.colors()
-                  )
-               }
-            }
-         }
-
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-               Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-               ) {
-                  Text(
-                     text = stringResource(R.string.settings_verification),
-                     style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                     modifier = Modifier.weight(1f)
-                  )
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Switch(
-                     checked = currentVerification,
-                     onCheckedChange = onVerificationChange
-                  )
-               }
-               ExpandableDescription(stringResource(R.string.settings_verification_desc))
-
-               // Everything about parallel unpacking lives on its own screen: it is
-               // one setting to most users and a measurement rig to the rest, and
-               // mixing the two buried the rest of this screen.
-               Spacer(modifier = Modifier.height(4.dp))
-               Column(
-                  modifier = Modifier
-                     .fillMaxWidth()
-                     .clickable { onOpenThreadSettings() }
-               ) {
-                  Text(
-                     text = stringResource(R.string.settings_thread_screen),
-                     style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                  // Names the mode *and* what it currently yields — the mode alone
-                  // does not answer "so how many is that?", which is the question
-                  // someone opening this screen actually has.
-                  Text(
-                     text = stringResource(
-                        R.string.settings_thread_screen_summary,
-                        threadModeLabel(currentThreadMode),
-                        pluralStringResource(R.plurals.threads, currentThreads, currentThreads)
-                     ),
-                     style = MaterialTheme.typography.bodySmall,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-               }
-            }
-         }
-
-         Card(
-            modifier = Modifier.fillMaxWidth(),
-            colors = CardDefaults.cardColors(
-               containerColor = MaterialTheme.colorScheme.surfaceVariant
-            )
-         ) {
-            Column(
-               modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(16.dp),
-               verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-               Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = androidx.compose.ui.Alignment.CenterVertically
-               ) {
-                  Text(
-                     text = stringResource(R.string.settings_show_update_banner),
-                     style = MaterialTheme.typography.titleMedium,
-                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                     modifier = Modifier.weight(1f)
-                  )
-                  Spacer(modifier = Modifier.width(8.dp))
-                  Switch(
-                     checked = currentShowUpdateBanner,
-                     onCheckedChange = onShowUpdateBannerChange
-                  )
-               }
-               ExpandableDescription(stringResource(R.string.settings_show_update_banner_desc))
-            }
-         }
+         SettingsFooter()
       }
    }
 }
 
-/** Localized label for a thread-count source. Shared with [ThreadSettingsScreen]. */
+/** App name, running version and a link to the repository, at the end of the list. */
+@Composable
+private fun SettingsFooter() {
+   val context = LocalContext.current
+   Column(
+      modifier = Modifier
+         .fillMaxWidth()
+         .padding(horizontal = 16.dp)
+         .padding(top = 12.dp, bottom = 20.dp),
+      horizontalAlignment = Alignment.CenterHorizontally,
+      verticalArrangement = Arrangement.spacedBy(6.dp)
+   ) {
+      Text(
+         text = stringResource(R.string.app_name),
+         style = MaterialTheme.typography.titleMedium,
+         fontWeight = FontWeight.Bold,
+         color = MaterialTheme.colorScheme.onSurface
+      )
+      Text(
+         text = "v${BuildConfig.VERSION_NAME}",
+         style = MaterialTheme.typography.bodyMedium,
+         color = MaterialTheme.colorScheme.onSurfaceVariant
+      )
+      val openRepo = stringResource(R.string.cd_open_github)
+      Row(
+         modifier = Modifier
+            .clickable(onClickLabel = openRepo) {
+               context.startActivity(Intent(Intent.ACTION_VIEW, REPO_URL.toUri()))
+            }
+            .padding(top = 2.dp),
+         horizontalArrangement = Arrangement.spacedBy(6.dp),
+         verticalAlignment = Alignment.CenterVertically
+      ) {
+         Icon(
+            imageVector = Icons.Filled.Code,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+            modifier = Modifier.size(20.dp)
+         )
+         Text(
+            text = stringResource(R.string.settings_footer_github),
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.primary
+         )
+      }
+   }
+}
+
+/** Localized label for a thread-count source, for the row that leads to its screen. */
 @Composable
 fun threadModeLabel(mode: ThreadMode): String = when (mode) {
    ThreadMode.MANUAL -> stringResource(R.string.thread_mode_manual)
    ThreadMode.HALF -> stringResource(R.string.thread_mode_half)
    ThreadMode.CALIBRATED -> stringResource(R.string.thread_mode_calibrated)
-}
-
-/** Format the RGB part of an ARGB color as `#RRGGBB`. */
-private fun argbToHex(argb: Int): String = "#%06X".format(0xFFFFFF and argb)
-
-/** Parse `#RRGGBB` / `RRGGBB` into an opaque ARGB color, or null if invalid. */
-private fun parseHexColor(input: String): Int? {
-   val cleaned = input.removePrefix("#").trim()
-   if (cleaned.length != 6) return null
-   return try {
-      0xFF000000.toInt() or cleaned.toInt(16)
-   } catch (e: NumberFormatException) {
-      null
-   }
 }

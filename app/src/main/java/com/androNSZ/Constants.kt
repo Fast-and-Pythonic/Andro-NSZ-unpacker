@@ -33,4 +33,12 @@ object Constants {
      * Value 250ms = 4 updates per second.
      */
     const val PROGRESS_SIZE_UPDATE_INTERVAL_MS = 250L
+
+    /**
+     * How often the speed-test card refreshes (in milliseconds).
+     * A display cadence only — the test's own verdict is timed end to end and does
+     * not sample anything at this or any other interval (see util/RealFileBenchmark).
+     * Value 200ms = 5 updates per second.
+     */
+    const val BENCH_TICK_INTERVAL_MS = 200L
 }

@@ -109,6 +109,12 @@ cancelling and deleting the output, and only the first level ever paid for a col
 cache. Whole runs remove the machinery those defects lived in. Cross-check on device
 (2026-07-28): a single-threaded run measured **391 MB/s** against the CLI's 400 (A15).
 
+The engine's progress counters are back in this code path, but **only to drive the
+screen** (`RealFileBenchmark.Progress`, one tick per `Constants.BENCH_TICK_INTERVAL_MS`):
+a level is minutes long, and a card that moved once per finished level looked hung. The
+verdict still comes from wall-clock time and bytes on disk. Keep the two apart — deriving
+the verdict from the counters is the exact mistake described above.
+
 **Rejected: adaptive hill-climbing from below.** A controller was built and measured on
 device (2026-07-25): `AdaptivePolicy` + `AdaptiveGate`, sampling aggregate MB/s and
 probing the count up/down with hysteresis. It was **deleted**. It started low and ramped

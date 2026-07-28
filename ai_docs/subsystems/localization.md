@@ -28,7 +28,7 @@ Android picks the file by language (respecting the per-app locale, see
 | `status_*` | operation statuses (`status_unpacking`, `status_unpacked`, …) |
 | `error_*` | error messages |
 | `format_*` | strings with parameters (`%d`, `%1$d`, …) |
-| `settings_*`, `stats_format_*`, `language_*` | settings screen |
+| `settings_*`, `stats_format_*`, `language_*`, `theme_*`, `accent_*` | settings screen |
 | `picker_*` | in-app file picker (titles, hints, permission gate) |
 | `stats_*` | folder-processing statistics |
 | `cd_*` | content descriptions (accessibility) |

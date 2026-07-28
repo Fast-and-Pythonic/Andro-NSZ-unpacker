@@ -117,6 +117,8 @@
     <!-- Content descriptions -->
     <string name="cd_back">Назад</string>
     <string name="cd_settings">Настройки</string>
+    <string name="cd_accent_preset">Пресет акцентного цвета</string>
+    <string name="cd_open_github">Открыть репозиторий на GitHub</string>
 
     <!-- Detailed folder statistics -->
     <string name="stats_title">Статистика обработки</string>
@@ -135,6 +137,10 @@
     <!-- Settings screen -->
     <string name="action_settings">Настройки</string>
     <string name="settings_title">Настройки</string>
+    <string name="settings_section_appearance">Внешний вид</string>
+    <string name="settings_section_unpacking">Распаковка</string>
+    <string name="settings_section_updates">Обновления</string>
+    <string name="settings_footer_github">GitHub</string>
     <string name="settings_stats_format">Вариант итоговой статистики</string>
     <string name="stats_format_compact">Компактно</string>
     <string name="stats_format_compact2">Компактно 2</string>
@@ -154,30 +160,47 @@
     <string name="accent_default">Дефолтный</string>
     <string name="accent_system">Системный</string>
     <string name="accent_custom">Вручную</string>
-    <string name="accent_hex_label">Hex (#RRGGBB)</string>
+    <string name="accent_default_desc">Фирменный акцент приложения</string>
+    <string name="accent_system_desc">Цвета берутся из обоев системы</string>
+    <string name="accent_custom_desc">Свой цвет из палитры ниже</string>
     <string name="settings_verification">Проверка результата</string>
-    <string name="settings_verification_desc">Сверять хеши распакованных NCA с метаданными CNMT. Почти бесплатно; несовпадения выводятся как предупреждения, а результат всегда сохраняется.</string>
+    <string name="settings_verification_summary">Сверять хеши распакованных NCA с метаданными CNMT</string>
     <string name="settings_decompression_threads">Потоки распаковки</string>
     <string name="settings_threads_auto">Авто</string>
     <string name="settings_decompression_threads_desc">Сколько файлов распаковывать параллельно. Ускоряет очередь или папку из нескольких файлов, но не один крупный файл.</string>
     <string name="settings_thread_screen">Количество потоков распаковки</string>
+    <string name="settings_thread_screen_title">Количество потоков</string>
     <string name="settings_thread_screen_summary">%1$s — %2$s</string>
+    <string name="settings_thread_hero_half">Половина ядер — на этом устройстве их %1$d</string>
+    <string name="settings_thread_hero_manual">Задано вручную из %1$d доступных</string>
+    <string name="settings_thread_hero_calibrated">Измерено тестом %1$s</string>
     <string name="settings_thread_mode">Откуда берётся число потоков</string>
     <string name="thread_mode_manual">Вручную</string>
     <string name="thread_mode_half">Половина (дефолт)</string>
     <string name="thread_mode_calibrated">Из теста скорости</string>
+    <string name="settings_thread_mode_manual_desc">Задать число слайдером</string>
+    <string name="settings_thread_mode_half_desc">%1$d ядер → %2$s</string>
+    <string name="settings_thread_mode_calibrated_running">Определяется тестом…</string>
+    <string name="settings_thread_modes_locked">Режим можно будет сменить, когда тест закончится или будет отменён.</string>
     <string name="settings_thread_mode_desc">Скорость распаковки ограничена тем, как быстро накопитель этого телефона принимает запись, и оптимальное число потоков у разных устройств разное. Задайте его сами или измерьте тестом на реальном файле.</string>
+    <string name="settings_slider_auto">0 — Авто</string>
     <string name="settings_speed_test_run">Запустить тест</string>
+    <string name="settings_speed_test_rerun">Измерить заново</string>
+    <string name="settings_speed_test_size_hint">Нужен файл\nна 1–2 ГБ</string>
     <string name="settings_speed_test_cancel">Отменить</string>
     <string name="settings_speed_test_starting">Тест запускается…</string>
-    <string name="settings_speed_test_progress">Прогон %1$d из %2$d — %3$s, %4$s МБ/с</string>
+    <string name="settings_speed_test_run_of">Прогон %1$d из %2$d</string>
+    <string name="settings_speed_test_warmup">Прогрев, в зачёт не идёт</string>
+    <string name="settings_speed_test_level_speed">%1$s — %2$s МБ/с</string>
+    <string name="settings_speed_test_busy_warning">Не закрывайте приложение и не запускайте распаковку — она измерится вместе с тестом.</string>
     <string name="settings_speed_test_real">Тест на реальном файле</string>
     <string name="settings_speed_test_real_desc">Полностью распаковывает выбранный NSZ/XCZ снова и снова: сначала в один поток, потом в два и так до числа ядер, затем в обратном порядке. Результат каждого прогона сразу удаляется. Берите файл на 1–2 ГБ: на нём тест занимает пару минут, а файл покрупнее затянет его надолго и сильно нагрузит накопитель.</string>
     <string name="settings_speed_test_suggest">Число потоков ещё не измерялось на этом устройстве. Тест подберёт его под ваш накопитель.</string>
     <string name="settings_speed_test_failed">Тест не удалось завершить.</string>
-    <string name="settings_speed_test_results">Измерено: %1$s (%2$s)</string>
-    <string name="settings_speed_test_result_row">%1$d — %2$s МБ/с, счёт %3$s</string>
-    <string name="settings_speed_test_result_row_noscore">%1$d — %2$s МБ/с</string>
+    <string name="settings_speed_test_measured">Измерено: %1$s</string>
+    <string name="settings_speed_test_col_threads">Потоки</string>
+    <string name="settings_speed_test_col_mbps">МБ/с</string>
+    <string name="settings_speed_test_col_score">Счёт</string>
     <string name="settings_speed_test_results_hint">Скорость — это то, что показал сам прогон; счёт сравнивает прогоны внутри их раунда, и именно по нему принято решение. Скорости разных тестов сравнимы, только если накопитель был одинаково отдохнувшим.</string>
     <string name="settings_calibrated_value">Измерено тестом: %1$d</string>
     <string name="settings_calibrated_none">Ещё не измерено — пока используется половина ядер (%1$d).</string>
@@ -188,11 +211,12 @@
         <item quantity="many">%d потоков</item>
         <item quantity="other">%d потока</item>
     </plurals>
-    <plurals name="threads_half">
-        <item quantity="one">Половина ядер этого устройства — %d поток.</item>
-        <item quantity="few">Половина ядер этого устройства — %d потока.</item>
-        <item quantity="many">Половина ядер этого устройства — %d потоков.</item>
-        <item quantity="other">Половина ядер этого устройства — %d потока.</item>
+    <!-- Только слово: само число рисуется отдельно, крупным шрифтом. -->
+    <plurals name="threads_parallel">
+        <item quantity="one">поток параллельно</item>
+        <item quantity="few">потока параллельно</item>
+        <item quantity="many">потоков параллельно</item>
+        <item quantity="other">потока параллельно</item>
     </plurals>
 
     <!-- About screen -->
@@ -237,9 +261,11 @@
     <string name="action_update_now">Обновить</string>
     <string name="action_update_later">Позже</string>
     <string name="action_hide">Скрыть</string>
+    <string name="action_more">Подробнее</string>
+    <string name="action_less">Свернуть</string>
     <string name="msg_downloading_update">Загрузка обновления…</string>
     <string name="msg_up_to_date">У вас последняя версия.</string>
     <string name="msg_update_check_failed">Не удалось проверить обновления: %s</string>
-    <string name="settings_show_update_banner">Показывать баннер обновления на главном экране</string>
-    <string name="settings_show_update_banner_desc">Когда доступен новый релиз, показывать баннер на главном экране. Проверка обновлений выполняется всегда, а уведомление в меню ⋮ отключить нельзя.</string>
+    <string name="settings_show_update_banner">Баннер обновления на главном экране</string>
+    <string name="settings_show_update_banner_summary">Проверка обновлений выполняется всегда</string>
 </resources>

@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
+import com.androNSZ.Constants
 import com.androNSZ.NszConverter
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
@@ -11,6 +12,8 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import java.io.File
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicLongArray
 
 /**
  * Finds how many files this device rewards unpacking at once, by unpacking a real
@@ -45,6 +48,10 @@ import java.io.File
  *  - It calls the engine directly rather than through `NszConverter.convert`, because
  *    that helper derives the output name from the input, so N parallel unpacks of one
  *    file would all target the same output. Here the outputs are plain cache paths.
+ *  - The conversions do carry a progress callback, but only to drive the screen
+ *    ([Progress]). The verdict is bytes on disk over wall-clock time, as above. Deriving
+ *    it from those counters instead is precisely the mistake described two paragraphs
+ *    up, and it biased the ranking rather than the scale — do not let the two meet.
  *  - [NszConverter.nativeCancel] is **global**: it stops *every* in-flight conversion
  *    (architecture.md A15). It is now used only for the user's Cancel button, and it
  *    still means this must never run while a real job converts — the caller enforces
@@ -52,12 +59,23 @@ import java.io.File
  */
 object RealFileBenchmark {
 
-   /** Progress of one finished level. */
-   data class LevelResult(
+   /**
+    * Live state of the level being measured right now, for the screen only.
+    *
+    * [mbps] and [fraction] come from the engine's progress counters, which is exactly
+    * how the *deleted* short-circuit version derived its verdict — see the class KDoc.
+    * Nothing here reaches [Outcome]: it exists so the card can move while a level that
+    * takes minutes runs.
+    */
+   data class Progress(
+      // The discarded first run. Named so the screen can say why it is not counted.
+      val warmUp: Boolean,
       val levelsDone: Int,
-      val round: Int,
+      // The level in flight, not the one that last finished.
       val level: Int,
-      val mbps: Double
+      val mbps: Double,
+      // Completion of this level, or -1 when the engine reports no total.
+      val fraction: Float
    )
 
    /** Verdict of a complete run. */
@@ -83,15 +101,16 @@ object RealFileBenchmark {
     * Runs the test on [sourceUri] and returns the thread count to adopt, or null if
     * nothing measurable came out of it (no space, or every conversion failed).
     *
-    * [onLevel] is called after each finished level. Cancellation takes effect between
-    * conversions only if the caller also calls [NszConverter.nativeCancel] — a single
-    * conversion is uninterruptible from Kotlin.
+    * [onProgress] ticks while a level runs, at most once per
+    * [Constants.BENCH_TICK_INTERVAL_MS]. Cancellation takes effect between conversions
+    * only if the caller also calls [NszConverter.nativeCancel] — a single conversion is
+    * uninterruptible from Kotlin.
     */
    suspend fun run(
       context: Context,
       sourceUri: Uri,
       cores: Int = Runtime.getRuntime().availableProcessors(),
-      onLevel: ((LevelResult) -> Unit)? = null
+      onProgress: ((Progress) -> Unit)? = null
    ): Outcome? {
       val dir = benchDir(context) ?: return null
       val maxLevel = cores.coerceAtLeast(1)
@@ -115,19 +134,24 @@ object RealFileBenchmark {
          // Discarded warm-up. Every conversion re-reads the source from the start and
          // only the first finds it cold; measuring that one would charge a single
          // level — always the same one — for reads every other level got for free.
-         measureLevel(context, sourceUri, isXcz, dir, 1)
+         measureLevel(context, sourceUri, isXcz, dir, 1) { done, total, mbps ->
+            onProgress?.invoke(Progress(true, 0, 1, mbps, fractionOf(done, total)))
+         }
 
          for (round in 1..ROUNDS) {
             val levels = if (round % 2 == 1) 1..maxLevel else maxLevel downTo 1
             for (level in levels) {
-               val mbps = measureLevel(context, sourceUri, isXcz, dir, level)
+               val mbps = measureLevel(context, sourceUri, isXcz, dir, level) { done, total, live ->
+                  onProgress?.invoke(
+                     Progress(false, levelsDone, level, live, fractionOf(done, total))
+                  )
+               }
                levelsDone++
                // A failed conversion says nothing about the level, so it is skipped
                // rather than recorded as slow.
                if (mbps == null) continue
                blocks += BlockStat(round = round, level = level, mbps = mbps)
                rawByLevel.getOrPut(level) { mutableListOf() }.add(mbps)
-               onLevel?.invoke(LevelResult(levelsDone, round, level, mbps))
             }
          }
       } finally {
@@ -143,16 +167,26 @@ object RealFileBenchmark {
       )
    }
 
+   /** Completion of a level from the engine's counters, or -1 when it reports no total. */
+   private fun fractionOf(done: Long, total: Long): Float =
+      if (total > 0L) (done.toFloat() / total).coerceIn(0f, 1f) else -1f
+
    /**
     * One level: [level] complete conversions of the source in parallel. Returns
     * aggregate MB/s over the whole run, or null if any of them failed.
+    *
+    * [onBytes] receives the summed byte counters of the conversions in flight, no more
+    * often than [Constants.BENCH_TICK_INTERVAL_MS], purely so the caller can show
+    * something moving. The returned figure — the one the verdict is built from — is
+    * still bytes on disk over wall-clock time and owes nothing to those counters.
     */
    private suspend fun measureLevel(
       context: Context,
       sourceUri: Uri,
       isXcz: Boolean,
       dir: File,
-      level: Int
+      level: Int,
+      onBytes: ((doneSum: Long, totalSum: Long, mbps: Double) -> Unit)? = null
    ): Double? = coroutineScope {
       cleanup(dir)
       val outputs = (0 until level).map { i ->
@@ -160,6 +194,33 @@ object RealFileBenchmark {
       }
 
       val startedAtMs = System.currentTimeMillis()
+
+      // The engine calls back from each conversion's own native thread, so the counters
+      // are atomic and one tick is claimed by a CAS rather than by a lock.
+      val doneBytes = AtomicLongArray(level)
+      val totalBytes = AtomicLongArray(level)
+      val lastTickMs = AtomicLong(startedAtMs)
+
+      fun tick(index: Int, done: Long, total: Long) {
+         doneBytes.set(index, done)
+         totalBytes.set(index, total)
+         val now = System.currentTimeMillis()
+         val previous = lastTickMs.get()
+         if (now - previous < Constants.BENCH_TICK_INTERVAL_MS) return
+         if (!lastTickMs.compareAndSet(previous, now)) return
+
+         var doneSum = 0L
+         var totalSum = 0L
+         for (i in 0 until level) {
+            doneSum += doneBytes.get(i)
+            totalSum += totalBytes.get(i)
+         }
+         // Averaged from the start of the level rather than over the last tick: a
+         // steady number that converges on the one this level will be recorded with.
+         val seconds = (now - startedAtMs).coerceAtLeast(1L) / 1000.0
+         onBytes?.invoke(doneSum, totalSum, doneSum / 1024.0 / 1024.0 / seconds)
+      }
+
       val codes = (0 until level).map { i ->
          async(Dispatchers.IO) {
             var pfd: ParcelFileDescriptor? = null
@@ -174,10 +235,17 @@ object RealFileBenchmark {
                   pfd = p
                   "fd:${p.fd}"
                }
+               // A real job runs with a progress callback attached too, so this keeps
+               // the test on the same footing rather than moving it off one.
+               val progress = if (onBytes == null) null else {
+                  object : NszConverter.ProgressCallback {
+                     override fun onProgress(done: Long, total: Long) = tick(i, done, total)
+                  }
+               }
                if (isXcz) {
-                  NszConverter.nativeConvertXcz(inputPath, outputs[i].absolutePath, null, null)
+                  NszConverter.nativeConvertXcz(inputPath, outputs[i].absolutePath, progress, null)
                } else {
-                  NszConverter.nativeConvert(inputPath, outputs[i].absolutePath, null, null)
+                  NszConverter.nativeConvert(inputPath, outputs[i].absolutePath, progress, null)
                }
             } finally {
                runCatching { pfd?.close() }

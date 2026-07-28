@@ -200,7 +200,7 @@ class MainViewModel : ViewModel() {
    // Real-file test (util/RealFileBenchmark): live per-level progress and the last
    // outcome. benchFailed distinguishes "not run" from "ran and produced nothing".
    var benchRunning by mutableStateOf(false)
-   var benchLevel by mutableStateOf<RealFileBenchmark.LevelResult?>(null)
+   var benchProgress by mutableStateOf<RealFileBenchmark.Progress?>(null)
    var benchFailed by mutableStateOf(false)
    // Numbers behind the last verdict. Survives a cancelled run and an app restart
    // (persisted); only ever replaced by a newer completed run.
@@ -256,7 +256,12 @@ class MainViewModel : ViewModel() {
       themeMode = SettingsRepository.getInstance(context).getThemeMode()
       accentMode = SettingsRepository.getInstance(context).getAccentMode()
       accentColorArgb = SettingsRepository.getInstance(context).getAccentColor()
-      verificationEnabled = SettingsRepository.getInstance(context).getVerificationEnabled()
+      // The verification switch is hidden from Settings: checking CNMT hashes costs
+      // almost nothing, and off it silently turns "Checked" into "Not checked". Pinned
+      // to on here — and written back, so a device where it was once turned off does not
+      // stay unverified forever with no control to fix it.
+      verificationEnabled = true
+      SettingsRepository.getInstance(context).saveVerificationEnabled(true)
       compactCardNames = SettingsRepository.getInstance(context).getCompactCardNames()
       decompressionThreads = SettingsRepository.getInstance(context).getDecompressionThreads()
       threadMode = SettingsRepository.getInstance(context).getThreadMode()
@@ -330,10 +335,10 @@ class MainViewModel : ViewModel() {
       if (benchRunning || isConverting) return
       benchRunning = true
       benchFailed = false
-      benchLevel = null
+      benchProgress = null
       benchJob = viewModelScope.launch {
-         val outcome = RealFileBenchmark.run(context, sourceUri) { level ->
-            viewModelScope.launch(Dispatchers.Main.immediate) { benchLevel = level }
+         val outcome = RealFileBenchmark.run(context, sourceUri) { progress ->
+            viewModelScope.launch(Dispatchers.Main.immediate) { benchProgress = progress }
          }
          if (outcome != null) {
             calibratedThreads = outcome.knee
@@ -353,7 +358,7 @@ class MainViewModel : ViewModel() {
             benchFailed = true
          }
          benchRunning = false
-         benchLevel = null
+         benchProgress = null
       }
    }
 
@@ -368,7 +373,7 @@ class MainViewModel : ViewModel() {
       benchJob?.cancel()
       benchJob = null
       benchRunning = false
-      benchLevel = null
+      benchProgress = null
    }
 
    fun saveShowUpdateBanner(context: android.content.Context, enabled: Boolean) {

@@ -155,7 +155,7 @@ fun AndroNSZApp(vm: MainViewModel) {
             calibratedThreads = vm.calibratedThreads,
             halfThreads = halfConcurrency(Runtime.getRuntime().availableProcessors()),
             benchRunning = vm.benchRunning,
-            benchLevel = vm.benchLevel,
+            benchProgress = vm.benchProgress,
             benchSummary = vm.benchSummary,
             benchFailed = vm.benchFailed,
             benchEnabled = !vm.isConverting,
