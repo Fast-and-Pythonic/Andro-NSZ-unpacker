@@ -474,3 +474,33 @@ If the op says `allow` but the process is older than the grant, it is case 3, no
 the check.
 **History:** found 2026-07-28 on POCO / HyperOS OS3.0 (Android 16), uid op `allow` for
 10 minutes against a 50-minute-old process.
+
+## G22: A reinstall keeps the saved output folder but not the permission to write it
+**Symptom:** after reinstalling the app, a run dies immediately with
+`Error creating subfolder '<name>': Permission Denial: opening provider
+com.android.externalstorage.ExternalStorageProvider ... requires that you obtain access
+using ACTION_OPEN_DOCUMENT or related APIs`, and the summary reports 0 successes. The
+output folder still looks correctly set on screen. Searching the system settings for the
+"missing permission" finds nothing, because a SAF grant is not a permission that appears
+there.
+**Root cause:** the two halves of "the chosen output folder" have different lifetimes.
+The tree uri is our own setting and lives in DataStore, so it survives anything; the
+`takePersistableUriPermission` grant that makes it usable belongs to the system and is
+dropped when the package is reinstalled. What's left is a uri that still renders as a
+folder path and fails on the first `DocumentsContract` call.
+**Fix:** `MainViewModel.validateOutputFolder` checks the saved uri against
+`contentResolver.persistedUriPermissions` (write permission held) whenever the setting is
+loaded, and on a miss clears it, falls back to the default Downloads output and raises
+`outputFolderLost`, which
+[AndroNSZApp.kt](../app/src/main/java/com/androNSZ/ui/screen/AndroNSZApp.kt) turns into a
+dialog offering the folder picker.
+**How to spot (adb, read-only):**
+```
+adb shell dumpsys activity permissions | grep -c androNSZ   # 0 => no grants held
+```
+Zero grants plus a non-default output folder in the app is exactly this case. Note this
+is unrelated to `MANAGE_EXTERNAL_STORAGE` (G21) — that one can be granted and healthy
+while this fails, which is what makes the "permission denied" wording misleading.
+**History:** found 2026-07-28 from a saved on-screen log, after several `adb install -r`
+cycles while chasing G21. The output folder in question was
+`Download/Switch_tests/Outputs`.

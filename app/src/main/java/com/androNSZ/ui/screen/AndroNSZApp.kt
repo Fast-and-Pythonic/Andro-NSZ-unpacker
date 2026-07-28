@@ -4,9 +4,14 @@ import android.app.Activity
 import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
+import com.androNSZ.R
 import com.androNSZ.model.FileEntry
 import com.androNSZ.model.PickerMode
 import com.androNSZ.model.Screen
@@ -45,6 +50,29 @@ fun AndroNSZApp(vm: MainViewModel) {
       ActivityResultContracts.OpenDocumentTree()
    ) { uri ->
       if (uri != null) vm.saveOutputFolder(context, uri)
+   }
+
+   // A reinstall keeps the saved output-folder uri but not its SAF grant, so the
+   // folder has been reset to the Downloads default and has to be picked again (G22).
+   if (vm.outputFolderLost) {
+      AlertDialog(
+         onDismissRequest = { vm.dismissOutputFolderLost() },
+         title = { Text(stringResource(R.string.output_folder_lost_title)) },
+         text = { Text(stringResource(R.string.output_folder_lost_message)) },
+         confirmButton = {
+            TextButton(onClick = {
+               vm.dismissOutputFolderLost()
+               outputFolderPicker.launch(null)
+            }) {
+               Text(stringResource(R.string.output_folder_lost_pick))
+            }
+         },
+         dismissButton = {
+            TextButton(onClick = { vm.dismissOutputFolderLost() }) {
+               Text(stringResource(R.string.output_folder_lost_keep))
+            }
+         }
+      )
    }
 
    // Source file for the Settings speed test's optional real-file pass. SAF rather

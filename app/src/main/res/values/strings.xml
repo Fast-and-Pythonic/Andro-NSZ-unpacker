@@ -28,6 +28,10 @@
     <string name="action_change_prod_keys">Change prod.keys</string>
     <string name="action_remove_prod_keys">Remove prod.keys</string>
     <string name="action_cancel">Cancel</string>
+    <string name="output_folder_lost_title">Output folder access lost</string>
+    <string name="output_folder_lost_message">The app no longer has access to the output folder you had chosen — reinstalling drops that grant, while the saved path stays. Output has been reset to Downloads. Pick the folder again to keep using it.</string>
+    <string name="output_folder_lost_pick">Choose folder</string>
+    <string name="output_folder_lost_keep">Keep Downloads</string>
     <string name="action_done">Done</string>
 
     <!-- File picker -->

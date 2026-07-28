@@ -28,6 +28,10 @@
     <string name="action_change_prod_keys">Изменить prod.keys</string>
     <string name="action_remove_prod_keys">Удалить prod.keys</string>
     <string name="action_cancel">Отмена</string>
+    <string name="output_folder_lost_title">Доступ к папке вывода потерян</string>
+    <string name="output_folder_lost_message">У приложения больше нет доступа к выбранной папке вывода: при переустановке разрешение на неё пропадает, а сохранённый путь остаётся. Вывод переключён на Downloads. Выберите папку заново, чтобы продолжить пользоваться ею.</string>
+    <string name="output_folder_lost_pick">Выбрать папку</string>
+    <string name="output_folder_lost_keep">Оставить Downloads</string>
     <string name="action_done">Готово</string>
 
     <!-- File picker -->

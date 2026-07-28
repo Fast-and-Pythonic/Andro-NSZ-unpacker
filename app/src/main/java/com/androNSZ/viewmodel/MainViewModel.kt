@@ -182,6 +182,10 @@ class MainViewModel : ViewModel() {
    // Settings
    var statsFormat by mutableStateOf(StatsFormat.COMPACT3)
    var outputFolderUri by mutableStateOf<Uri?>(null)
+   // Set when a saved output folder had to be dropped because its SAF grant is gone
+   // (the uri survives in DataStore, the grant does not — G22). Drives the dialog
+   // that asks for a new folder.
+   var outputFolderLost by mutableStateOf(false)
    var appLanguage by mutableStateOf("system")
    var themeMode by mutableStateOf(ThemeMode.SYSTEM)
    var accentMode by mutableStateOf(AccentMode.DEFAULT)
@@ -250,6 +254,7 @@ class MainViewModel : ViewModel() {
       viewModelScope.launch {
          SettingsRepository.getInstance(context).outputFolderUriFlow.collect {
             outputFolderUri = it
+            validateOutputFolder(context)
          }
       }
       appLanguage = SettingsRepository.getInstance(context).getLanguage()
@@ -483,9 +488,37 @@ class MainViewModel : ViewModel() {
          android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
       )
       outputFolderUri = uri
+      outputFolderLost = false
       viewModelScope.launch {
          SettingsRepository.getInstance(context).saveOutputFolderUri(uri)
       }
+   }
+
+   /**
+    * Drops the saved output folder when its SAF grant is no longer held.
+    *
+    * The uri lives in DataStore and outlives a reinstall; the persistable grant that
+    * makes it usable does not. That pair looks fine on screen and then fails in the
+    * middle of a run with "Permission Denial ... requires ACTION_OPEN_DOCUMENT", so
+    * check it up front, fall back to the default Downloads output, and ask the user
+    * to pick the folder again (G22).
+    */
+   fun validateOutputFolder(context: android.content.Context) {
+      val uri = outputFolderUri ?: return
+      val held = context.contentResolver.persistedUriPermissions.any {
+         it.uri == uri && it.isWritePermission
+      }
+      if (held) return
+      outputFolderUri = null
+      outputFolderLost = true
+      viewModelScope.launch {
+         SettingsRepository.getInstance(context).saveOutputFolderUri(null)
+      }
+   }
+
+   /** Closes the "output folder access lost" dialog; the Downloads fallback stays. */
+   fun dismissOutputFolderLost() {
+      outputFolderLost = false
    }
 
    fun saveStatsFormat(context: android.content.Context, format: StatsFormat) {
