@@ -441,6 +441,10 @@ Nintendo's intellectual property rights.
 
 **Contributors:**
 
+- [Fast-and-Pythonic](https://github.com/Fast-and-Pythonic) — initiator and project manager.
+- Claude Code — Main developer, project architect, analyst, and advisor.
+- Claude Code, Claude Design, Fast-and-Pythonic — GUI desing.
+- GitHub Chat-gpt — Sometimes he criticizes the mistakes and shortcomings of the project, during the PRs.
 - [manx98](https://github.com/manx98) — fix for XCZ→XCI extraction on gamecards with an
   empty HFS0 partition ([#6](https://github.com/Fast-and-Pythonic/Andro-NSZ-unpacker/pull/6))
 
