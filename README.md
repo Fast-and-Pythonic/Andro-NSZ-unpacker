@@ -441,7 +441,7 @@ Nintendo's intellectual property rights.
 
 **Contributors:**
 
-- [Fast-and-Pythonic](https://github.com/Fast-and-Pythonic) — initiator and project manager.
+- [Fast-and-Pythonic](https://github.com/Fast-and-Pythonic) — manager.
 - Claude Code — Main developer, project architect, analyst, and advisor.
 - Claude Code, Claude Design, Fast-and-Pythonic — GUI desing.
 - GitHub Chat-gpt — Sometimes he criticizes the mistakes and shortcomings of the project, during the PRs.
