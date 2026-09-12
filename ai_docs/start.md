@@ -12,7 +12,8 @@ via JNI. A port of the Python reference [nicoboss/nsz](https://github.com/nicobo
 | [conventions.md](conventions.md) | Code style (3 spaces!), language, build, checks | before writing code |
 | [architecture.md](architecture.md) | Deep technical decisions (A##): perf pipeline, hw crypto, ThinLTO | when changing engine/build |
 | [gotchas.md](gotchas.md) | Non-trivial traps (G##) | before a non-trivial task |
-| [status.md](status.md) | What works, fragile points, deferred items, decision log | when touching fragile code |
+| [status.md](status.md) | What works, fragile points, deferred items | when touching fragile code |
+| [journal.md](journal.md) | Why the work went this way — what was measured, built and thrown away | before redoing something that looks undone |
 | [subsystems/kotlin-layer.md](subsystems/kotlin-layer.md) | Kotlin layer: ViewModel, modes, JNI, data flow | working on UI/logic |
 | [subsystems/native-engine.md](subsystems/native-engine.md) | C engine: modules, containers, crypto | working on C |
 | [subsystems/localization.md](subsystems/localization.md) | Localization: strings, how to add a language | working on UI strings |

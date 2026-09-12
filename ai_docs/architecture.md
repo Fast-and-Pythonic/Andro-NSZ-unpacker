@@ -5,6 +5,23 @@ Most of A01–A07 are parts of one performance story: unpacking 2 GB was sped up
 from ~50 s to ~7 s (parity with the desktop reference), and on 9 GB it beats the
 competitor. Verification is essentially free, CNMT-based and non-fatal — see A12.
 
+- **A01** · zstd is built with `-O3` even in debug
+- **A02** · Hardware AES-CTR (ARMv8 crypto) + software fallback
+- **A03** · Hardware SHA-256 (ARMv8 crypto)
+- **A04** · Async writer (background write + hashing thread)
+- **A05** · No-copy input via `fd:N`, output via `/proc/self/fd`
+- **A06** · Fallback to a temp copy on direct-read failure
+- **A07** · Batch/folder parallelism — three sources for the thread count
+- **A08** · Per-app language via `attachBaseContext` + SharedPreferences
+- **A09** · Per-type progress throttling (live bar, each number at its own pace)
+- **A10** · ThinLTO for the native engine
+- **A11** · XCI output mirrors `XciStream` (0x8000 HFS0 alignment, hfs0 at 0xF000)
+- **A12** · CNMT-based verification (non-fatal), with a filename fallback and a toggle
+- **A13** · Core-aware scheduler for heterogeneous CPUs (big.LITTLE) — DELETED
+- **A14** · In-app file picker over the raw filesystem (`MANAGE_EXTERNAL_STORAGE`)
+- **A15** · Throughput pass + the write-bound diagnosis (solid mode, 2026-07-24/25)
+- **A16** · The native debug log is per job and reference counted
+
 ## A01: zstd is built with `-O3` even in debug
 **Context:** the zstd dependency in debug inherits `CMAKE_BUILD_TYPE=Debug` → `-O0`
 and `-DDEBUGLEVEL=1` (internal asserts). Decompression is the dominant cost of the

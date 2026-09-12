@@ -1,0 +1,37 @@
+# Configuration for the ai_docs linter. The linter itself lives in the standard:
+#   https://github.com/Fast-and-Pythonic/ai-docs-method
+#
+#   python <standard>/tools/lint_docs.py --config tools/lint_docs.toml
+#   python <standard>/tools/make_index.py --config tools/lint_docs.toml
+#
+# Both commands work from any directory: a relative root is resolved against this file.
+
+[profile]
+name = "engineering"
+
+[project]
+# Three subsystem pages — the Kotlin layer, the native engine, the localisation layer —
+# so four areas counting the JNI boundary between the first two. See RULES.md, "Tiers
+# and scaling". The registers are well under the split threshold, so this is M, not L.
+tier = "M"
+
+[paths]
+root = ".."
+docs = "ai_docs"
+# Documented in prose but legitimately absent from the tree. Each entry needs its reason
+# here, or a later session deletes a true statement to silence a linter.
+allow = [
+  # journal.md records the deletion of the core-aware scheduler on 2026-07-24 and names
+  # this among the files removed. The entry is true, the journal is append-only, and the
+  # files being gone is the whole point of it.
+  "cpu_affinity.c/.h",
+]
+
+[registers]
+G = "gotchas.md"
+A = "architecture.md"
+
+[limits]
+"start.md" = 100
+"subsystems/*.md" = 200   # a warning: past this, split the page rather than grow it
+

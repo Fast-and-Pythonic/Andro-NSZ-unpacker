@@ -41,7 +41,7 @@ context with the right `Locale` (per-app language, see
   `resolveConcurrency` a job uses, so it cannot drift from reality.
   Accent: the first swatch is `DefaultAccent` and means `AccentMode.DEFAULT`, the rest set
   `CUSTOM` + that color; in `SYSTEM` mode nothing is marked. The color wheel and the hex
-  field are gone (`ui/components/ColorWheelPicker.kt` is now unused).
+  field are gone, and the `ColorWheelPicker` component was deleted with them.
   The **verification switch is commented out** — CNMT verification is now always on:
   `MainViewModel.loadSettings` pins `verificationEnabled = true` and writes it back, so a
   device where it was once turned off does not stay unverified with no control to fix it.

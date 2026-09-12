@@ -80,15 +80,16 @@ Commands — from the project root (PowerShell). Ordered fast to full:
 Android Studio's Build menu is the primary path (it uses its bundled JBR 21 and
 handles the daemon). The notes below are for headless / agent CLI builds.
 
-- **JDK 21 toolchain (required).** The build needs a JDK 21 toolchain. Point Gradle
-  at a local JDK 21 (installed here:
-  `C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot`) via `JAVA_HOME` or a project
-  flag:
+- **JDK 21 toolchain (required).** The build needs a JDK 21 toolchain. The one on this
+  machine is the JBR bundled with Android Studio (OpenJDK 21), at
+  `C:\Program Files\Android\Android Studio\jbr`.
+  That is also what `JAVA_HOME` points at, so a CLI build and an Android Studio build
+  use the same toolchain. Point Gradle at it via `JAVA_HOME` or a project flag:
   ```powershell
-  $env:JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+  $env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
   # or, without changing the environment:
   .\gradlew.bat :app:compileDebugKotlin `
-     "-Porg.gradle.java.installations.paths=C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+     "-Porg.gradle.java.installations.paths=C:\Program Files\Android\Android Studio\jbr"
   ```
   Missing 21 (offline) → `Unable to download toolchain … languageVersion=21`.
 - **Offline.** Add `--offline` when there's no network, so Gradle doesn't hang
@@ -106,7 +107,7 @@ handles the daemon). The notes below are for headless / agent CLI builds.
 
 Known-good offline CLI invocation (run only when AS isn't building):
 ```powershell
-$env:JAVA_HOME="C:\Program Files\Microsoft\jdk-21.0.7.6-hotspot"
+$env:JAVA_HOME="C:\Program Files\Android\Android Studio\jbr"
 $env:GRADLE_OPTS="-Djava.net.preferIPv4Stack=true"
 .\gradlew.bat :app:compileDebugKotlin --offline
 ```

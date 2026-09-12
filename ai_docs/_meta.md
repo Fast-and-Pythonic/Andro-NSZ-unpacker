@@ -1,61 +1,64 @@
-# _meta — rules for maintaining the docs
+# _meta — where the rules for these docs live
 
-This folder follows the `ai_docs/` standard (method description:
-`E:\a_My_Programming\ai_docs_method`). Entry format: `G##` for gotchas, `A##`
-for architecture decisions.
+The rules for maintaining this documentation are **not copied here**. Two sources of
+truth drift apart, which is the disease the method exists to cure — and this file was
+the proof: it carried its own copy of the trigger table, the session protocol and the
+"what not to write" list, and that copy still named a `Decision log` inside `status.md`
+months after the chronicle moved to `journal.md`.
 
-Entry point is `ai_docs/start.md`, pointed to by the root `CLAUDE.md`.
+Standard: https://github.com/Fast-and-Pythonic/ai-docs-method — audited against v2.1
+on 2026-09-12.
 
-## Language
+| You need | Read |
+|----------|------|
+| What is mandatory, the update triggers, the session protocol | `RULES.md` of the standard |
+| How to format a `G##` / `A##`, links, indexes | `FORMATS.md` |
+| Which files this project's size warrants | `RULES.md` §6, "Tiers and scaling" |
+| What goes on a subsystem page, and what does not | the engineering profile of the standard |
 
-**All documentation is written in English** — including the `ai_docs/` files
-themselves (this `_meta.md`, gotchas, architecture, status, subsystems, etc.),
-not just README and code comments. See [conventions.md](conventions.md).
+There is no local method folder: this project has no departures from the standard. If
+one becomes necessary it goes in `ai_docs_method/` at the root as a `DELTA.md`, and this
+file gains a line saying the local method wins where the two disagree.
 
-## Update triggers
+Entry point is [start.md](start.md), pointed to by the root `CLAUDE.md`.
 
-| Trigger | File / action |
-|---------|---------------|
-| Debugging > 30 min with a non-obvious cause | `gotchas.md` — new `G##` |
-| An architecture decision was made | `architecture.md` — new `A##` |
-| A fragile point was identified | `status.md` — Fragile points |
-| A feature was deliberately deferred | `status.md` — Deferred + reason |
-| A feature was finished | `status.md` — Working + date at top of file |
-| Code style / workflow / build commands changed | `conventions.md` |
-| A module was renamed / structure changed | `overview.md` (tree) and subsystems if needed |
-| A subsystem changed | `subsystems/<name>.md` |
-| A new doc file / subsystem appeared | `start.md` (map) |
-| The doc-keeping methodology changed | this file |
+## Project settings
 
-## What NOT to write in the docs
+**Profile:** engineering
+**Tier:** M — three subsystem pages (the Kotlin layer, the native engine, the
+localisation layer), so four areas counting the JNI boundary between the first two.
+Both registers are well under the split threshold, so this is M rather than L.
+**Language:** English, including these files themselves.
 
-- Things derivable from the code: signatures, variable names, imports, obvious
-  type hierarchies. Exception — the high-level tree in `overview.md`.
-- Change history (that's `git log`). Exception — the Decision log in `status.md`
-  ("why we decided", not "what changed").
-- Current TODOs/tasks. Exception — Deferred in `status.md` (deliberately deferred
-  + reason).
-- Long tutorials and general theory. Project specifics only.
-- Precise counters that go stale fast (line counts, sizes). Give a ballpark and a
-  link to the source.
+Non-English text is permitted **only as quoted data**: UI labels, test fixtures, sample
+input strings. `G19` quotes the app's Russian button captions verbatim because they are
+the literal arguments a `grep -F` must match — translating them would break the recipe.
+Prose in any other language is a defect to be fixed.
 
-## Session start protocol
+## Stop and ask
 
-1. Always: read `start.md`.
-2. Per the situational guide in `start.md` — decide what else to read.
-3. Non-trivial task → additionally `gotchas.md`.
-4. Engine/build change → `architecture.md` + `status.md` (Fragile).
-5. Breaking a convention from `conventions.md` → stop and ask the user.
+Beyond the standard's own rule about invariants: **the C engine is not modified without
+asking.** `aes_*`, `sha256`, `ncz_decompress`, the container parsers and the JNI
+signatures are debugged against the Python reference, and parity with it is the
+project's invariant — see `conventions.md` and [status.md](status.md).
 
-## Freshness principle
+## The three things most often broken here
 
-A document that lies is worse than a missing one: the agent will trust it and
-break something that works. Stale → update now or delete the section. `status.md`
-always carries a date at the top.
+1. **`status.md` collecting the chronicle.** It reached 349 lines against a limit of 80,
+   two thirds of it an append-only decision log. State goes in `status.md`, reasoning in
+   an `A##`, and the story in `journal.md`.
+2. **Documented paths going stale.** A deleted component stays named in a subsystem page,
+   and a toolchain path outlives the toolchain. Both happened here. The linter catches
+   them; run it.
+3. **Register indexes.** Do not hand-write one — `make_index.py` regenerates it from the
+   entries, and a hand-made index drifts by the next session.
 
-## Tool-specific files
+## Checking
 
-`ai_docs/` must not contain tool-specific files (`CLAUDE.md`, `.cursorrules`,
-etc.). Those live at the project root and only point to `ai_docs/start.md`. There
-is currently a root `CLAUDE.md` (Claude Code). Personal developer settings go in
-`CLAUDE.local.md` (in `.gitignore`), not in the repository.
+```
+python <standard>/tools/lint_docs.py  --config tools/lint_docs.toml
+python <standard>/tools/make_index.py --config tools/lint_docs.toml
+```
+
+Both work from any directory. The project is under git, so nothing here is demoted to
+advice.

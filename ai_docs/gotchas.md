@@ -3,6 +3,29 @@
 Non-trivial traps. Format `G##` — a stable anchor. Add after debugging > 30 min
 with a non-obvious cause.
 
+- **G01** · The overall batch progress fills up before all files are unpacked
+- **G02** · The debug build unpacks many times slower than release
+- **G03** · Direct fd input reading fails on FUSE storage
+- **G04** · The app language can't be read from DataStore
+- **G05** · PFS0 alignment must be reproduced from the source, not guessed
+- **G06** · HFS0/XCI — 0x8000 alignment and non-roundtripping of full XCI
+- **G07** · XCZ→XCI fails on an XCI with an empty partition (`file_count == 0`)
+- **G08** · `Flow.catch` in batch mode masks a failure as "Done"
+- **G09** · Spurious `Unresolved reference` errors from a dropped Kotlin compile daemon
+- **G10** · Folder mode — verify falsely fails with "cannot parse NSP container"
+- **G11** · CNMT verification config is global — set it before conversions start
+- **G12** · Gradle test worker can't connect — `BindException` on `:testDebugUnitTest`
+- **G13** · `file://` inputs silently mis-name the output / zero the progress bar
+- **G14** · Judge Compose scroll smoothness only on a non-debuggable build
+- **G15** · GitHub API returns HTTP 403 without a `User-Agent` header
+- **G16** · Sideloaded APK install needs the permission + FileProvider + a per-app grant
+- **G17** · Unpacking speed is bounded by a *drifting* flash write ceiling — benchmark accordingly
+- **G18** · Comparing worker counts within one session is biased — the flash gets slower
+- **G19** · Driving the GUI over `adb shell input tap` reliably
+- **G20** · A write benchmark that doesn't force durability measures the page cache
+- **G21** · "All files access" granted mid-session never reaches the running app
+- **G22** · A reinstall keeps the saved output folder but not the permission to write it
+
 ## G01: The overall batch progress fills up before all files are unpacked
 **Symptom:** in queue mode the overall bar reaches 100% long before the last files
 are actually unpacked.
