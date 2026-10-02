@@ -6,8 +6,10 @@ AndroNSZ — an Android app that unpacks compressed Nintendo Switch files
 **Documentation entry point:** [`ai_docs/start.md`](ai_docs/start.md) — read it first.
 
 Critical rules:
-- Code comments, documentation, and commit messages — in English.
+- Code comments, documentation, and commit messages — in English
+  (`ai_docs/conventions.md`).
 - Don't touch without an explicit request: cryptography (`aes_ctr.c`, `aes_xts.c`,
-  `sha256.c`), the decompression algorithm (`ncz_decompress.c`), JNI signatures.
+  `sha256.c`), the decompression algorithm (`ncz_decompress.c`), JNI signatures
+  (`ai_docs/conventions.md`).
 - Indentation — exactly 3 spaces, keeping the indentation on blank lines. See
   [`ai_docs/conventions.md`](ai_docs/conventions.md).
