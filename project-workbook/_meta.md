@@ -6,8 +6,7 @@ the proof: it carried its own copy of the trigger table, the session protocol an
 "what not to write" list, and that copy still named a `Decision log` inside `status.md`
 months after the chronicle moved to `journal.md`.
 
-Standard: https://github.com/Fast-and-Pythonic/project-workbook-method — audited against v2.1
-on 2026-09-12.
+Standard: https://github.com/Fast-and-Pythonic/project-workbook-method — audited against v3.0 on 2026-10-13.
 
 | You need | Read |
 |----------|------|
