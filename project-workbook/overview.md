@@ -26,8 +26,8 @@ sections). The engine logic mirrors the Python reference
 
 ```
 AndroNSZ/
-├── CLAUDE.md                     # thin pointer to ai_docs/start.md
-├── ai_docs/                      # documentation (this standard)
+├── CLAUDE.md                     # thin pointer to project-workbook/start.md
+├── project-workbook/                      # documentation (this standard)
 └── app/src/main/
     ├── AndroidManifest.xml
     ├── cpp/                      # === native C engine (libAndroNSZ) ===

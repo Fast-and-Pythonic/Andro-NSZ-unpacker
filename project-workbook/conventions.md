@@ -3,7 +3,7 @@
 ## Language
 
 - **Code, comments, documentation, commit messages** — **English**. This includes
-  the `ai_docs/` files themselves, not only README and code comments (see
+  the `project-workbook/` files themselves, not only README and code comments (see
   [_meta.md](_meta.md)).
 - **UI strings** — never hardcode, always via resources (see
   [subsystems/localization.md](subsystems/localization.md)).

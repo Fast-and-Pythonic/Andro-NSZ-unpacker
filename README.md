@@ -236,7 +236,7 @@ depends on storage, not on how fast the CPU is.
 └─────────────────────────────────────────┘
 ```
 
-The full documentation set lives in [`ai_docs/`](ai_docs/start.md) — architecture
+The full documentation set lives in [`project-workbook/`](project-workbook/start.md) — architecture
 decisions, gotchas, subsystem notes and a decision log.
 
 ### Supported Formats
@@ -386,12 +386,12 @@ To force a native rebuild:
 Bug reports and PRs are welcome — see [Troubleshooting](#troubleshooting) for what to
 attach to a report.
 
-Before writing code, read [`ai_docs/start.md`](ai_docs/start.md): it maps the
+Before writing code, read [`project-workbook/start.md`](project-workbook/start.md): it maps the
 architecture decisions (`A##`), the known traps (`G##`) and the fragile areas. Two rules
 that matter more than they look:
 
 - Indentation is **exactly 3 spaces**, kept on blank lines too — auto-formatters strip
-  it, so check after formatting ([`ai_docs/conventions.md`](ai_docs/conventions.md))
+  it, so check after formatting ([`project-workbook/conventions.md`](project-workbook/conventions.md))
 - Don't touch the crypto (`aes_ctr.c`, `aes_xts.c`, `sha256.c`), the decompression
   algorithm (`ncz_decompress.c`) or the JNI signatures without a reason — they are
   debugged against the Python reference

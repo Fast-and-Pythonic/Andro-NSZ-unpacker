@@ -1,8 +1,8 @@
-# Configuration for the ai_docs linter. The linter itself lives in the standard:
-#   https://github.com/Fast-and-Pythonic/ai-docs-method
+# Configuration for the project-workbook linter. The linter itself lives in the standard:
+#   https://github.com/Fast-and-Pythonic/project-workbook-method
 #
-#   python <standard>/tools/lint_docs.py --config tools/lint_docs.toml
-#   python <standard>/tools/make_index.py --config tools/lint_docs.toml
+#   python <standard>/tools/lint_workbook.py --config tools/lint_workbook.toml
+#   python <standard>/tools/make_index.py --config tools/lint_workbook.toml
 #
 # Both commands work from any directory: a relative root is resolved against this file.
 
@@ -17,7 +17,7 @@ tier = "M"
 
 [paths]
 root = ".."
-docs = "ai_docs"
+docs = "project-workbook"
 # Documented in prose but legitimately absent from the tree. Each entry needs its reason
 # here, or a later session deletes a true statement to silence a linter.
 allow = [
@@ -32,6 +32,5 @@ G = "gotchas.md"
 A = "architecture.md"
 
 [limits]
-"start.md" = 100
 "subsystems/*.md" = 200   # a warning: past this, split the page rather than grow it
 

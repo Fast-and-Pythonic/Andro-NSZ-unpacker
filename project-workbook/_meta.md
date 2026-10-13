@@ -6,7 +6,7 @@ the proof: it carried its own copy of the trigger table, the session protocol an
 "what not to write" list, and that copy still named a `Decision log` inside `status.md`
 months after the chronicle moved to `journal.md`.
 
-Standard: https://github.com/Fast-and-Pythonic/ai-docs-method — audited against v2.1
+Standard: https://github.com/Fast-and-Pythonic/project-workbook-method — audited against v2.1
 on 2026-09-12.
 
 | You need | Read |
@@ -17,7 +17,7 @@ on 2026-09-12.
 | What goes on a subsystem page, and what does not | the engineering profile of the standard |
 
 There is no local method folder: this project has no departures from the standard. If
-one becomes necessary it goes in `ai_docs_method/` at the root as a `DELTA.md`, and this
+one becomes necessary it goes in `workbook-method/` at the root as a `DELTA.md`, and this
 file gains a line saying the local method wins where the two disagree.
 
 Entry point is [start.md](start.md), pointed to by the root `CLAUDE.md`.
@@ -56,8 +56,8 @@ project's invariant — see `conventions.md` and [status.md](status.md).
 ## Checking
 
 ```
-python <standard>/tools/lint_docs.py  --config tools/lint_docs.toml
-python <standard>/tools/make_index.py --config tools/lint_docs.toml
+python <standard>/tools/lint_workbook.py  --config tools/lint_workbook.toml
+python <standard>/tools/make_index.py --config tools/lint_workbook.toml
 ```
 
 Both work from any directory. The project is under git, so nothing here is demoted to
