@@ -1,0 +1,74 @@
+#!/bin/sh
+# Project Workbook checks before every commit: the register indexes, the workbook
+# linter, and a reminder of the update triggers when code is staged and the
+# workbook is not (that one never fails the commit). Copied from the standard's
+# templates/pre-commit to tools/hooks/pre-commit; enable once per clone:
+#
+#    git config core.hooksPath tools/hooks
+#
+# The standard is found, in order: $WORKBOOK_STANDARD; a checkout named
+# project-workbook-method or 0_project-workbook-method beside the main working
+# tree or beside any folder above it; the installed commands, from
+#    pipx install git+https://github.com/Fast-and-Pythonic/project-workbook-method
+# With none of them the commit goes through, with a line saying so: a
+# contributor without the standard has nothing to run.
+
+# One config per document set; a repository holding several projects lists each.
+CONFIGS="tools/lint_workbook.toml"
+
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+std=""
+if [ -n "$WORKBOOK_STANDARD" ] && [ -f "$WORKBOOK_STANDARD/tools/lint_workbook.py" ]; then
+    std=$WORKBOOK_STANDARD
+else
+    # The main checkout, not a linked worktree: that sits deeper and its parents hold
+    # no standard. The common git dir is the main checkout's .git either way.
+    dir=$(dirname "$(git rev-parse --path-format=absolute --git-common-dir)")
+    while [ -z "$std" ]; do
+        parent=$(dirname "$dir")
+        [ "$parent" = "$dir" ] && break
+        dir=$parent
+        for name in project-workbook-method 0_project-workbook-method; do
+            if [ -f "$dir/$name/tools/lint_workbook.py" ]; then std="$dir/$name"; break; fi
+        done
+    done
+fi
+
+py=python
+command -v "$py" >/dev/null 2>&1 || py=python3
+
+# tool lint_workbook|make_index|check_triggers [args]: from the checkout, else installed.
+tool() {
+    name=$1; shift
+    if [ -n "$std" ]; then
+        "$py" "$std/tools/$name.py" "$@"
+    else
+        case $name in
+            lint_workbook) workbook-lint "$@" ;;
+            make_index) workbook-index "$@" ;;
+            check_triggers) workbook-triggers "$@" ;;
+        esac
+    fi
+}
+
+if [ -z "$std" ] && ! command -v workbook-lint >/dev/null 2>&1; then
+    echo "pre-commit: Project Workbook standard not found; the workbook was not checked" >&2
+    exit 0
+fi
+
+for cfg in $CONFIGS; do
+    tool make_index --config "$cfg" --check || {
+        echo "pre-commit: a register index is out of date; run make_index.py --config $cfg" >&2
+        exit 1
+    }
+    tool lint_workbook --config "$cfg" || {
+        echo "pre-commit: workbook lint failed ($cfg). Fix it, or commit with --no-verify" >&2
+        echo "if you are deliberately committing a broken intermediate state." >&2
+        exit 1
+    }
+done
+
+# Not a gate: the update triggers of RULES.md section 2, while their entry can still
+# join this commit.
+tool check_triggers || true
