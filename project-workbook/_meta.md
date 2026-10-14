@@ -34,6 +34,11 @@ input strings. `G19` quotes the app's Russian button captions verbatim because t
 the literal arguments a `grep -F` must match — translating them would break the recipe.
 Prose in any other language is a defect to be fixed.
 
+**Portable entries:** G09, G12, G14, G15, G16, G17, G18, G19, G20, G21 and G22 are also
+kept in `my-setup-notes`, the author's private store of knowledge about this machine and
+its tools, shared by all their projects and not published. The entries here stay
+complete; that copy is for the author's other projects.
+
 ## Stop and ask
 
 Beyond the standard's own rule about invariants: **the C engine is not modified without

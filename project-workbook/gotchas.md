@@ -161,6 +161,8 @@ didn't touch them; only function imports are flagged, class imports are fine; th
 "Could not connect to Kotlin compile daemon" line is present. Contrast: a *real*
 error names a symbol you actually changed or removed.
 
+**Portable:** yes — Kotlin compile daemon dropping out mid-build and producing false build errors
+
 ## G10: Folder mode — verify falsely fails with "cannot parse NSP container"
 **Status:** **moot** — the post-conversion output re-read was removed (A12) and its code
 (`nca_verifier.c` + `nativeVerifyNsp`) deleted on 2026-07-26, so there is no reopen left to
@@ -226,6 +228,8 @@ $env:_JAVA_OPTIONS="-Djava.net.preferIPv4Stack=true"
 Android Studio's bundled runner handles this itself; the workaround is only for headless
 CLI test runs.
 
+**Portable:** yes — Gradle test workers not inheriting the build environment
+
 ## G13: `file://` inputs silently mis-name the output / zero the progress bar
 **Symptom:** files chosen through the in-app picker (raw `file://` uris, A14) unpack to
 an output called `input.nsp`, and in a multi-file queue the overall progress bar denominator
@@ -263,6 +267,8 @@ stat syscalls. But that fix was only visible once tested on `benchmark`.)
 no state read changes during the fling (existing rows aren't recomposing), yet debug still
 stutters.
 
+**Portable:** yes — judging UI performance on a debuggable build instead of an optimized one
+
 ## G15: GitHub API returns HTTP 403 without a `User-Agent` header
 **Symptom:** the in-app update check always lands in the "check failed" branch; the
 request to `api.github.com/repos/.../releases/latest` comes back `403` even though the
@@ -277,6 +283,8 @@ the APK download. Don't remove them. The update feature deliberately uses the JD
 `HttpURLConnection` + `org.json` (no OkHttp/Ktor dependency).
 **How to spot:** the failure dialog shows "HTTP 403"; adding the `User-Agent` header
 makes the exact same request succeed.
+
+**Portable:** yes — GitHub API rejecting requests without a User-Agent header
 
 ## G16: Sideloaded APK install needs the permission + FileProvider + a per-app grant
 **Symptom:** tapping "Update" downloads the APK but the system installer never opens, or
@@ -299,6 +307,8 @@ read-grant flag. Provider + permission live in
 **How to spot:** the download completes (the cached `AndroNSZ_<v>.apk` exists) but the
 installer doesn't appear — check, in order, the manifest permission, the FileProvider
 authority match, and the "install unknown apps" toggle for the app.
+
+**Portable:** yes — sideloading an APK from inside an app on Android
 
 ## G17: Unpacking speed is bounded by a *drifting* flash write ceiling — benchmark accordingly
 **Symptom:** raising the worker count doesn't raise total throughput; instead each file
@@ -337,6 +347,8 @@ throttling — check before blaming heat: `/sys/class/thermal/thermal_zone*/temp
 **Trap when driving adb from Git Bash on Windows:** MSYS rewrites `/data/local/tmp` into a
 Windows path, so `adb push` fails with `remote secure_mkdirs failed`. Prefix the command
 with `MSYS_NO_PATHCONV=1`.
+
+**Portable:** yes — benchmarks bounded by a drifting hardware ceiling (flash write speed)
 
 ## G18: Comparing worker counts within one session is biased — the flash gets slower
 **Symptom:** a search for the best worker count reports that whichever level was measured
@@ -381,6 +393,8 @@ measure 2.2× slower (A15), so a "simpler" loop would characterise a system the 
 not have. Keeping the pacing is necessary but **not sufficient**: see **G20** for the
 fourth bias, which bit exactly here.
 
+**Portable:** yes — before/after comparisons biased by run order on a degrading device
+
 ## G19: Driving the GUI over `adb shell input tap` reliably
 **Symptom:** a tap lands on the wrong element — a menu opens "About" instead of
 "Settings" — or a whole step silently no-ops and the script keeps going as if it
@@ -418,6 +432,8 @@ find_tap() {  # find_tap "exact button text"
                         $(( ($(echo $b|cut -d' ' -f2)+$(echo $b|cut -d' ' -f4))/2 ))
 }
 ```
+
+**Portable:** yes — driving a phone GUI over adb input tap
 
 ## G20: A write benchmark that doesn't force durability measures the page cache
 **Symptom:** the benchmark reports speeds the storage cannot physically absorb, and it
@@ -463,6 +479,8 @@ real pipeline managed 699. Fixed with `fdatasync`, then the whole synthetic test
 deleted for an unrelated reason (A07) — the trap is recorded here because it belongs to
 the next benchmark, not to that code.
 
+**Portable:** yes — benchmarks that measure the page cache instead of the device
+
 ## G21: "All files access" granted mid-session never reaches the running app
 **Symptom:** the user grants "All files access", returns to the app, and the file picker
 still shows the permission gate. Looking for the toggle afterwards, they don't find it in
@@ -498,6 +516,8 @@ the check.
 **History:** found 2026-07-28 on POCO / HyperOS OS3.0 (Android 16), uid op `allow` for
 10 minutes against a 50-minute-old process.
 
+**Portable:** yes — special permissions and storage mount mode on Android/HyperOS not reaching a running process
+
 ## G22: A reinstall keeps the saved output folder but not the permission to write it
 **Symptom:** after reinstalling the app, a run dies immediately with
 `Error creating subfolder '<name>': Permission Denial: opening provider
@@ -527,3 +547,5 @@ while this fails, which is what makes the "permission denied" wording misleading
 **History:** found 2026-07-28 from a saved on-screen log, after several `adb install -r`
 cycles while chasing G21. The output folder in question was
 `Download/Switch_tests/Outputs`.
+
+**Portable:** yes — Android SAF grants lost when an app is reinstalled
